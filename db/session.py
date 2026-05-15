@@ -26,10 +26,23 @@ from sqlalchemy.orm import sessionmaker, Session
 
 load_dotenv()
 
-DATABASE_URL: str = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg2://postgres:postgres@localhost:5432/siigo_contable",
-)
+# Lee DATABASE_URL desde: 1) variable de entorno, 2) st.secrets (Streamlit Cloud), 3) fallback local
+def _get_database_url() -> str:
+    url = os.getenv("DATABASE_URL", "")
+    if not url:
+        try:
+            import streamlit as st
+            url = st.secrets.get("DATABASE_URL", "")
+        except Exception:
+            pass
+    if not url:
+        url = "postgresql+psycopg2://postgres:postgres@localhost:5432/siigo_contable"
+    # Supabase / psycopg2 requiere el driver explícito en el prefijo
+    if url.startswith("postgresql://") and "+psycopg2" not in url:
+        url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    return url
+
+DATABASE_URL: str = _get_database_url()
 
 engine = create_engine(
     DATABASE_URL,
