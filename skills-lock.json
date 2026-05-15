@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-design/SKILL.md",
+      "computedHash": "516bd2154eb843a8240e43d5b285229129853114ad7075a5e141e1c08e408c84"
+    },
+    "python-performance-optimization": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/python-development/skills/python-performance-optimization/SKILL.md",
+      "computedHash": "6390615b25e5922057b15eb900d69a90db563c5f2d6bd3182be707592fc25f09"
+    },
+    "ui-ux-pro-max": {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/ui-ux-pro-max/SKILL.md",
+      "computedHash": "6337038fe1fe6bbe1b9f252ab678ee575859190bab6f0f246f4061824eb40875"
+    }
+  }
+}

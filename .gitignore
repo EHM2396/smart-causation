@@ -1,0 +1,60 @@
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Build and packaging artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Test and coverage artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Logs and local runtime files
+*.log
+migrate_log.txt
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Streamlit local config/cache
+.streamlit/secrets.toml
+
+# Local data databases
+/data/*.db
+/data/*.sqlite
+/data/*.sqlite3
+/data/*.sqlite3-*
+
+# Docker override files
+Dockerfile.*.local
+docker-compose.override.yml
+
+# Temporary exports and generated spreadsheets
+*.xlsx
+*.xls
+*.csv
+
+# Keep source code and project config only
+# (remove patterns above if you need to version specific data files)

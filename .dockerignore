@@ -1,0 +1,43 @@
+# Control de versiones
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Variables de entorno (nunca en imagen)
+.env
+
+# Archivos de datos generados
+data/*.db
+data/*.xlsx
+data/output/
+
+# VS Code / IDE
+.vscode/
+.claude/
+.agents/
+
+# Logs
+*.log
+
+# Cache de pytest / mypy
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# macOS
+.DS_Store

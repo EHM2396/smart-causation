@@ -1,0 +1,71 @@
+services:
+
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: siigo_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-siigo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-siigo_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-siigo_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI Backend ────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: siigo_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-siigo}:${POSTGRES_PASSWORD:-siigo_pass}@postgres:5432/${POSTGRES_DB:-siigo_db}
+    volumes:
+      # Monta carpeta data para que la BD SQLite de aprendizaje persista
+      - ./data:/app/data
+      # Monta archivos xlsx en modo sólo lectura
+      - ./Cuentas_contables.xlsx:/app/Cuentas_contables.xlsx:ro
+      - ./codigos_impuestos.xlsx:/app/codigos_impuestos.xlsx:ro
+      - ./Tipos_comprobante_contable.xlsx:/app/Tipos_comprobante_contable.xlsx:ro
+    ports:
+      - "8000:8000"
+    # Ejecuta migraciones y luego arranca el servidor
+    command: >
+      sh -c "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port 8000"
+
+  # ── Streamlit Frontend ─────────────────────────────────────────────────────
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    container_name: siigo_streamlit
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_started
+    environment:
+      API_URL: http://api:8000
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-siigo}:${POSTGRES_PASSWORD:-siigo_pass}@postgres:5432/${POSTGRES_DB:-siigo_db}
+    volumes:
+      - ./data:/app/data
+      - ./Cuentas_contables.xlsx:/app/Cuentas_contables.xlsx:ro
+      - ./codigos_impuestos.xlsx:/app/codigos_impuestos.xlsx:ro
+      - ./Tipos_comprobante_contable.xlsx:/app/Tipos_comprobante_contable.xlsx:ro
+    ports:
+      - "8501:8501"
+
+volumes:
+  postgres_data:

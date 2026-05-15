@@ -1,0 +1,267 @@
+"""
+Exportador: genera el archivo importacion_SIIGO_YYYYMMDD.xlsx respetando
+exactamente la estructura de columnas de modelo_importacion.xlsx.
+"""
+
+from __future__ import annotations
+
+import os
+from datetime import date
+from io import BytesIO
+
+import pandas as pd
+
+BASE_DIR = os.path.join(os.path.dirname(__file__), "..")
+_RUTA_MODELO = os.path.join(BASE_DIR, "modelo_importacion.xlsx")
+
+# Columnas exactas del modelo SIIGO (mismo orden que modelo_importacion.xlsx)
+_COLUMNAS_MODELO = [
+    "Tipo de comprobante",
+    "Consecutivo comprobante",
+    "Fecha de elaboración ",          # trailing space intencional (coincide con el archivo)
+    "Sigla moneda",
+    "Tasa de cambio",
+    "Código cuenta contable",
+    "Identificación tercero",
+    "Sucursal",
+    "Código producto",
+    "Código de bodega",
+    "Acción",
+    "Cantidad producto",
+    "Prefijo",
+    "Consecutivo",
+    "No. cuota",
+    "Fecha vencimiento",
+    "Código impuesto",
+    "Código grupo activo fijo",
+    "Código activo fijo",
+    "Descripción",
+    "Código centro/subcentro de costos",
+    "Débito",
+    "Crédito",
+    "Observaciones",
+    "Base gravable libro compras/ventas  ",  # trailing spaces intencionales
+    "Base exenta libro compras/ventas",
+    "Mes de cierre",
+]
+
+
+def _leer_columnas_modelo() -> list[str]:
+    """Lee la primera fila del modelo para obtener el orden exacto de columnas."""
+    try:
+        df = pd.read_excel(_RUTA_MODELO, nrows=0, dtype=str)
+        cols = [str(c) for c in df.columns if str(c).strip() not in ("nan", "")]
+        return cols if cols else _COLUMNAS_MODELO
+    except Exception:
+        return _COLUMNAS_MODELO
+
+
+def construir_movimientos(
+    factura: dict,
+    consecutivo: int | str,
+    mapeos_confirmados: list[dict],
+    tipo_comprobante: str = "12",
+    centro_costo: str = "",
+) -> list[dict]:
+    """
+    Construye la lista de movimientos contables para una factura.
+
+    Parámetros:
+        factura: dict parseado por core.parser
+        consecutivo: número entero del comprobante en SIIGO (ej. 23)
+        mapeos_confirmados: lista de {
+            "descripcion": str,
+            "cuenta_gasto": str,
+            "cod_impuesto": str,     # código SIIGO del impuesto (de codigos_impuestos.xlsx)
+            "porcentaje": float,
+            "cuenta_impuesto_deb": str,   # cuenta débito del impuesto (IVA descontable)
+            "cuenta_impuesto_cre": str,   # cuenta crédito del impuesto (retención)
+            "base": float,
+            "valor_impuesto": float,
+            "es_retencion": bool,
+        }
+        tipo_comprobante: código numérico SIIGO del tipo de comprobante (ej. "12")
+        centro_costo: código de centro de costo (vacío si no aplica)
+
+    Retorna lista de filas listas para el DataFrame de exportación.
+    """
+    movimientos: list[dict] = []
+    fecha = factura.get("fecha", "")
+    nit   = str(factura.get("nit", "")).strip()
+    num_factura = factura.get("numero_dian", "")
+
+    total_debitos  = 0.0
+    total_creditos = 0.0
+
+    for m in mapeos_confirmados:
+        base        = float(m.get("base", 0) or 0)
+        val_imp     = float(m.get("valor_impuesto", 0) or 0)
+        es_ret      = bool(m.get("es_retencion", False))
+        cuenta_gasto = str(m.get("cuenta_gasto", "")).strip()
+        cuenta_imp_d = str(m.get("cuenta_impuesto_deb", "")).strip()
+        cuenta_imp_c = str(m.get("cuenta_impuesto_cre", "")).strip()
+        cod_imp      = str(m.get("cod_impuesto", "")).strip()
+        pct          = float(m.get("porcentaje", 0) or 0)
+        desc         = str(m.get("descripcion", ""))
+
+        # Fila de gasto/costo (débito)
+        if base and cuenta_gasto:
+            movimientos.append(_fila(
+                tipo_comprobante, consecutivo, fecha, nit,
+                cuenta_gasto, base, None,
+                desc, centro_costo, num_factura, "",
+            ))
+            total_debitos += base
+
+        # Fila de IVA descontable (débito)
+        if val_imp and cuenta_imp_d and not es_ret:
+            movimientos.append(_fila(
+                tipo_comprobante, consecutivo, fecha, nit,
+                cuenta_imp_d, val_imp, None,
+                f"Iva generado",
+                centro_costo, num_factura, cod_imp,
+            ))
+            total_debitos += val_imp
+
+        # Fila de retención practicada (crédito)
+        if val_imp and cuenta_imp_c and es_ret:
+            movimientos.append(_fila(
+                tipo_comprobante, consecutivo, fecha, nit,
+                cuenta_imp_c, None, val_imp,
+                f"Retención {pct}% - {desc}",
+                centro_costo, num_factura, cod_imp,
+            ))
+            total_creditos += val_imp
+
+    # Cuenta de pago seleccionada por el usuario (activo/pasivo)
+    cuenta_pago = str(mapeos_confirmados[0].get("cuenta_pago", "")).strip() if mapeos_confirmados else ""
+    cuenta_pago_nombre = str(mapeos_confirmados[0].get("cuenta_pago_nombre", "")).strip() if mapeos_confirmados else ""
+    if not cuenta_pago:
+        from core.mapper import cuenta_proveedor
+        cuenta_pago = cuenta_proveedor(nit, factura.get("tipo_proveedor", "juridica"))
+        cuenta_pago_nombre = factura.get("razon_social", "")
+    neto = round(total_debitos - total_creditos, 2)
+    if neto != 0:
+        movimientos.append(_fila(
+            tipo_comprobante, consecutivo, fecha, nit,
+            cuenta_pago, None, neto,
+            cuenta_pago_nombre or factura.get("razon_social", ""),
+            centro_costo, num_factura, "",
+        ))
+        total_creditos += neto
+
+    return movimientos
+
+
+def _fila(
+    tipo_comp: str,
+    consecutivo: int | str,
+    fecha: str,
+    nit: str,
+    cuenta: str,
+    debito: float | None,
+    credito: float | None,
+    descripcion: str,
+    centro_costo: str,
+    observaciones: str,
+    cod_imp: str,
+) -> dict:
+    return {
+        "Tipo de comprobante":               tipo_comp,
+        "Consecutivo comprobante":           consecutivo,
+        "Fecha de elaboración ":             fecha,
+        "Sigla moneda":                      "",
+        "Tasa de cambio":                    "",
+        "Código cuenta contable":            cuenta,
+        "Identificación tercero":            nit,
+        "Sucursal":                          "",
+        "Código producto":                   "",
+        "Código de bodega":                  "",
+        "Acción":                            "",
+        "Cantidad producto":                 "",
+        "Prefijo":                           "",
+        "Consecutivo":                       "",
+        "No. cuota":                         "",
+        "Fecha vencimiento":                 "",
+        "Código impuesto":                   cod_imp if cod_imp else "",
+        "Código grupo activo fijo":          "",
+        "Código activo fijo":                "",
+        "Descripción":                       descripcion[:100],
+        "Código centro/subcentro de costos": centro_costo,
+        "Débito":                            round(debito, 2) if debito else "",
+        "Crédito":                           round(credito, 2) if credito else "",
+        "Observaciones":                     observaciones,
+        "Base gravable libro compras/ventas  ": "",
+        "Base exenta libro compras/ventas":  "",
+        "Mes de cierre":                     "",
+    }
+
+
+def generar_xlsx(movimientos: list[dict]) -> BytesIO:
+    """
+    Genera el archivo xlsx de importación SIIGO con las columnas en el orden exacto
+    del modelo_importacion.xlsx. Formato con encabezados azul oscuro.
+
+    Retorna un BytesIO listo para descargar desde Streamlit.
+    """
+    columnas = _leer_columnas_modelo()
+    df = pd.DataFrame(movimientos)
+
+    # Asegurar que todas las columnas del modelo existan
+    for col in columnas:
+        if col not in df.columns:
+            df[col] = ""
+
+    # Mantener solo columnas del modelo en el orden correcto
+    df = df[columnas]
+
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+        df.to_excel(writer, index=False, sheet_name="Datos")
+        wb = writer.book
+        ws = writer.sheets["Datos"]
+
+        fmt_header = wb.add_format({
+            "bold": True,
+            "bg_color": "#1F4E79",
+            "font_color": "#FFFFFF",
+            "border": 1,
+            "text_wrap": True,
+            "valign": "vcenter",
+        })
+        fmt_money = wb.add_format({"num_format": "#,##0.00"})
+        fmt_date  = wb.add_format({"num_format": "yyyy-mm-dd"})
+
+        # Anchos por columna
+        anchos = {
+            "Tipo de comprobante": 18,
+            "Consecutivo comprobante": 22,
+            "Fecha de elaboración ": 20,
+            "Código cuenta contable": 22,
+            "Identificación tercero": 22,
+            "Código impuesto": 16,
+            "Descripción": 40,
+            "Código centro/subcentro de costos": 28,
+            "Débito": 18,
+            "Crédito": 18,
+            "Observaciones": 18,
+        }
+
+        for col_idx, col_name in enumerate(df.columns):
+            # Sobreescribir el encabezado con formato azul
+            ws.write(0, col_idx, col_name.strip(), fmt_header)
+            ancho = anchos.get(col_name, 16)
+            if col_name in ("Débito", "Crédito"):
+                ws.set_column(col_idx, col_idx, ancho, fmt_money)
+            else:
+                ws.set_column(col_idx, col_idx, ancho)
+
+        # Congelar la primera fila
+        ws.freeze_panes(1, 0)
+
+    buffer.seek(0)
+    return buffer
+
+
+def nombre_archivo_salida() -> str:
+    return f"importacion_SIIGO_{date.today().strftime('%Y%m%d')}.xlsx"
