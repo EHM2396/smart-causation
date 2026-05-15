@@ -15,7 +15,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from core import exporter, mapper, parser, validator
 from db import memory as mem
-from db.session import SessionLocal
+from db.models import Base
+from db.session import SessionLocal, engine
 from services import cuentas_service, impuestos_service, tipos_service
 
 st.set_page_config(
@@ -26,6 +27,8 @@ st.set_page_config(
 )
 
 mem.init_db()
+# Si la app corre sin FastAPI, crea el esquema mínimo en PostgreSQL.
+Base.metadata.create_all(bind=engine)
 
 def _init_state():
     defaults = {
