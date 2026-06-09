@@ -10,14 +10,22 @@ import sys
 
 import pandas as pd
 import streamlit as st
+from sqlalchemy import select
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from core import exporter, mapper, parser, validator
-from db import memory as mem
+from core import exporter, parser, validator
 from db.models import Base
+from db.models.contabilidad import FacturaCausada, Proveedor
 from db.session import SessionLocal, engine
-from services import cuentas_service, impuestos_service, tipos_service
+from services import (
+    aprendizaje_service,
+    causacion_service,
+    consecutivos_service,
+    cuentas_service,
+    impuestos_service,
+    tipos_service,
+)
 
 st.set_page_config(
     page_title="Causacion SIIGO",
@@ -26,7 +34,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-mem.init_db()
 # Si la app corre sin FastAPI, crea el esquema mínimo en PostgreSQL.
 Base.metadata.create_all(bind=engine)
 
@@ -43,6 +50,75 @@ def _init_state():
             st.session_state[k] = v
 
 _init_state()
+
+
+def _mapear_cuenta_gasto_db(db, nit: str, descripcion: str) -> tuple[str | None, list[dict], str]:
+    cuenta_regla = aprendizaje_service.aplicar_reglas(db, descripcion)
+    if cuenta_regla:
+        return cuenta_regla, [], "regla"
+
+    cuenta_aprendida = aprendizaje_service.obtener_mapeo(db, nit, descripcion)
+    if cuenta_aprendida:
+        return cuenta_aprendida, [], "aprendido"
+
+    sugerencias = cuentas_service.buscar_cuentas_sugeridas(db, descripcion)
+    if sugerencias:
+        return None, sugerencias, "sugerido"
+
+    return None, [], "manual"
+
+
+def _buscar_proveedor_db(db, nit: str | None) -> Proveedor | None:
+    nit_limpio = str(nit or "").strip()
+    if not nit_limpio:
+        return None
+    return db.scalar(select(Proveedor).where(Proveedor.nit == nit_limpio))
+
+
+def _guardar_proveedor_db(db, factura: dict, cuenta_pagar: str) -> None:
+    nit = str(factura.get("nit") or "").strip()
+    if not nit:
+        return
+
+    proveedor = db.scalar(select(Proveedor).where(Proveedor.nit == nit))
+    if proveedor is None:
+        proveedor = Proveedor(nit=nit)
+        db.add(proveedor)
+
+    proveedor.razon_social = factura.get("razon_social", "")
+    proveedor.tipo_persona = factura.get("tipo_proveedor", "juridica")
+    proveedor.regimen = factura.get("regimen", "")
+    proveedor.cuenta_pagar = cuenta_pagar or proveedor.cuenta_pagar
+
+
+def _idx_opcion_por_codigo(opciones_map: dict[str, str], opciones: list[str], codigo: str | None) -> int | None:
+    if not codigo:
+        return None
+    label = next((k for k, v in opciones_map.items() if v == codigo), None)
+    return opciones.index(label) if label in opciones else None
+
+
+def _factura_ya_causada_db(numero_dian: str) -> bool:
+    if not numero_dian:
+        return False
+    with SessionLocal() as db:
+        return causacion_service.esta_causada(db, numero_dian)
+
+
+def _listar_facturas_causadas_db() -> list[dict]:
+    with SessionLocal() as db:
+        rows = db.scalars(
+            select(FacturaCausada).order_by(FacturaCausada.fecha_causacion.desc(), FacturaCausada.id.desc())
+        ).all()
+        return [
+            {
+                "consecutivo": r.consecutivo,
+                "numero_dian": r.numero_dian,
+                "razon_social": r.razon_social,
+                "fecha_factura": r.fecha_factura,
+            }
+            for r in rows
+        ]
 
 # Sidebar
 with st.sidebar:
@@ -61,7 +137,8 @@ with st.sidebar:
         tipo_comp = st.text_input("Tipo de comprobante (codigo SIIGO)", value="12", max_chars=6)
         st.caption("Agrega tipos en la pestana Catalogos base.")
 
-    ultimo_guardado = mem.get_ultimo_consecutivo(tipo_comp)
+    with SessionLocal() as _db_consec_sidebar:
+        ultimo_guardado = consecutivos_service.get_ultimo(_db_consec_sidebar, tipo_comp)
     st.caption(f"Ultimo consecutivo registrado: **{ultimo_guardado}**")
 
     ultimo_manual = st.number_input(
@@ -69,14 +146,16 @@ with st.sidebar:
         min_value=0, value=0, step=1,
     )
     if ultimo_manual > 0:
-        mem.set_ultimo_consecutivo(tipo_comp, ultimo_manual - 1)
+        with SessionLocal() as _db_set_consec:
+            consecutivos_service.set_ultimo(_db_set_consec, tipo_comp, ultimo_manual - 1)
+            _db_set_consec.commit()
         st.success(f"Consecutivo ajustado. Proximo: {ultimo_manual}")
 
     centro_costo = st.text_input("Centro de costo (vacio si no aplica)", value="")
 
     st.divider()
     with st.expander("Historial de facturas causadas"):
-        historial = mem.listar_facturas_causadas()
+        historial = _listar_facturas_causadas_db()
         if historial:
             df_hist = pd.DataFrame(historial)[["consecutivo", "numero_dian", "razon_social", "fecha_factura"]]
             st.dataframe(df_hist, width="stretch", hide_index=True)
@@ -117,7 +196,7 @@ with tab_caus:
                 resultados = parser.parsear_archivo(archivo, archivo.name)
                 for resultado in resultados:
                     num = resultado.get("numero_dian", "")
-                    if num and mem.factura_ya_causada(num):
+                    if num and _factura_ya_causada_db(num):
                         errores.append(f"La factura **{num}** ya fue causada anteriormente. Se omite.")
                         continue
                     facturas_ok.append({**resultado, "_archivo": archivo.name})
@@ -156,156 +235,180 @@ with tab_caus:
 
         opciones_impuestos = {f"{i['cod']} ({i['porcentaje']}%)": i["cod"] for i in impuestos_disponibles}
 
-        mapeos_sesion: list[dict] = []
-        hay_pendientes = False
+        with st.form("form_mapeo_cuentas"):
+            mapeos_sesion: list[dict] = []
+            hay_pendientes = False
 
-        for idx_fac, factura in enumerate(st.session_state["facturas_parseadas"]):
-            titulo = (
-                f"{factura.get('numero_dian', 'Sin numero')} - "
-                f"{factura.get('razon_social', 'Proveedor desconocido')} | "
-                f"NIT: {factura.get('nit', '?')} | Fecha: {factura.get('fecha', '?')} | "
-                f"Total: ${factura.get('total', 0):,.0f}"
-            )
-            with st.expander(titulo, expanded=(idx_fac == 0)):
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    nit_input = st.text_input("NIT proveedor", value=factura.get("nit", ""), key=f"nit_{idx_fac}")
-                    factura["nit"] = nit_input
-                with col2:
-                    tipo_prov = st.selectbox(
-                        "Tipo proveedor", ["juridica", "natural"],
-                        index=0 if factura.get("tipo_proveedor") != "natural" else 1,
-                        key=f"tipo_{idx_fac}",
-                    )
-                    factura["tipo_proveedor"] = tipo_prov
-                with col3:
-                    st.metric("Total factura", f"${factura.get('total', 0):,.0f}")
-
-                # Método de pago (activo/pasivo) — a nivel de factura
-                if OPTS_PAGO:
-                    sel_pago = st.selectbox(
-                        "Cuenta de pago (activo/pasivo — buscar por codigo o nombre)",
-                        options=OPTS_PAGO,
-                        index=None,
-                        placeholder="Escribe para buscar...",
-                        key=f"pago_{idx_fac}",
-                    )
-                    cuenta_pago_fac  = OPTS_PAGO_MAP.get(sel_pago, "") if sel_pago else ""
-                    cuenta_pago_nombre_fac = sel_pago.split(" - ", 1)[1] if sel_pago and " - " in sel_pago else ""
-                    hay_pendientes = hay_pendientes or not cuenta_pago_fac
-                else:
-                    st.warning("No hay cuentas de activo/pasivo de 8 digitos disponibles. Verifica el PUC.")
-                    cuenta_pago_fac = ""
-                    cuenta_pago_nombre_fac = ""
-                    hay_pendientes = True
-
-                if not factura.get("items"):
-                    st.warning("No se detectaron lineas de items para esta factura.")
-                    continue
-
-                for idx_item, item in enumerate(factura["items"]):
-                    st.markdown(f"**Item {idx_item + 1}:** {item['descripcion']}")
-                    ci1, ci2, ci3, ci4 = st.columns([3, 2, 2, 2])
-
-                    with ci1:
-                        cuenta_auto, sugerencias, fuente = mapper.mapear_cuenta_gasto(
-                            factura["nit"], item["descripcion"]
+            for idx_fac, factura in enumerate(st.session_state["facturas_parseadas"]):
+                with SessionLocal() as _db_prov_item:
+                    proveedor_aprendido = _buscar_proveedor_db(_db_prov_item, factura.get("nit"))
+                tipo_default = (
+                    proveedor_aprendido.tipo_persona
+                    if proveedor_aprendido and proveedor_aprendido.tipo_persona
+                    else factura.get("tipo_proveedor", "juridica")
+                )
+                cuenta_pago_default = proveedor_aprendido.cuenta_pagar if proveedor_aprendido else ""
+                titulo = (
+                    f"{factura.get('numero_dian', 'Sin numero')} - "
+                    f"{factura.get('razon_social', 'Proveedor desconocido')} | "
+                    f"NIT: {factura.get('nit', '?')} | Fecha: {factura.get('fecha', '?')} | "
+                    f"Total: ${factura.get('total', 0):,.0f}"
+                )
+                with st.expander(titulo, expanded=(idx_fac == 0)):
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        nit_input = st.text_input("NIT proveedor", value=factura.get("nit", ""), key=f"nit_{idx_fac}")
+                        factura["nit"] = nit_input
+                    with col2:
+                        tipo_prov = st.selectbox(
+                            "Tipo proveedor", ["juridica", "natural"],
+                            index=0 if tipo_default != "natural" else 1,
+                            key=f"tipo_{idx_fac}",
                         )
-                        if fuente == "aprendido":
-                            etiqueta = "Aprendido"
-                        elif fuente == "sugerido":
-                            etiqueta = "Sugerido"
-                        else:
-                            etiqueta = "Manual"
+                        factura["tipo_proveedor"] = tipo_prov
+                    with col3:
+                        st.metric("Total factura", f"${factura.get('total', 0):,.0f}")
 
-                        # Buscar el índice por defecto en la lista filtrada
-                        codigo_ref = cuenta_auto or (sugerencias[0]["codigo"] if sugerencias else "")
-                        idx_gasto_default = None
-                        if codigo_ref:
-                            label_ref = next(
-                                (k for k in OPTS_GASTO_MAP if OPTS_GASTO_MAP[k] == codigo_ref), None
-                            )
-                            if label_ref and label_ref in OPTS_GASTO:
-                                idx_gasto_default = OPTS_GASTO.index(label_ref)
-
-                        sel_gasto = st.selectbox(
-                            f"Cuenta gasto/costo ({etiqueta}) — buscar por codigo o nombre",
-                            options=OPTS_GASTO,
-                            index=idx_gasto_default,
+                    if OPTS_PAGO:
+                        idx_pago_default = _idx_opcion_por_codigo(OPTS_PAGO_MAP, OPTS_PAGO, cuenta_pago_default)
+                        sel_pago = st.selectbox(
+                            "Cuenta de pago (activo/pasivo — buscar por codigo o nombre)",
+                            options=OPTS_PAGO,
+                            index=idx_pago_default,
                             placeholder="Escribe para buscar...",
-                            key=f"cg_{idx_fac}_{idx_item}",
+                            key=f"pago_{idx_fac}",
                         )
-                        cuenta_gasto_final = OPTS_GASTO_MAP.get(sel_gasto, "") if sel_gasto else ""
-                        hay_pendientes = hay_pendientes or not cuenta_gasto_final
+                        cuenta_pago_fac = OPTS_PAGO_MAP.get(sel_pago, "") if sel_pago else ""
+                        cuenta_pago_nombre_fac = sel_pago.split(" - ", 1)[1] if sel_pago and " - " in sel_pago else ""
+                        hay_pendientes = hay_pendientes or not cuenta_pago_fac
+                    else:
+                        st.warning("No hay cuentas de activo/pasivo de 8 digitos disponibles. Verifica el PUC.")
+                        cuenta_pago_fac = ""
+                        cuenta_pago_nombre_fac = ""
+                        hay_pendientes = True
 
-                    with ci2:
-                        st.metric("Base", f"${item['base']:,.0f}")
+                    if not factura.get("items"):
+                        st.warning("No se detectaron lineas de items para esta factura.")
+                        continue
 
-                    with ci3:
-                        cod_imp_item = item.get("cod_impuesto", "")
-                        with SessionLocal() as _db_bi:
-                            imp_info = impuestos_service.buscar_como_dict(_db_bi, cod_imp_item) if cod_imp_item else None
+                    sel_gasto_global = st.selectbox(
+                        "Cuenta gasto/costo para todos los items de esta factura",
+                        options=OPTS_GASTO,
+                        index=None,
+                        placeholder="Opcional: aplica una cuenta a todos los items...",
+                        key=f"cg_global_{idx_fac}",
+                    )
+                    cuenta_gasto_global = OPTS_GASTO_MAP.get(sel_gasto_global, "") if sel_gasto_global else ""
 
-                        if imp_info:
-                            cod_imp_final = imp_info["cod"]
-                            pct_final = imp_info["porcentaje"]
-                            cuenta_imp_d = imp_info["cuenta_debito"]
-                            cuenta_imp_c = imp_info["cuenta_credito"]
-                            es_retencion = any(
-                                t in imp_info.get("naturaleza", "").lower()
-                                for t in ("retefuente", "reteica", "reteiva")
-                            )
-                            st.text_input(
-                                "Cod. impuesto (auto)",
-                                value=f"{cod_imp_final} — {imp_info['naturaleza']} {pct_final}%",
-                                disabled=True,
-                                key=f"imp_{idx_fac}_{idx_item}",
-                            )
-                        else:
-                            hay_pendientes = True
-                            if opciones_impuestos:
-                                imp_sel = st.selectbox(
-                                    "Cod. impuesto (seleccionar)",
-                                    options=list(opciones_impuestos.keys()),
-                                    index=None,
-                                    placeholder="Escribe para buscar...",
-                                    key=f"imp_sel_{idx_fac}_{idx_item}",
+                    for idx_item, item in enumerate(factura["items"]):
+                        st.markdown(f"**Item {idx_item + 1}:** {item['descripcion']}")
+                        ci1, ci2, ci3, ci4 = st.columns([3, 2, 2, 2])
+
+                        with ci1:
+                            with SessionLocal() as _db_map_item:
+                                cuenta_auto, sugerencias, fuente = _mapear_cuenta_gasto_db(
+                                    _db_map_item, factura["nit"], item["descripcion"]
                                 )
-                                cod_imp_final = opciones_impuestos.get(imp_sel, "") if imp_sel else ""
+                            if fuente == "aprendido":
+                                etiqueta = "Aprendido"
+                            elif fuente == "regla":
+                                etiqueta = "Regla"
+                            elif fuente == "sugerido":
+                                etiqueta = "Sugerido"
                             else:
-                                cod_imp_final = st.text_input(
-                                    "Cod. impuesto (manual)",
-                                    value=cod_imp_item or "",
-                                    key=f"imp_man_{idx_fac}_{idx_item}",
+                                etiqueta = "Manual"
+
+                            codigo_ref = cuenta_gasto_global or cuenta_auto or (sugerencias[0]["codigo"] if sugerencias else "")
+                            idx_gasto_default = None
+                            if codigo_ref:
+                                label_ref = next(
+                                    (k for k in OPTS_GASTO_MAP if OPTS_GASTO_MAP[k] == codigo_ref), None
                                 )
-                            with SessionLocal() as _db_bi2:
-                                imp_info2 = impuestos_service.buscar_como_dict(_db_bi2, cod_imp_final) if cod_imp_final else None
-                            pct_final = imp_info2["porcentaje"] if imp_info2 else item.get("porcentaje", 0)
-                            cuenta_imp_d = imp_info2["cuenta_debito"] if imp_info2 else ""
-                            cuenta_imp_c = imp_info2["cuenta_credito"] if imp_info2 else ""
-                            es_retencion = bool(imp_info2 and "ret" in imp_info2.get("naturaleza", "").lower())
+                                if label_ref and label_ref in OPTS_GASTO:
+                                    idx_gasto_default = OPTS_GASTO.index(label_ref)
 
-                    with ci4:
-                        st.metric("Valor impuesto", f"${item.get('valor_impuesto', 0):,.0f}")
+                            sel_gasto = st.selectbox(
+                                f"Cuenta gasto/costo ({etiqueta}) — buscar por codigo o nombre",
+                                options=OPTS_GASTO,
+                                index=idx_gasto_default,
+                                placeholder="Escribe para buscar...",
+                                key=f"cg_{idx_fac}_{idx_item}",
+                            )
+                            cuenta_gasto_final = cuenta_gasto_global or (OPTS_GASTO_MAP.get(sel_gasto, "") if sel_gasto else "")
+                            hay_pendientes = hay_pendientes or not cuenta_gasto_final
 
-                    mapeos_sesion.append({
-                        "idx_factura":        idx_fac,
-                        "descripcion":        item["descripcion"],
-                        "base":               item["base"],
-                        "cod_impuesto":       cod_imp_final,
-                        "porcentaje":         pct_final,
-                        "valor_impuesto":     item.get("valor_impuesto", 0),
-                        "cuenta_gasto":       cuenta_gasto_final,
-                        "cuenta_impuesto_deb":cuenta_imp_d,
-                        "cuenta_impuesto_cre":cuenta_imp_c,
-                        "es_retencion":       bool(es_retencion),
-                        "cuenta_pago":        cuenta_pago_fac,
-                        "cuenta_pago_nombre": cuenta_pago_nombre_fac,
-                    })
-                    st.divider()
+                        with ci2:
+                            st.metric("Base", f"${item['base']:,.0f}")
 
-        btn_label = "Validar partida doble" if not hay_pendientes else "Validar (hay campos pendientes)"
-        if st.button(btn_label, type="primary"):
+                        with ci3:
+                            cod_imp_item = item.get("cod_impuesto", "")
+                            with SessionLocal() as _db_bi:
+                                imp_info = impuestos_service.buscar_como_dict(_db_bi, cod_imp_item) if cod_imp_item else None
+
+                            if imp_info:
+                                cod_imp_final = imp_info["cod"]
+                                pct_final = imp_info["porcentaje"]
+                                cuenta_imp_d = imp_info["cuenta_debito"]
+                                cuenta_imp_c = imp_info["cuenta_credito"]
+                                es_retencion = any(
+                                    t in imp_info.get("naturaleza", "").lower()
+                                    for t in ("retefuente", "reteica", "reteiva")
+                                )
+                                st.text_input(
+                                    "Cod. impuesto (auto)",
+                                    value=f"{cod_imp_final} — {imp_info['naturaleza']} {pct_final}%",
+                                    disabled=True,
+                                    key=f"imp_{idx_fac}_{idx_item}",
+                                )
+                            else:
+                                hay_pendientes = True
+                                if opciones_impuestos:
+                                    imp_sel = st.selectbox(
+                                        "Cod. impuesto (seleccionar)",
+                                        options=list(opciones_impuestos.keys()),
+                                        index=None,
+                                        placeholder="Escribe para buscar...",
+                                        key=f"imp_sel_{idx_fac}_{idx_item}",
+                                    )
+                                    cod_imp_final = opciones_impuestos.get(imp_sel, "") if imp_sel else ""
+                                else:
+                                    cod_imp_final = st.text_input(
+                                        "Cod. impuesto (manual)",
+                                        value=cod_imp_item or "",
+                                        key=f"imp_man_{idx_fac}_{idx_item}",
+                                    )
+                                with SessionLocal() as _db_bi2:
+                                    imp_info2 = impuestos_service.buscar_como_dict(_db_bi2, cod_imp_final) if cod_imp_final else None
+                                pct_final = imp_info2["porcentaje"] if imp_info2 else item.get("porcentaje", 0)
+                                cuenta_imp_d = imp_info2["cuenta_debito"] if imp_info2 else ""
+                                cuenta_imp_c = imp_info2["cuenta_credito"] if imp_info2 else ""
+                                es_retencion = bool(imp_info2 and "ret" in imp_info2.get("naturaleza", "").lower())
+
+                        with ci4:
+                            st.metric("Valor impuesto", f"${item.get('valor_impuesto', 0):,.0f}")
+
+                        mapeos_sesion.append({
+                            "idx_factura":        idx_fac,
+                            "descripcion":        item["descripcion"],
+                            "base":               item["base"],
+                            "cod_impuesto":       cod_imp_final,
+                            "porcentaje":         pct_final,
+                            "valor_impuesto":     item.get("valor_impuesto", 0),
+                            "cuenta_gasto":       cuenta_gasto_final,
+                            "cuenta_sugerida":    cuenta_auto or (sugerencias[0]["codigo"] if sugerencias else None),
+                            "fuente":             fuente,
+                            "cuenta_impuesto_deb":cuenta_imp_d,
+                            "cuenta_impuesto_cre":cuenta_imp_c,
+                            "es_retencion":       bool(es_retencion),
+                            "cuenta_pago":        cuenta_pago_fac,
+                            "cuenta_pago_nombre": cuenta_pago_nombre_fac,
+                        })
+                        st.divider()
+
+            btn_label = "Validar partida doble" if not hay_pendientes else "Validar (hay campos pendientes)"
+            validar_mapeo = st.form_submit_button(btn_label, type="primary")
+
+        if validar_mapeo:
             st.session_state["mapeos"] = mapeos_sesion
             st.session_state["paso"] = 3
             st.rerun()
@@ -319,8 +422,11 @@ with tab_caus:
         mapeos   = st.session_state["mapeos"]
         todos_movimientos: list[dict] = []
 
+        with SessionLocal() as _db_num_real:
+            ultimo_validacion = consecutivos_service.get_ultimo(_db_num_real, tipo_comp)
+
         for idx_fac, factura in enumerate(st.session_state["facturas_parseadas"]):
-            num_real = mem.get_ultimo_consecutivo(tipo_comp) + 1 + idx_fac
+            num_real = ultimo_validacion + 1 + idx_fac
             mapeos_factura = [m for m in mapeos if m["idx_factura"] == idx_fac]
             movs = exporter.construir_movimientos(
                 factura=factura,
@@ -389,7 +495,8 @@ with tab_caus:
                 type="primary",
             )
         with col_info:
-            ultimo_c = mem.get_ultimo_consecutivo(tipo_comp)
+            with SessionLocal() as _db_ultimo_p4:
+                ultimo_c = consecutivos_service.get_ultimo(_db_ultimo_p4, tipo_comp)
             total_f  = len(facturas)
             st.markdown(f"""
             **Resumen**
@@ -401,36 +508,48 @@ with tab_caus:
             """)
 
         if st.button("Confirmar importacion y guardar aprendizaje", type="primary"):
-            for idx_fac, factura in enumerate(facturas):
-                num_c = mem.get_ultimo_consecutivo(tipo_comp) + 1 + idx_fac
-                mem.registrar_factura(
-                    numero_dian   = factura.get("numero_dian", ""),
-                    nit_proveedor = factura.get("nit", ""),
-                    razon_social  = factura.get("razon_social", ""),
-                    fecha_factura = factura.get("fecha", ""),
-                    total         = factura.get("total", 0),
-                    consecutivo   = str(num_c),
-                )
-                if factura.get("nit"):
-                    mem.guardar_proveedor(
-                        nit          = factura["nit"],
-                        razon_social = factura.get("razon_social", ""),
-                        tipo         = factura.get("tipo_proveedor", "juridica"),
-                        regimen      = factura.get("regimen", ""),
-                        cuenta_pagar = mapper.cuenta_proveedor(factura["nit"], factura.get("tipo_proveedor", "juridica")),
-                    )
-                for m in [x for x in mapeos if x["idx_factura"] == idx_fac]:
-                    if m.get("cuenta_gasto") and factura.get("nit"):
-                        mem.guardar_mapeo_puc(factura["nit"], m["descripcion"], m["cuenta_gasto"])
+            try:
+                with SessionLocal() as db_confirm:
+                    ultimo_actual = consecutivos_service.get_ultimo(db_confirm, tipo_comp)
+                    for idx_fac, factura in enumerate(facturas):
+                        num_c = ultimo_actual + 1 + idx_fac
+                        mapeos_factura = [x for x in mapeos if x["idx_factura"] == idx_fac]
+                        cuenta_pagar = next((m.get("cuenta_pago", "") for m in mapeos_factura if m.get("cuenta_pago")), "")
 
-            nuevo_ultimo = mem.get_ultimo_consecutivo(tipo_comp) + len(facturas)
-            mem.set_ultimo_consecutivo(tipo_comp, nuevo_ultimo)
-            st.success(f"Importacion confirmada. Proximo consecutivo: **{nuevo_ultimo + 1}**")
-            st.balloons()
-            for k in ["facturas_parseadas", "mapeos", "movimientos"]:
-                st.session_state[k] = []
-            st.session_state["reporte"] = None
-            st.session_state["paso"] = 1
+                        _guardar_proveedor_db(db_confirm, factura, cuenta_pagar)
+                        if not causacion_service.esta_causada(db_confirm, factura.get("numero_dian", "")):
+                            causacion_service.registrar_factura_causada(
+                                db_confirm,
+                                factura=factura,
+                                consecutivo=num_c,
+                                tipo_comprobante=tipo_comp,
+                                archivo_origen=factura.get("_archivo", ""),
+                            )
+                        for m in mapeos_factura:
+                            if m.get("cuenta_gasto") and factura.get("nit"):
+                                causacion_service.confirmar_mapeo(
+                                    db_confirm,
+                                    numero_dian=factura.get("numero_dian", ""),
+                                    nit=factura.get("nit"),
+                                    descripcion=m["descripcion"],
+                                    cuenta_sugerida=m.get("cuenta_sugerida"),
+                                    cuenta_aplicada=m["cuenta_gasto"],
+                                    cod_impuesto=m.get("cod_impuesto"),
+                                    origen=m.get("fuente", "manual"),
+                                )
+
+                    nuevo_ultimo = ultimo_actual + len(facturas)
+                    consecutivos_service.set_ultimo(db_confirm, tipo_comp, nuevo_ultimo)
+                    db_confirm.commit()
+            except Exception as exc:
+                st.error(f"No se pudo guardar la importacion en la base de datos: {exc}")
+            else:
+                st.success(f"Importacion confirmada. Proximo consecutivo: **{nuevo_ultimo + 1}**")
+                st.balloons()
+                for k in ["facturas_parseadas", "mapeos", "movimientos"]:
+                    st.session_state[k] = []
+                st.session_state["reporte"] = None
+                st.session_state["paso"] = 1
 
 
 # TAB CATALOGOS

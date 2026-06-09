@@ -133,12 +133,14 @@ def construir_movimientos(
             ))
             total_creditos += val_imp
 
-    # Cuenta de pago seleccionada por el usuario (activo/pasivo)
+    # Cuenta de pago seleccionada o aprendida para el proveedor (activo/pasivo)
     cuenta_pago = str(mapeos_confirmados[0].get("cuenta_pago", "")).strip() if mapeos_confirmados else ""
     cuenta_pago_nombre = str(mapeos_confirmados[0].get("cuenta_pago_nombre", "")).strip() if mapeos_confirmados else ""
     if not cuenta_pago:
-        from core.mapper import cuenta_proveedor
-        cuenta_pago = cuenta_proveedor(nit, factura.get("tipo_proveedor", "juridica"))
+        cuenta_pago = str(factura.get("cuenta_pago", "")).strip()
+        cuenta_pago_nombre = factura.get("razon_social", "")
+    if not cuenta_pago:
+        cuenta_pago = "220510" if factura.get("tipo_proveedor") == "natural" else "220505"
         cuenta_pago_nombre = factura.get("razon_social", "")
     neto = round(total_debitos - total_creditos, 2)
     if neto != 0:
