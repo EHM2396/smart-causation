@@ -330,10 +330,17 @@ with tab_caus:
                             ia_preaplicada = False
                             fuente_item = fuente
 
+                            # Fase 5: rollout por NIT — NULL o True = habilitado; False = excluido
+                            _ia_nit_ok = (
+                                proveedor_aprendido is None
+                                or proveedor_aprendido.ia_habilitada is not False
+                            )
+
                             if (
                                 fuente == "manual"
                                 and not cuenta_gasto_global
                                 and ai_service.esta_disponible()
+                                and _ia_nit_ok
                             ):
                                 ia_sugerencia = ai_service.sugerir(
                                     item["descripcion"],
@@ -635,7 +642,9 @@ with tab_cat:
     st.header("Catalogos base")
     st.caption("Los registros existentes son de solo lectura. Usa los formularios para agregar nuevos registros.")
 
-    sub_imp, sub_cuentas, sub_tipos = st.tabs(["Codigos de Impuesto", "Plan de Cuentas PUC", "Tipos de Comprobante"])
+    sub_imp, sub_cuentas, sub_tipos, sub_ia = st.tabs(
+        ["Codigos de Impuesto", "Plan de Cuentas PUC", "Tipos de Comprobante", "Control IA"]
+    )
 
     # ── Codigos de impuesto ───────────────────────────────────────────────────
     with sub_imp:
@@ -805,4 +814,80 @@ with tab_cat:
                                 st.rerun()
                     except Exception as e:
                         st.error(f"Error al guardar: {e}")
+
+    # ── Control IA por proveedor ──────────────────────────────────────────────
+    with sub_ia:
+        st.subheader("Control IA por proveedor")
+        st.caption(
+            "Activa o desactiva la sugerencia automatica de IA para cada proveedor. "
+            "Proveedores sin registro aparecen como Habilitado (predeterminado)."
+        )
+
+        if not ai_service.esta_disponible():
+            st.warning(
+                "La clave OPENAI_API_KEY no esta configurada. "
+                "Configura el secreto en Streamlit Cloud > Settings > Secrets para usar IA."
+            )
+
+        with SessionLocal() as _db_ia_tab:
+            from sqlalchemy import select as _sel_ia
+            proveedores_ia = list(
+                _db_ia_tab.scalars(
+                    _sel_ia(Proveedor).order_by(Proveedor.razon_social)
+                ).all()
+            )
+
+        if proveedores_ia:
+            df_ia = pd.DataFrame([
+                {
+                    "NIT": p.nit,
+                    "Proveedor": p.razon_social or p.nit,
+                    "IA": "Habilitada" if p.ia_habilitada is not False else "Deshabilitada",
+                }
+                for p in proveedores_ia
+            ])
+            st.dataframe(df_ia, use_container_width=True, hide_index=True)
+
+            st.divider()
+            st.subheader("Cambiar estado IA de un proveedor")
+            with st.form("form_ctrl_ia", clear_on_submit=True):
+                nits_opciones = {f"{p.razon_social or p.nit} ({p.nit})": p.nit for p in proveedores_ia}
+                sel_prov_ia = st.selectbox(
+                    "Proveedor",
+                    options=list(nits_opciones.keys()),
+                    index=None,
+                    placeholder="Selecciona un proveedor...",
+                    key="sel_prov_ctrl_ia",
+                )
+                nuevo_estado_ia = st.radio(
+                    "Estado IA",
+                    options=["Habilitada", "Deshabilitada"],
+                    horizontal=True,
+                    key="radio_estado_ia",
+                )
+                ia_ok = st.form_submit_button("Guardar", type="primary")
+                if ia_ok:
+                    if not sel_prov_ia:
+                        st.error("Selecciona un proveedor.")
+                    else:
+                        nit_sel = nits_opciones[sel_prov_ia]
+                        try:
+                            with SessionLocal() as _db_ia_upd:
+                                prov_upd = _db_ia_upd.scalar(
+                                    _sel_ia(Proveedor).where(Proveedor.nit == nit_sel)
+                                )
+                                if prov_upd:
+                                    prov_upd.ia_habilitada = nuevo_estado_ia == "Habilitada"
+                                    _db_ia_upd.commit()
+                                    st.success(
+                                        f"IA **{nuevo_estado_ia.lower()}** para proveedor **{nit_sel}**."
+                                    )
+                                    st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al guardar: {e}")
+        else:
+            st.info(
+                "No hay proveedores registrados aun. "
+                "Se registran automaticamente al confirmar la primera causacion."
+            )
 

@@ -38,6 +38,7 @@ class Proveedor(Base):
     ciudad: Mapped[str | None] = mapped_column(String(100))
     direccion: Mapped[str | None] = mapped_column(String(255))
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    ia_habilitada: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # None = heredar global (True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
