@@ -43,5 +43,6 @@ from services.causacion_service import (        # noqa: F401
 from services.ai_service import (               # noqa: F401
     esta_disponible as ia_disponible,
     sugerir as ia_sugerir,
+    get_estadisticas_sesion as ia_estadisticas,
     SugerenciaIA,
 )

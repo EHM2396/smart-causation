@@ -221,7 +221,14 @@ with tab_caus:
     if st.session_state["paso"] >= 2 and st.session_state["facturas_parseadas"]:
         st.divider()
         st.header("Paso 2 - Revisar y confirmar cuentas contables")
-        st.caption("Aprendido = del historial. Sugerido = del plan de cuentas. Manual = sin informacion previa.")
+        _caption_step2 = "Aprendido = del historial. Sugerido = del plan de cuentas. Manual = sin informacion previa."
+        if ai_service.esta_disponible():
+            _stats = ai_service.get_estadisticas_sesion()
+            _caption_step2 += (
+                f" | IA: {_stats['llamadas']}/{_stats['limite']} llamadas"
+                f" · {_stats['tokens']:,} tokens"
+            )
+        st.caption(_caption_step2)
 
         with SessionLocal() as _db_p2:
             cuentas_gasto_disponibles = cuentas_service.listar_cuentas_gasto(_db_p2)

@@ -1,14 +1,20 @@
 """
 ai_service.py – Capa de inteligencia artificial para clasificación de ítems.
 
-Modo operación: SOMBRA
-  - Solo sugiere. Nunca escribe ni decide directamente.
+Modo operación: FASE 2 (preselección por alta confianza)
+  - Con alta confianza: preselecciona cuenta/impuesto directamente en UI.
+  - Con confianza media: muestra sugerencia pero no impone selección.
   - Si la API key no está disponible o falla, retorna None silenciosamente.
-  - El flujo actual (reglas + aprendizaje histórico) no se modifica.
-    La IA solo complementa cuando los mecanismos existentes no dan resultado.
+
+Hardening de Fase 4:
+  1. Sanitización de PII — limpia NITs, teléfonos, emails y montos antes de enviar
+  2. Detección de prompt injection — rechaza descripciones con patrones sospechosos
+  3. Rate limiter por sesión — máx. 60 llamadas por sesión de usuario
+  4. Tracking de tokens — acumula uso en session_state para auditoría y costo
+  5. Métricas de sesión — get_estadisticas_sesion() expone stats a la UI
 
 Datos enviados al modelo (minimizados, sin PII):
-  - Descripción del ítem (texto del archivo DIAN)
+  - Descripción del ítem sanitizada (sin NITs, teléfonos, emails ni montos)
   - Lista de cuentas PUC disponibles (código + nombre)
   - Lista de códigos de impuesto disponibles (código + tipo + tarifa)
   - Tipo de proveedor: "juridica" | "natural"  ← sin NIT ni razón social
@@ -23,6 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -41,6 +48,35 @@ _MODELO_DEFAULT = "gpt-4o-mini"
 # Máximo de cuentas enviadas al modelo para no exceder tokens
 _MAX_CUENTAS_PROMPT = 100
 
+# Umbral de confianza para preselección automática (Fase 2)
+_UMBRAL_CONFIANZA_ALTA = 0.80
+
+# Límite de llamadas IA por sesión de usuario (protección de costo)
+_LIMITE_LLAMADAS_POR_SESION = 60
+
+# Claves de session_state para métricas
+_SS_LLAMADAS = "_ia_llamadas_sesion"
+_SS_TOKENS   = "_ia_tokens_sesion"
+
+# Patrones PII a limpiar antes de enviar al modelo
+_RE_NIT      = re.compile(r"\b\d{6,10}-?\d\b")          # NIT colombiano
+_RE_TELEFONO = re.compile(r"\b(\+57[\s-]?)?\d{3}[\s-]?\d{3}[\s-]?\d{4}\b")
+_RE_EMAIL    = re.compile(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+")
+_RE_MONTO    = re.compile(r"\$\s?[\d.,]+")               # $1.234.567
+
+# Palabras que indican intento de prompt injection (case-insensitive)
+_PALABRAS_INYECCION = (
+    "ignore previous",
+    "ignore all",
+    "system:",
+    "you are now",
+    "override",
+    "jailbreak",
+    "new instruction",
+    "disregard",
+    "act as",
+)
+
 
 # ── Tipos de retorno ──────────────────────────────────────────────────────────
 
@@ -56,7 +92,7 @@ class SugerenciaIA:
 
     @property
     def confianza_alta(self) -> bool:
-        return self.confianza >= 0.80
+        return self.confianza >= _UMBRAL_CONFIANZA_ALTA
 
     @property
     def confianza_media(self) -> bool:
@@ -94,6 +130,75 @@ def _get_api_key() -> str | None:
     return key if key and key != "sk-..." else None
 
 
+# ── Helpers de hardening (Fase 4) ────────────────────────────────────────────
+
+def _sanitizar_descripcion(texto: str) -> str:
+    """
+    Elimina patrones de PII de la descripción antes de enviarla al modelo.
+    Reemplaza NITs, teléfonos, emails y montos por marcadores neutros.
+    Trunca a 300 caracteres para evitar tokens innecesarios.
+    """
+    t = _RE_NIT.sub("[NIT]", texto)
+    t = _RE_TELEFONO.sub("[TEL]", t)
+    t = _RE_EMAIL.sub("[EMAIL]", t)
+    t = _RE_MONTO.sub("[MONTO]", t)
+    return t[:300].strip()
+
+
+def _detectar_inyeccion(texto: str) -> bool:
+    """
+    Retorna True si la descripción contiene patrones de prompt injection.
+    En ese caso, la llamada a la IA se cancela y se registra en el log.
+    """
+    lower = texto.lower()
+    return any(patron in lower for patron in _PALABRAS_INYECCION)
+
+
+def _verificar_rate_limit() -> bool:
+    """
+    Comprueba que no se haya superado el límite de llamadas por sesión.
+    Incrementa el contador si aún hay margen. Retorna True si se puede llamar.
+    """
+    try:
+        import streamlit as st
+        count = st.session_state.get(_SS_LLAMADAS, 0)
+        if count >= _LIMITE_LLAMADAS_POR_SESION:
+            logger.warning(
+                "ai_service: rate limit de sesión alcanzado (%d/%d) — llamada omitida",
+                count, _LIMITE_LLAMADAS_POR_SESION,
+            )
+            return False
+        st.session_state[_SS_LLAMADAS] = count + 1
+        return True
+    except Exception:
+        return True  # fuera de Streamlit (tests, scripts): sin límite
+
+
+def _registrar_tokens(total_tokens: int) -> None:
+    """Acumula tokens usados en la sesión para tracking de costo."""
+    try:
+        import streamlit as st
+        st.session_state[_SS_TOKENS] = st.session_state.get(_SS_TOKENS, 0) + total_tokens
+    except Exception:
+        pass
+
+
+def get_estadisticas_sesion() -> dict:
+    """
+    Retorna métricas de uso IA de la sesión actual.
+    Seguro de llamar fuera de contexto Streamlit (retorna ceros).
+    """
+    try:
+        import streamlit as st
+        return {
+            "llamadas": st.session_state.get(_SS_LLAMADAS, 0),
+            "tokens":   st.session_state.get(_SS_TOKENS, 0),
+            "limite":   _LIMITE_LLAMADAS_POR_SESION,
+        }
+    except Exception:
+        return {"llamadas": 0, "tokens": 0, "limite": _LIMITE_LLAMADAS_POR_SESION}
+
+
 # ── API pública ───────────────────────────────────────────────────────────────
 
 def esta_disponible() -> bool:
@@ -126,9 +231,24 @@ def sugerir(
     if not descripcion or not descripcion.strip():
         return None
 
+    # Guard 1: prompt injection
+    if _detectar_inyeccion(descripcion):
+        logger.warning(
+            "ai_service: posible prompt injection detectado en descripcion — omitida. "
+            "Primeros 80 chars: %r", descripcion[:80]
+        )
+        return None
+
+    # Guard 2: rate limit de sesión
+    if not _verificar_rate_limit():
+        return None
+
+    # Guard 3: sanitizar PII antes de enviar al modelo
+    descripcion_segura = _sanitizar_descripcion(descripcion)
+
     try:
         return _llamar_openai(
-            descripcion.strip(),
+            descripcion_segura,
             cuentas_gasto,
             codigos_impuesto,
             tipo_proveedor,
@@ -202,6 +322,10 @@ def _llamar_openai(
         max_tokens=150,
         response_format={"type": "json_object"},
     )
+
+    # Fase 4: registrar tokens consumidos para tracking de costo
+    if response.usage:
+        _registrar_tokens(response.usage.total_tokens)
 
     raw = json.loads(response.choices[0].message.content)
 
