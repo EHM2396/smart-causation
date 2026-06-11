@@ -39,3 +39,8 @@ from services.causacion_service import (        # noqa: F401
     registrar_factura_causada,
     esta_causada,
 )
+from services.ai_service import (               # noqa: F401
+    esta_disponible as ia_disponible,
+    sugerir as ia_sugerir,
+    SugerenciaIA,
+)

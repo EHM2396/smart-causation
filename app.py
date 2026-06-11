@@ -19,6 +19,7 @@ from db.models import Base
 from db.models.contabilidad import FacturaCausada, Proveedor
 from db.session import SessionLocal, engine
 from services import (
+    ai_service,
     aprendizaje_service,
     causacion_service,
     consecutivos_service,
@@ -334,6 +335,32 @@ with tab_caus:
                                 placeholder="Escribe para buscar...",
                                 key=f"cg_{idx_fac}_{idx_item}",
                             )
+
+                            # ── Modo sombra IA (Phase 1) ─────────────────────────
+                            # Solo actua cuando no hay cuenta automatica ni global.
+                            # No modifica defaults ni session_state — solo informa.
+                            if (
+                                fuente == "manual"
+                                and not cuenta_gasto_global
+                                and ai_service.esta_disponible()
+                            ):
+                                _sug_ia = ai_service.sugerir(
+                                    item["descripcion"],
+                                    cuentas_gasto_disponibles,
+                                    impuestos_disponibles,
+                                    tipo_default,
+                                )
+                                if _sug_ia and _sug_ia.cuenta_gasto:
+                                    _ia_lbl = next(
+                                        (k for k in OPTS_GASTO_MAP if OPTS_GASTO_MAP[k] == _sug_ia.cuenta_gasto),
+                                        _sug_ia.cuenta_gasto,
+                                    )
+                                    st.caption(
+                                        f"\U0001f4a1 IA sugiere: **{_ia_lbl}** "
+                                        f"({_sug_ia.confianza:.0%}) — {_sug_ia.explicacion}"
+                                    )
+                            # ────────────────────────────────────────────────────
+
                             cuenta_gasto_final = cuenta_gasto_global or (OPTS_GASTO_MAP.get(sel_gasto, "") if sel_gasto else "")
                             hay_pendientes = hay_pendientes or not cuenta_gasto_final
 
