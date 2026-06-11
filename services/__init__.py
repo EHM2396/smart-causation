@@ -26,6 +26,7 @@ from services.consecutivos_service import (     # noqa: F401
 )
 from services.aprendizaje_service import (      # noqa: F401
     obtener_mapeo,
+    obtener_cod_impuesto,
     registrar_mapeo,
     registrar_decision,
     aplicar_reglas,

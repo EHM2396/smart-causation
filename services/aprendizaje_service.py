@@ -7,6 +7,7 @@ Agrega historial de decisiones y reglas de clasificación versionadas.
 
 from __future__ import annotations
 
+from collections import defaultdict
 import re
 import unicodedata
 from datetime import datetime, timezone
@@ -116,6 +117,58 @@ def registrar_decision(
     db.add(decision)
     db.flush()
     return decision
+
+
+def obtener_cod_impuesto(
+    db: Session,
+    nit: str | None,
+    descripcion: str,
+) -> str | None:
+    """
+    Sugiere un código de impuesto usando historial de decisiones confirmadas.
+
+    Estrategia:
+      1. Busca decisiones recientes con cod_impuesto para el mismo NIT.
+      2. Puntúa los códigos por coincidencias de keywords de la descripción.
+      3. Si no hay señal por NIT, intenta señal global (cualquier proveedor).
+    """
+    palabras = [p for p in _norm(descripcion).split() if len(p) > 3]
+    if not palabras:
+        return None
+
+    def _mejor_codigo(mismo_nit: bool) -> str | None:
+        stmt = (
+            select(HistorialDecision)
+            .where(HistorialDecision.cod_impuesto.is_not(None))
+            .order_by(HistorialDecision.created_at.desc())
+            .limit(500)
+        )
+        if mismo_nit and nit:
+            stmt = stmt.where(HistorialDecision.nit_proveedor == nit)
+
+        rows = db.scalars(stmt).all()
+        if not rows:
+            return None
+
+        score: dict[str, float] = defaultdict(float)
+        for row in rows:
+            desc = _norm(row.descripcion_item or "")
+            if not desc:
+                continue
+            hits = sum(1 for p in palabras if p in desc)
+            if hits <= 0:
+                continue
+            base = float(hits)
+            # Ligero bonus si no hubo corrección manual
+            if not row.fue_corregida:
+                base += 0.25
+            score[str(row.cod_impuesto)] += base
+
+        if not score:
+            return None
+        return max(score, key=score.get)
+
+    return _mejor_codigo(mismo_nit=True) or _mejor_codigo(mismo_nit=False)
 
 
 # ── Reglas de clasificación versionadas ──────────────────────────────────────

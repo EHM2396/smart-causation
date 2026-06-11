@@ -383,7 +383,16 @@ with tab_caus:
                             st.metric("Base", f"${item['base']:,.0f}")
 
                         with ci3:
-                            cod_imp_item = item.get("cod_impuesto", "")
+                            cod_imp_aprendido = ""
+                            if not item.get("cod_impuesto"):
+                                with SessionLocal() as _db_imp_learn:
+                                    cod_imp_aprendido = aprendizaje_service.obtener_cod_impuesto(
+                                        _db_imp_learn,
+                                        factura.get("nit"),
+                                        item["descripcion"],
+                                    ) or ""
+
+                            cod_imp_item = item.get("cod_impuesto", "") or cod_imp_aprendido
                             cod_imp_ia = ia_sugerencia.cod_impuesto if ia_preaplicada and ia_sugerencia else ""
                             cod_imp_inicial = cod_imp_item or cod_imp_ia
                             with SessionLocal() as _db_bi:
@@ -404,6 +413,8 @@ with tab_caus:
                                     disabled=True,
                                     key=f"imp_{idx_fac}_{idx_item}",
                                 )
+                                if cod_imp_aprendido and cod_imp_final == cod_imp_aprendido:
+                                    st.caption("Impuesto autocompletado desde aprendizaje historico")
                             else:
                                 hay_pendientes = True
                                 if opciones_impuestos:
