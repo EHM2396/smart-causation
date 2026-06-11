@@ -319,7 +319,31 @@ with tab_caus:
                             else:
                                 etiqueta = "Manual"
 
-                            codigo_ref = cuenta_gasto_global or cuenta_auto or (sugerencias[0]["codigo"] if sugerencias else "")
+                            ia_sugerencia = None
+                            ia_preaplicada = False
+                            fuente_item = fuente
+
+                            if (
+                                fuente == "manual"
+                                and not cuenta_gasto_global
+                                and ai_service.esta_disponible()
+                            ):
+                                ia_sugerencia = ai_service.sugerir(
+                                    item["descripcion"],
+                                    cuentas_gasto_disponibles,
+                                    impuestos_disponibles,
+                                    tipo_default,
+                                )
+                                if ia_sugerencia and ia_sugerencia.cuenta_gasto and ia_sugerencia.confianza_alta:
+                                    ia_preaplicada = True
+                                    fuente_item = "ia_alta"
+
+                            codigo_ref = (
+                                cuenta_gasto_global
+                                or (ia_sugerencia.cuenta_gasto if ia_preaplicada and ia_sugerencia else "")
+                                or cuenta_auto
+                                or (sugerencias[0]["codigo"] if sugerencias else "")
+                            )
                             idx_gasto_default = None
                             if codigo_ref:
                                 label_ref = next(
@@ -336,30 +360,21 @@ with tab_caus:
                                 key=f"cg_{idx_fac}_{idx_item}",
                             )
 
-                            # ── Modo sombra IA (Phase 1) ─────────────────────────
-                            # Solo actua cuando no hay cuenta automatica ni global.
-                            # No modifica defaults ni session_state — solo informa.
-                            if (
-                                fuente == "manual"
-                                and not cuenta_gasto_global
-                                and ai_service.esta_disponible()
-                            ):
-                                _sug_ia = ai_service.sugerir(
-                                    item["descripcion"],
-                                    cuentas_gasto_disponibles,
-                                    impuestos_disponibles,
-                                    tipo_default,
+                            if ia_sugerencia and ia_sugerencia.cuenta_gasto:
+                                _ia_lbl = next(
+                                    (k for k in OPTS_GASTO_MAP if OPTS_GASTO_MAP[k] == ia_sugerencia.cuenta_gasto),
+                                    ia_sugerencia.cuenta_gasto,
                                 )
-                                if _sug_ia and _sug_ia.cuenta_gasto:
-                                    _ia_lbl = next(
-                                        (k for k in OPTS_GASTO_MAP if OPTS_GASTO_MAP[k] == _sug_ia.cuenta_gasto),
-                                        _sug_ia.cuenta_gasto,
+                                if ia_preaplicada:
+                                    st.caption(
+                                        f"\U0001f916 IA preselecciono: **{_ia_lbl}** "
+                                        f"({ia_sugerencia.confianza:.0%}) — {ia_sugerencia.explicacion}"
                                     )
+                                else:
                                     st.caption(
                                         f"\U0001f4a1 IA sugiere: **{_ia_lbl}** "
-                                        f"({_sug_ia.confianza:.0%}) — {_sug_ia.explicacion}"
+                                        f"({ia_sugerencia.confianza:.0%}) — {ia_sugerencia.explicacion}"
                                     )
-                            # ────────────────────────────────────────────────────
 
                             cuenta_gasto_final = cuenta_gasto_global or (OPTS_GASTO_MAP.get(sel_gasto, "") if sel_gasto else "")
                             hay_pendientes = hay_pendientes or not cuenta_gasto_final
@@ -369,8 +384,10 @@ with tab_caus:
 
                         with ci3:
                             cod_imp_item = item.get("cod_impuesto", "")
+                            cod_imp_ia = ia_sugerencia.cod_impuesto if ia_preaplicada and ia_sugerencia else ""
+                            cod_imp_inicial = cod_imp_item or cod_imp_ia
                             with SessionLocal() as _db_bi:
-                                imp_info = impuestos_service.buscar_como_dict(_db_bi, cod_imp_item) if cod_imp_item else None
+                                imp_info = impuestos_service.buscar_como_dict(_db_bi, cod_imp_inicial) if cod_imp_inicial else None
 
                             if imp_info:
                                 cod_imp_final = imp_info["cod"]
@@ -390,10 +407,19 @@ with tab_caus:
                             else:
                                 hay_pendientes = True
                                 if opciones_impuestos:
+                                    imp_sel_default = next(
+                                        (k for k, v in opciones_impuestos.items() if v == cod_imp_ia),
+                                        None,
+                                    )
+                                    idx_imp_default = (
+                                        list(opciones_impuestos.keys()).index(imp_sel_default)
+                                        if imp_sel_default in opciones_impuestos
+                                        else None
+                                    )
                                     imp_sel = st.selectbox(
                                         "Cod. impuesto (seleccionar)",
                                         options=list(opciones_impuestos.keys()),
-                                        index=None,
+                                        index=idx_imp_default,
                                         placeholder="Escribe para buscar...",
                                         key=f"imp_sel_{idx_fac}_{idx_item}",
                                     )
@@ -422,8 +448,15 @@ with tab_caus:
                             "porcentaje":         pct_final,
                             "valor_impuesto":     item.get("valor_impuesto", 0),
                             "cuenta_gasto":       cuenta_gasto_final,
-                            "cuenta_sugerida":    cuenta_auto or (sugerencias[0]["codigo"] if sugerencias else None),
-                            "fuente":             fuente,
+                            "cuenta_sugerida":    (
+                                cuenta_auto
+                                or (ia_sugerencia.cuenta_gasto if ia_sugerencia else None)
+                                or (sugerencias[0]["codigo"] if sugerencias else None)
+                            ),
+                            "fuente":             fuente_item,
+                            "ia_confianza":       ia_sugerencia.confianza if ia_sugerencia else None,
+                            "ia_explicacion":     ia_sugerencia.explicacion if ia_sugerencia else None,
+                            "ia_modelo":          ia_sugerencia.modelo if ia_sugerencia else None,
                             "cuenta_impuesto_deb":cuenta_imp_d,
                             "cuenta_impuesto_cre":cuenta_imp_c,
                             "es_retencion":       bool(es_retencion),
