@@ -293,8 +293,8 @@ with tab_caus:
             cuentas_pago_disponibles  = cuentas_service.listar_metodos_pago(_db_p2)
             impuestos_disponibles     = impuestos_service.listar_como_dict(_db_p2)
 
-        OPTS_GASTO = [f"{c['codigo']} - {c['nombre']}" for c in cuentas_gasto_disponibles]
-        OPTS_GASTO_MAP = {f"{c['codigo']} - {c['nombre']}": c["codigo"] for c in cuentas_gasto_disponibles}
+        OPTS_GASTO = [c["label"] for c in cuentas_gasto_disponibles]
+        OPTS_GASTO_MAP = {c["label"]: c["codigo"] for c in cuentas_gasto_disponibles}
 
         OPTS_PAGO = [f"{c['codigo']} - {c['nombre']}" for c in cuentas_pago_disponibles]
         OPTS_PAGO_MAP = {f"{c['codigo']} - {c['nombre']}": c["codigo"] for c in cuentas_pago_disponibles}

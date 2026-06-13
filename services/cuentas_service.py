@@ -11,7 +11,7 @@ import re
 import unicodedata
 from typing import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from db.models.catalogo import CuentaContable
@@ -40,40 +40,90 @@ def buscar_por_codigo(db: Session, codigo: str) -> CuentaContable | None:
 
 # ── Selectores para la UI ─────────────────────────────────────────────────────
 
+# Tags visuales para cuentas fuera del rango gasto/costo estándar
+_TAGS_GASTO_EXT: dict[str, str] = {
+    "14": "[Inv] ",
+    "15": "[PP&E] ",
+    "16": "[Intang] ",
+    "17": "[Diferi] ",
+}
+
+
 def listar_cuentas_gasto(db: Session) -> list[dict]:
     """
-    Cuentas de gastos y costos (clases 5, 6, 7) de nivel auxiliar (8 dígitos).
-    Excluye las marcadas como fiscales.
-    Equivalente a core.mapper.listar_cuentas_gasto().
+    Cuentas de gasto/costo para la causación de facturas.
+
+    Prioridad 1 (gastos y costos): clases 5, 6, 7.
+    Prioridad 2 (inventarios y activos): cuentas 14xxx y 15xxx.
+    Opcional (diferidos e intangibles): cuentas 16xxx y 17xxx.
+    Solo nivel auxiliar (8 dígitos), activas y no fiscales.
     """
-    rows = db.scalars(
+    rows_std = db.scalars(
         select(CuentaContable).where(
             CuentaContable.activo == True,
             CuentaContable.nivel == 8,
             CuentaContable.clase.in_([5, 6, 7]),
             CuentaContable.fiscal == False,
-        )
+        ).order_by(CuentaContable.codigo)
     ).all()
 
-    return [
-        {"codigo": r.codigo, "nombre": r.nombre, "label": f"{r.codigo} – {r.nombre}"}
-        for r in rows
+    rows_ext = db.scalars(
+        select(CuentaContable).where(
+            CuentaContable.activo == True,
+            CuentaContable.nivel == 8,
+            CuentaContable.fiscal == False,
+            or_(
+                CuentaContable.codigo.like("14%"),
+                CuentaContable.codigo.like("15%"),
+                CuentaContable.codigo.like("16%"),
+                CuentaContable.codigo.like("17%"),
+            )
+        ).order_by(CuentaContable.codigo)
+    ).all()
+
+    result = [
+        {"codigo": r.codigo, "nombre": r.nombre, "tag": "", "label": f"{r.codigo} – {r.nombre}"}
+        for r in rows_std
     ]
+    for r in rows_ext:
+        tag = next((v for k, v in _TAGS_GASTO_EXT.items() if r.codigo.startswith(k)), "")
+        result.append({
+            "codigo": r.codigo,
+            "nombre": r.nombre,
+            "tag": tag,
+            "label": f"{tag}{r.codigo} – {r.nombre}",
+        })
+    return result
 
 
 def listar_metodos_pago(db: Session) -> list[dict]:
     """
-    Cuentas de activo/pasivo (clases 1, 2) de nivel auxiliar (8 dígitos).
-    Se usan para registrar el método de pago / cuenta por pagar del proveedor.
-    Equivalente a core.mapper.listar_metodos_pago().
+    Cuentas de pago de nivel auxiliar (8 dígitos), activas y no fiscales.
+
+    Incluye:
+      - Clase 2 completa: proveedores, cuentas por pagar, obligaciones.
+      - Clase 1, grupos 11 (Disponible) y 12 (Inversiones/bancos): efectivo
+        y equivalentes usados para registrar pagos directos.
+
+    Excluye el resto de clase 1 (inventarios 14, PP&E 15, etc.) porque
+    no son cuentas de pago en el contexto de causación de facturas.
     """
     rows = db.scalars(
         select(CuentaContable).where(
             CuentaContable.activo == True,
             CuentaContable.nivel == 8,
-            CuentaContable.clase.in_([1, 2]),
             CuentaContable.fiscal == False,
-        )
+            or_(
+                CuentaContable.clase == 2,
+                and_(
+                    CuentaContable.clase == 1,
+                    or_(
+                        CuentaContable.codigo.like("11%"),
+                        CuentaContable.codigo.like("12%"),
+                    )
+                )
+            )
+        ).order_by(CuentaContable.codigo)
     ).all()
 
     return [
