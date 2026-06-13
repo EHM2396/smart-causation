@@ -165,3 +165,25 @@ def generar_y_descargar(body: CausacionRequest, db: DB):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'},
     )
+
+
+@router.get("/historial", response_model=list[dict])
+def get_historial(db: DB, user: AuthUser):
+    """Lista todas las facturas causadas, ordenadas de más reciente a más antigua."""
+    from sqlalchemy import select
+    from db.models.contabilidad import FacturaCausada
+    rows = db.scalars(
+        select(FacturaCausada).order_by(
+            FacturaCausada.fecha_causacion.desc(),
+            FacturaCausada.id.desc()
+        )
+    ).all()
+    return [
+        {
+            "consecutivo": r.consecutivo,
+            "numero_dian": r.numero_dian,
+            "razon_social": r.razon_social,
+            "fecha_factura": str(r.fecha_factura) if r.fecha_factura else "",
+        }
+        for r in rows
+    ]

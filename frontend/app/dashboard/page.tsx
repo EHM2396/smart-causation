@@ -1,32 +1,32 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
-/**
- * Dashboard placeholder — redirige a onboarding si el usuario
- * aún no tiene organización asignada.
- */
 export default async function DashboardPage() {
-  const supabase = await createClient();
+  // Modo dev: saltar validaciones de Supabase
+  const devBypass = process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === "true";
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  let profileNombre: string | null = null;
 
-  // Verificar si ya completó onboarding
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("organization_id, nombre")
-    .eq("id", user.id)
-    .single();
+  if (!devBypass) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) redirect("/login");
 
-  if (!profile?.organization_id) {
-    redirect("/onboarding");
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("organization_id, nombre")
+      .eq("id", user.id)
+      .single();
+
+    if (!profile?.organization_id) redirect("/onboarding");
+    profileNombre = profile?.nombre ?? null;
   }
 
   return (
     <main className="min-h-screen bg-gray-950 text-white p-8">
       <div className="max-w-4xl mx-auto">
         <h1 className="text-3xl font-bold mb-2">
-          Hola{profile.nombre ? `, ${profile.nombre}` : ""} 👋
+          Hola{profileNombre ? `, ${profileNombre}` : ""} 👋
         </h1>
         <p className="text-gray-400 mb-8">
           Tu plataforma de causación contable inteligente
@@ -64,7 +64,7 @@ export default async function DashboardPage() {
           </a>
 
           <a
-            href="/catalogos/ia"
+            href="/catalogos/cuentas"
             className="block p-6 bg-gray-900 border border-gray-800 rounded-lg hover:border-blue-600 transition-colors"
           >
             <h2 className="text-xl font-semibold mb-1">🤖 Control IA</h2>

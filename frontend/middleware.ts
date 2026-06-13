@@ -2,9 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
 // Rutas que no requieren autenticación
-const PUBLIC_PATHS = ["/login", "/register", "/auth/callback"];
+const PUBLIC_PATHS = ["/", "/login", "/register", "/auth/callback"];
 
 export async function middleware(request: NextRequest) {
+  // Modo dev: saltar auth por completo
+  if (process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === "true") {
+    return NextResponse.next({ request });
+  }
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(

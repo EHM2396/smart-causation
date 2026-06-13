@@ -31,20 +31,41 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-siigo}:${POSTGRES_PASSWORD:-siigo_pass}@postgres:5432/${POSTGRES_DB:-siigo_db}
+      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
-      # Monta carpeta data para que la BD SQLite de aprendizaje persista
       - ./data:/app/data
-      # Monta archivos xlsx en modo sólo lectura
       - ./Cuentas_contables.xlsx:/app/Cuentas_contables.xlsx:ro
       - ./codigos_impuestos.xlsx:/app/codigos_impuestos.xlsx:ro
       - ./Tipos_comprobante_contable.xlsx:/app/Tipos_comprobante_contable.xlsx:ro
     ports:
       - "8000:8000"
-    # Ejecuta migraciones y luego arranca el servidor
     command: >
       sh -c "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port 8000"
 
-  # ── Streamlit Frontend ─────────────────────────────────────────────────────
+  # ── Next.js Frontend ───────────────────────────────────────────────────────
+  nextjs:
+    build:
+      context: .
+      dockerfile: Dockerfile.nextjs
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_DEV_AUTH_BYPASS: ${NEXT_PUBLIC_DEV_AUTH_BYPASS:-false}
+    container_name: siigo_nextjs
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_DEV_AUTH_BYPASS: ${NEXT_PUBLIC_DEV_AUTH_BYPASS:-false}
+    ports:
+      - "3000:3000"
+
+  # ── Streamlit Frontend (legado) ────────────────────────────────────────────
   streamlit:
     build:
       context: .
@@ -69,3 +90,4 @@ services:
 
 volumes:
   postgres_data:
+
