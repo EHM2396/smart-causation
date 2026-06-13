@@ -57,15 +57,29 @@ _init_state()
 def _dialog_nuevo_impuesto(tipo_prefill: str = "") -> None:
     """Modal para crear un nuevo CodigoImpuesto desde cualquier parte de la app."""
     st.markdown(f"**Tipo:** `{tipo_prefill or 'otro'}`")
+
+    with SessionLocal() as _db_dlg_ctas:
+        _todas_ctas = cuentas_service.listar_metodos_pago(_db_dlg_ctas) + cuentas_service.listar_cuentas_gasto(_db_dlg_ctas)
+    _OPTS_CTA_DLG     = [f"{c['codigo']} — {c['nombre']}" for c in _todas_ctas]
+    _OPTS_CTA_DLG_MAP = {f"{c['codigo']} — {c['nombre']}": c["codigo"] for c in _todas_ctas}
+
     col_a, col_b = st.columns(2)
     with col_a:
-        _imp_codigo  = st.text_input("Codigo SIIGO *", placeholder="ej. RETE1, RICA5")
-        _imp_tarifa  = st.number_input("Tarifa %", min_value=0.0, max_value=100.0, step=0.5, value=0.0)
+        _imp_codigo = st.text_input("Codigo SIIGO *", placeholder="ej. RETE1, RICA5")
+        _imp_tarifa = st.number_input("Tarifa %", min_value=0.0, max_value=100.0, step=0.5, value=0.0)
     with col_b:
-        _imp_nombre  = st.text_input("Nombre / descripcion", placeholder="ej. Retefuente servicios 1%")
-        _imp_cta_cre = st.text_input("Cuenta credito (PUC) *", placeholder="ej. 23650501")
+        _imp_nombre = st.text_input("Nombre / descripcion", placeholder="ej. Retefuente servicios 1%")
+        _sel_cta_cre = st.selectbox(
+            "Cuenta credito (PUC) *",
+            options=_OPTS_CTA_DLG,
+            index=None,
+            placeholder="Buscar por codigo o nombre...",
+            key="dlg_cta_cre",
+        )
+    _imp_cta_cre = _OPTS_CTA_DLG_MAP.get(_sel_cta_cre, "") if _sel_cta_cre else ""
+
     if st.button("Guardar", type="primary", key="dlg_save_imp"):
-        if not _imp_codigo.strip() or not _imp_cta_cre.strip():
+        if not _imp_codigo.strip() or not _imp_cta_cre:
             st.error("El codigo y la cuenta credito son obligatorios.")
         else:
             try:
@@ -79,7 +93,7 @@ def _dialog_nuevo_impuesto(tipo_prefill: str = "") -> None:
                             nombre        = _imp_nombre.strip() or None,
                             tipo_impuesto = tipo_prefill or None,
                             tarifa        = float(_imp_tarifa),
-                            cta_compras   = _imp_cta_cre.strip(),
+                            cta_compras   = _imp_cta_cre,
                         )
                         _db_dlg.commit()
                         st.success(f"Codigo **{_imp_codigo.strip()}** agregado correctamente.")
