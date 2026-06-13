@@ -365,190 +365,218 @@ with tab_caus:
                         st.warning("No se detectaron lineas de items para esta factura.")
                         continue
 
-                    sel_gasto_global = st.selectbox(
-                        "Cuenta gasto/costo para todos los items de esta factura",
-                        options=OPTS_GASTO,
-                        index=None,
-                        placeholder="Opcional: aplica una cuenta a todos los items...",
-                        key=f"cg_global_{idx_fac}",
-                    )
+                    # ── Configuracion global para toda la factura ────────────
+                    with st.container(border=True):
+                        st.caption("📋 **GLOBAL — aplica a todos los items de esta factura** · Deja en blanco para configurar cada item por separado")
+                        _gg1, _gg2, _gg3 = st.columns(3)
+                        with _gg1:
+                            sel_gasto_global = st.selectbox(
+                                "Cuenta gasto/costo",
+                                options=OPTS_GASTO,
+                                index=None,
+                                placeholder="Aplica a todos los items...",
+                                key=f"cg_global_{idx_fac}",
+                            )
+                        with _gg2:
+                            sel_retefuente_fac = st.selectbox(
+                                "Retefuente",
+                                options=list(OPTS_RETEFUENTE.keys()),
+                                index=None,
+                                placeholder="Buscar codigo retefuente...",
+                                key=f"retefuente_{idx_fac}",
+                            )
+                        with _gg3:
+                            sel_reteica_fac = st.selectbox(
+                                "ReteICA",
+                                options=list(OPTS_RETEICA.keys()),
+                                index=None,
+                                placeholder="Buscar codigo reteica...",
+                                key=f"reteica_{idx_fac}",
+                            )
                     cuenta_gasto_global = OPTS_GASTO_MAP.get(sel_gasto_global, "") if sel_gasto_global else ""
-
-                    # ── Retenciones a nivel de factura ────────────────────────
-                    _col_rf, _col_ri = st.columns(2)
-                    with _col_rf:
-                        sel_retefuente_fac = st.selectbox(
-                            "Codigo Retefuente (opcional)",
-                            options=list(OPTS_RETEFUENTE.keys()),
-                            index=None,
-                            placeholder="Buscar codigo retefuente...",
-                            key=f"retefuente_{idx_fac}",
-                        )
-                    with _col_ri:
-                        sel_reteica_fac = st.selectbox(
-                            "Codigo ReteICA (opcional)",
-                            options=list(OPTS_RETEICA.keys()),
-                            index=None,
-                            placeholder="Buscar codigo reteica...",
-                            key=f"reteica_{idx_fac}",
-                        )
+                    _ret_global_activa = bool(sel_retefuente_fac or sel_reteica_fac)
 
                     for idx_item, item in enumerate(factura["items"]):
-                        st.markdown(f"**Item {idx_item + 1}:** {item['descripcion']}")
-                        ci1, ci2, ci3, ci4 = st.columns([3, 2, 2, 2])
+                        with st.container(border=True):
+                            st.markdown(f"**📄 Item {idx_item + 1}:** {item['descripcion']}")
+                            ci1, ci2, ci3, ci4 = st.columns([3, 2, 2, 2])
 
-                        with ci1:
-                            with SessionLocal() as _db_map_item:
-                                cuenta_auto, sugerencias, fuente = _mapear_cuenta_gasto_db(
-                                    _db_map_item, factura["nit"], item["descripcion"]
-                                )
-                            if fuente == "aprendido":
-                                etiqueta = "Aprendido"
-                            elif fuente == "regla":
-                                etiqueta = "Regla"
-                            elif fuente == "sugerido":
-                                etiqueta = "Sugerido"
-                            else:
-                                etiqueta = "Manual"
-
-                            ia_sugerencia = None
-                            ia_preaplicada = False
-                            fuente_item = fuente
-
-                            # Fase 5: rollout por NIT — NULL o True = habilitado; False = excluido
-                            _ia_nit_ok = (
-                                proveedor_aprendido is None
-                                or proveedor_aprendido.ia_habilitada is not False
-                            )
-
-                            if (
-                                fuente == "manual"
-                                and not cuenta_gasto_global
-                                and ai_service.esta_disponible()
-                                and _ia_nit_ok
-                            ):
-                                ia_sugerencia = ai_service.sugerir(
-                                    item["descripcion"],
-                                    cuentas_gasto_disponibles,
-                                    impuestos_disponibles,
-                                    tipo_default,
-                                )
-                                if ia_sugerencia and ia_sugerencia.cuenta_gasto and ia_sugerencia.confianza_alta:
-                                    ia_preaplicada = True
-                                    fuente_item = "ia_alta"
-
-                            codigo_ref = (
-                                cuenta_gasto_global
-                                or (ia_sugerencia.cuenta_gasto if ia_preaplicada and ia_sugerencia else "")
-                                or cuenta_auto
-                                or (sugerencias[0]["codigo"] if sugerencias else "")
-                            )
-                            idx_gasto_default = None
-                            if codigo_ref:
-                                label_ref = next(
-                                    (k for k in OPTS_GASTO_MAP if OPTS_GASTO_MAP[k] == codigo_ref), None
-                                )
-                                if label_ref and label_ref in OPTS_GASTO:
-                                    idx_gasto_default = OPTS_GASTO.index(label_ref)
-
-                            sel_gasto = st.selectbox(
-                                f"Cuenta gasto/costo ({etiqueta}) — buscar por codigo o nombre",
-                                options=OPTS_GASTO,
-                                index=idx_gasto_default,
-                                placeholder="Escribe para buscar...",
-                                key=f"cg_{idx_fac}_{idx_item}",
-                            )
-
-                            if ia_sugerencia and ia_sugerencia.cuenta_gasto:
-                                _ia_lbl = next(
-                                    (k for k in OPTS_GASTO_MAP if OPTS_GASTO_MAP[k] == ia_sugerencia.cuenta_gasto),
-                                    ia_sugerencia.cuenta_gasto,
-                                )
-                                if ia_preaplicada:
-                                    st.caption(
-                                        f"\U0001f916 IA preselecciono: **{_ia_lbl}** "
-                                        f"({ia_sugerencia.confianza:.0%}) — {ia_sugerencia.explicacion}"
+                            with ci1:
+                                with SessionLocal() as _db_map_item:
+                                    cuenta_auto, sugerencias, fuente = _mapear_cuenta_gasto_db(
+                                        _db_map_item, factura["nit"], item["descripcion"]
                                     )
+                                if fuente == "aprendido":
+                                    etiqueta = "Aprendido"
+                                elif fuente == "regla":
+                                    etiqueta = "Regla"
+                                elif fuente == "sugerido":
+                                    etiqueta = "Sugerido"
                                 else:
-                                    st.caption(
-                                        f"\U0001f4a1 IA sugiere: **{_ia_lbl}** "
-                                        f"({ia_sugerencia.confianza:.0%}) — {ia_sugerencia.explicacion}"
-                                    )
+                                    etiqueta = "Manual"
 
-                            cuenta_gasto_final = cuenta_gasto_global or (OPTS_GASTO_MAP.get(sel_gasto, "") if sel_gasto else "")
-                            hay_pendientes = hay_pendientes or not cuenta_gasto_final
+                                ia_sugerencia = None
+                                ia_preaplicada = False
+                                fuente_item = fuente
 
-                        with ci2:
-                            st.metric("Base", f"${item['base']:,.0f}")
+                                # Fase 5: rollout por NIT — NULL o True = habilitado; False = excluido
+                                _ia_nit_ok = (
+                                    proveedor_aprendido is None
+                                    or proveedor_aprendido.ia_habilitada is not False
+                                )
 
-                        with ci3:
-                            cod_imp_aprendido = ""
-                            if not item.get("cod_impuesto"):
-                                with SessionLocal() as _db_imp_learn:
-                                    cod_imp_aprendido = aprendizaje_service.obtener_cod_impuesto(
-                                        _db_imp_learn,
-                                        factura.get("nit"),
+                                if (
+                                    fuente == "manual"
+                                    and not cuenta_gasto_global
+                                    and ai_service.esta_disponible()
+                                    and _ia_nit_ok
+                                ):
+                                    ia_sugerencia = ai_service.sugerir(
                                         item["descripcion"],
-                                    ) or ""
+                                        cuentas_gasto_disponibles,
+                                        impuestos_disponibles,
+                                        tipo_default,
+                                    )
+                                    if ia_sugerencia and ia_sugerencia.cuenta_gasto and ia_sugerencia.confianza_alta:
+                                        ia_preaplicada = True
+                                        fuente_item = "ia_alta"
 
-                            cod_imp_item = item.get("cod_impuesto", "") or cod_imp_aprendido
-                            cod_imp_ia = ia_sugerencia.cod_impuesto if ia_preaplicada and ia_sugerencia else ""
-                            cod_imp_inicial = cod_imp_item or cod_imp_ia
-                            with SessionLocal() as _db_bi:
-                                imp_info = impuestos_service.buscar_como_dict(_db_bi, cod_imp_inicial) if cod_imp_inicial else None
+                                codigo_ref = (
+                                    cuenta_gasto_global
+                                    or (ia_sugerencia.cuenta_gasto if ia_preaplicada and ia_sugerencia else "")
+                                    or cuenta_auto
+                                    or (sugerencias[0]["codigo"] if sugerencias else "")
+                                )
+                                idx_gasto_default = None
+                                if codigo_ref:
+                                    label_ref = next(
+                                        (k for k in OPTS_GASTO_MAP if OPTS_GASTO_MAP[k] == codigo_ref), None
+                                    )
+                                    if label_ref and label_ref in OPTS_GASTO:
+                                        idx_gasto_default = OPTS_GASTO.index(label_ref)
 
-                            if imp_info:
-                                cod_imp_final = imp_info["cod"]
-                                pct_final = imp_info["porcentaje"]
-                                cuenta_imp_d = imp_info["cuenta_debito"]
-                                cuenta_imp_c = imp_info["cuenta_credito"]
-                                es_retencion = any(
-                                    t in imp_info.get("naturaleza", "").lower()
-                                    for t in ("retefuente", "reteica", "reteiva")
+                                sel_gasto = st.selectbox(
+                                    f"Cuenta gasto/costo ({etiqueta}) — buscar por codigo o nombre",
+                                    options=OPTS_GASTO,
+                                    index=idx_gasto_default,
+                                    placeholder="Escribe para buscar...",
+                                    key=f"cg_{idx_fac}_{idx_item}",
                                 )
-                                st.text_input(
-                                    "Cod. impuesto (auto)",
-                                    value=f"{cod_imp_final} — {imp_info['naturaleza']} {pct_final}%",
-                                    disabled=True,
-                                    key=f"imp_{idx_fac}_{idx_item}",
-                                )
-                                if cod_imp_aprendido and cod_imp_final == cod_imp_aprendido:
-                                    st.caption("Impuesto autocompletado desde aprendizaje historico")
-                            else:
-                                hay_pendientes = True
-                                if opciones_impuestos:
-                                    imp_sel_default = next(
-                                        (k for k, v in opciones_impuestos.items() if v == cod_imp_ia),
-                                        None,
+
+                                if ia_sugerencia and ia_sugerencia.cuenta_gasto:
+                                    _ia_lbl = next(
+                                        (k for k in OPTS_GASTO_MAP if OPTS_GASTO_MAP[k] == ia_sugerencia.cuenta_gasto),
+                                        ia_sugerencia.cuenta_gasto,
                                     )
-                                    idx_imp_default = (
-                                        list(opciones_impuestos.keys()).index(imp_sel_default)
-                                        if imp_sel_default in opciones_impuestos
-                                        else None
+                                    if ia_preaplicada:
+                                        st.caption(
+                                            f"\U0001f916 IA preselecciono: **{_ia_lbl}** "
+                                            f"({ia_sugerencia.confianza:.0%}) — {ia_sugerencia.explicacion}"
+                                        )
+                                    else:
+                                        st.caption(
+                                            f"\U0001f4a1 IA sugiere: **{_ia_lbl}** "
+                                            f"({ia_sugerencia.confianza:.0%}) — {ia_sugerencia.explicacion}"
+                                        )
+
+                                cuenta_gasto_final = cuenta_gasto_global or (OPTS_GASTO_MAP.get(sel_gasto, "") if sel_gasto else "")
+                                hay_pendientes = hay_pendientes or not cuenta_gasto_final
+
+                            with ci2:
+                                st.metric("Base", f"${item['base']:,.0f}")
+
+                            with ci3:
+                                cod_imp_aprendido = ""
+                                if not item.get("cod_impuesto"):
+                                    with SessionLocal() as _db_imp_learn:
+                                        cod_imp_aprendido = aprendizaje_service.obtener_cod_impuesto(
+                                            _db_imp_learn,
+                                            factura.get("nit"),
+                                            item["descripcion"],
+                                        ) or ""
+
+                                cod_imp_item = item.get("cod_impuesto", "") or cod_imp_aprendido
+                                cod_imp_ia = ia_sugerencia.cod_impuesto if ia_preaplicada and ia_sugerencia else ""
+                                cod_imp_inicial = cod_imp_item or cod_imp_ia
+                                with SessionLocal() as _db_bi:
+                                    imp_info = impuestos_service.buscar_como_dict(_db_bi, cod_imp_inicial) if cod_imp_inicial else None
+
+                                if imp_info:
+                                    cod_imp_final = imp_info["cod"]
+                                    pct_final = imp_info["porcentaje"]
+                                    cuenta_imp_d = imp_info["cuenta_debito"]
+                                    cuenta_imp_c = imp_info["cuenta_credito"]
+                                    es_retencion = any(
+                                        t in imp_info.get("naturaleza", "").lower()
+                                        for t in ("retefuente", "reteica", "reteiva")
                                     )
-                                    imp_sel = st.selectbox(
-                                        "Cod. impuesto (seleccionar)",
-                                        options=list(opciones_impuestos.keys()),
-                                        index=idx_imp_default,
-                                        placeholder="Escribe para buscar...",
-                                        key=f"imp_sel_{idx_fac}_{idx_item}",
+                                    st.text_input(
+                                        "Cod. impuesto (auto)",
+                                        value=f"{cod_imp_final} — {imp_info['naturaleza']} {pct_final}%",
+                                        disabled=True,
+                                        key=f"imp_{idx_fac}_{idx_item}",
                                     )
-                                    cod_imp_final = opciones_impuestos.get(imp_sel, "") if imp_sel else ""
+                                    if cod_imp_aprendido and cod_imp_final == cod_imp_aprendido:
+                                        st.caption("Impuesto autocompletado desde aprendizaje historico")
                                 else:
-                                    cod_imp_final = st.text_input(
-                                        "Cod. impuesto (manual)",
-                                        value=cod_imp_item or "",
-                                        key=f"imp_man_{idx_fac}_{idx_item}",
-                                    )
-                                with SessionLocal() as _db_bi2:
-                                    imp_info2 = impuestos_service.buscar_como_dict(_db_bi2, cod_imp_final) if cod_imp_final else None
-                                pct_final = imp_info2["porcentaje"] if imp_info2 else item.get("porcentaje", 0)
-                                cuenta_imp_d = imp_info2["cuenta_debito"] if imp_info2 else ""
-                                cuenta_imp_c = imp_info2["cuenta_credito"] if imp_info2 else ""
-                                es_retencion = bool(imp_info2 and "ret" in imp_info2.get("naturaleza", "").lower())
+                                    hay_pendientes = True
+                                    if opciones_impuestos:
+                                        imp_sel_default = next(
+                                            (k for k, v in opciones_impuestos.items() if v == cod_imp_ia),
+                                            None,
+                                        )
+                                        idx_imp_default = (
+                                            list(opciones_impuestos.keys()).index(imp_sel_default)
+                                            if imp_sel_default in opciones_impuestos
+                                            else None
+                                        )
+                                        imp_sel = st.selectbox(
+                                            "Cod. impuesto (seleccionar)",
+                                            options=list(opciones_impuestos.keys()),
+                                            index=idx_imp_default,
+                                            placeholder="Escribe para buscar...",
+                                            key=f"imp_sel_{idx_fac}_{idx_item}",
+                                        )
+                                        cod_imp_final = opciones_impuestos.get(imp_sel, "") if imp_sel else ""
+                                    else:
+                                        cod_imp_final = st.text_input(
+                                            "Cod. impuesto (manual)",
+                                            value=cod_imp_item or "",
+                                            key=f"imp_man_{idx_fac}_{idx_item}",
+                                        )
+                                    with SessionLocal() as _db_bi2:
+                                        imp_info2 = impuestos_service.buscar_como_dict(_db_bi2, cod_imp_final) if cod_imp_final else None
+                                    pct_final = imp_info2["porcentaje"] if imp_info2 else item.get("porcentaje", 0)
+                                    cuenta_imp_d = imp_info2["cuenta_debito"] if imp_info2 else ""
+                                    cuenta_imp_c = imp_info2["cuenta_credito"] if imp_info2 else ""
+                                    es_retencion = bool(imp_info2 and "ret" in imp_info2.get("naturaleza", "").lower())
 
-                        with ci4:
-                            st.metric("Valor impuesto", f"${item.get('valor_impuesto', 0):,.0f}")
+                            with ci4:
+                                st.metric("Valor impuesto", f"${item.get('valor_impuesto', 0):,.0f}")
+
+                            # ── Retenciones por item ──────────────────────────
+                            if _ret_global_activa:
+                                st.caption("↑ Retencion global de factura activa — los selectores por item estan deshabilitados.")
+                                sel_rf_item = None
+                                sel_ri_item = None
+                            else:
+                                _crf, _cri = st.columns(2)
+                                with _crf:
+                                    sel_rf_item = st.selectbox(
+                                        "Retefuente (solo este item)",
+                                        options=list(OPTS_RETEFUENTE.keys()),
+                                        index=None,
+                                        placeholder="Buscar codigo retefuente...",
+                                        key=f"rf_{idx_fac}_{idx_item}",
+                                    )
+                                with _cri:
+                                    sel_ri_item = st.selectbox(
+                                        "ReteICA (solo este item)",
+                                        options=list(OPTS_RETEICA.keys()),
+                                        index=None,
+                                        placeholder="Buscar codigo reteica...",
+                                        key=f"ri_{idx_fac}_{idx_item}",
+                                    )
 
                         mapeos_sesion.append({
                             "idx_factura":        idx_fac,
@@ -573,9 +601,55 @@ with tab_caus:
                             "cuenta_pago":        cuenta_pago_fac,
                             "cuenta_pago_nombre": cuenta_pago_nombre_fac,
                         })
-                        st.divider()
 
-                    # ── Retenciones de factura (Retefuente / ReteICA) ─────────
+                        # ── Retenciones individuales del item ─────────────────
+                        if sel_rf_item and OPTS_RETEFUENTE.get(sel_rf_item):
+                            _rf_i = OPTS_RETEFUENTE[sel_rf_item]
+                            _rf_i_valor = round(float(item.get("base", 0) or 0) * float(_rf_i["porcentaje"]) / 100, 2)
+                            mapeos_sesion.append({
+                                "idx_factura":         idx_fac,
+                                "descripcion":         f"Retefuente {_rf_i['porcentaje']}% — {item['descripcion'][:60]}",
+                                "base":                float(item.get("base", 0) or 0),
+                                "cod_impuesto":        _rf_i["cod"],
+                                "porcentaje":          _rf_i["porcentaje"],
+                                "valor_impuesto":      _rf_i_valor,
+                                "cuenta_gasto":        "",
+                                "cuenta_sugerida":     None,
+                                "fuente":              "manual",
+                                "ia_confianza":        None,
+                                "ia_explicacion":      None,
+                                "ia_modelo":           None,
+                                "cuenta_impuesto_deb": "",
+                                "cuenta_impuesto_cre": _rf_i["cuenta_credito"],
+                                "es_retencion":        True,
+                                "cuenta_pago":         cuenta_pago_fac,
+                                "cuenta_pago_nombre":  cuenta_pago_nombre_fac,
+                            })
+
+                        if sel_ri_item and OPTS_RETEICA.get(sel_ri_item):
+                            _ri_i = OPTS_RETEICA[sel_ri_item]
+                            _ri_i_valor = round(float(item.get("base", 0) or 0) * float(_ri_i["porcentaje"]) / 100, 2)
+                            mapeos_sesion.append({
+                                "idx_factura":         idx_fac,
+                                "descripcion":         f"ReteICA {_ri_i['porcentaje']}% — {item['descripcion'][:60]}",
+                                "base":                float(item.get("base", 0) or 0),
+                                "cod_impuesto":        _ri_i["cod"],
+                                "porcentaje":          _ri_i["porcentaje"],
+                                "valor_impuesto":      _ri_i_valor,
+                                "cuenta_gasto":        "",
+                                "cuenta_sugerida":     None,
+                                "fuente":              "manual",
+                                "ia_confianza":        None,
+                                "ia_explicacion":      None,
+                                "ia_modelo":           None,
+                                "cuenta_impuesto_deb": "",
+                                "cuenta_impuesto_cre": _ri_i["cuenta_credito"],
+                                "es_retencion":        True,
+                                "cuenta_pago":         cuenta_pago_fac,
+                                "cuenta_pago_nombre":  cuenta_pago_nombre_fac,
+                            })
+
+                    # ── Retenciones globales de factura ───────────────────────
                     _total_base_fac = sum(float(it.get("base", 0) or 0) for it in factura.get("items", []))
 
                     if sel_retefuente_fac and OPTS_RETEFUENTE.get(sel_retefuente_fac):
