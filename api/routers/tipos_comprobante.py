@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from api.schemas import TipoComprobanteCreate, TipoComprobanteOut
+from api.deps import AuthUser
 from db.session import get_db
 from services import tipos_service
 
@@ -17,12 +18,12 @@ DB = Annotated[Session, Depends(get_db)]
 
 
 @router.get("/", response_model=list[TipoComprobanteOut])
-def get_tipos(db: DB):
+def get_tipos(db: DB, user: AuthUser):
     return tipos_service.listar_todos(db)
 
 
 @router.get("/opciones", response_model=list[dict])
-def get_opciones(db: DB):
+def get_opciones(db: DB, user: AuthUser):
     """Formato compacto {codigo, titulo, label} para la UI."""
     return tipos_service.listar_como_opciones(db)
 

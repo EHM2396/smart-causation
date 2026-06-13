@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routers import (
+    auth_router,
     aprendizaje_router,
     causacion_router,
     cuentas_router,
@@ -45,11 +46,16 @@ app = FastAPI(
 # ── CORS ──────────────────────────────────────────────────────────────────────
 # Ajustar origins en producción; aquí se permite localhost para Streamlit.
 # CORS configurable por variable de entorno (CSV), con fallback local.
+# ── CORS — incluir Vercel en producción ──────────────────────────────────────
 cors_origins_env = os.getenv("CORS_ORIGINS", "").strip()
 if cors_origins_env:
     cors_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
 else:
-    cors_origins = ["http://localhost:8501", "http://127.0.0.1:8501"]
+    cors_origins = [
+        "http://localhost:3000",       # Next.js dev
+        "http://localhost:8501",       # Streamlit dev
+        "https://smart-causation.vercel.app",  # Vercel prod
+    ]
 
 app.add_middleware(
     CORSMiddleware,
@@ -60,6 +66,7 @@ app.add_middleware(
 )
 
 # ── Routers ───────────────────────────────────────────────────────────────────
+app.include_router(auth_router)        # público: /auth/setup-organization, /auth/me
 app.include_router(cuentas_router)
 app.include_router(impuestos_router)
 app.include_router(tipos_router)

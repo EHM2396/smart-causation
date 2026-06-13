@@ -17,6 +17,7 @@ from api.schemas import (
     SugerenciaRequest,
     SugerenciaResponse,
 )
+from api.deps import AuthUser
 from db.session import get_db
 from services import causacion_service
 
@@ -27,6 +28,7 @@ DB = Annotated[Session, Depends(get_db)]
 
 @router.post("/parsear", response_model=list[dict])
 async def parsear_facturas(
+    user: AuthUser,
     archivo: UploadFile = File(..., description="Archivo XLSX de facturas DIAN"),
 ):
     """
@@ -42,7 +44,7 @@ async def parsear_facturas(
 
 
 @router.post("/sugerir-cuenta", response_model=SugerenciaResponse)
-def sugerir_cuenta(body: SugerenciaRequest, db: DB):
+def sugerir_cuenta(body: SugerenciaRequest, db: DB, user: AuthUser):
     """
     Dado un NIT y una descripción de ítem, sugiere la cuenta de gasto PUC.
     Consulta reglas de clasificación y mapeos aprendidos.
@@ -59,7 +61,7 @@ def sugerir_cuenta(body: SugerenciaRequest, db: DB):
 
 
 @router.post("/generar", response_model=CausacionResponse)
-def generar_causacion(body: CausacionRequest, db: DB):
+def generar_causacion(body: CausacionRequest, db: DB, user: AuthUser):
     """
     Paso final: genera el archivo SIIGO y registra la causación.
     Retorna metadatos; el archivo se descarga por /causacion/descargar/{numero_dian}.

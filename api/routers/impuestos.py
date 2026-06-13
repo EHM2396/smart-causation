@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from api.schemas import ImpuestoCreate, ImpuestoOut
+from api.deps import AuthUser
 from db.session import get_db
 from services import impuestos_service
 
@@ -17,12 +18,12 @@ DB = Annotated[Session, Depends(get_db)]
 
 
 @router.get("/", response_model=list[ImpuestoOut])
-def get_impuestos(db: DB):
+def get_impuestos(db: DB, user: AuthUser):
     return impuestos_service.listar_todos(db)
 
 
 @router.get("/{codigo}", response_model=ImpuestoOut)
-def get_impuesto(codigo: str, db: DB):
+def get_impuesto(codigo: str, db: DB, user: AuthUser):
     imp = impuestos_service.buscar_por_codigo(db, codigo)
     if not imp:
         raise HTTPException(404, f"Impuesto {codigo!r} no encontrado")

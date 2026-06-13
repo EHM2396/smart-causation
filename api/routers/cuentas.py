@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from api.schemas import CuentaCreate, CuentaOpcion, CuentaOut
+from api.deps import AuthUser
 from db.session import get_db
 from services import cuentas_service
 
@@ -17,13 +18,13 @@ DB = Annotated[Session, Depends(get_db)]
 
 
 @router.get("/gasto", response_model=list[CuentaOpcion])
-def get_cuentas_gasto(db: DB):
+def get_cuentas_gasto(db: DB, user: AuthUser):
     """Cuentas de gastos y costos (clases 5/6/7, 8 dígitos, sin fiscal)."""
     return cuentas_service.listar_cuentas_gasto(db)
 
 
 @router.get("/pago", response_model=list[CuentaOpcion])
-def get_metodos_pago(db: DB):
+def get_metodos_pago(db: DB, user: AuthUser):
     """Cuentas de activo/pasivo (clases 1/2, 8 dígitos, sin fiscal)."""
     return cuentas_service.listar_metodos_pago(db)
 
@@ -32,6 +33,7 @@ def get_metodos_pago(db: DB):
 def get_sugerencias(
     descripcion: Annotated[str, Query(min_length=3)],
     db: DB,
+    user: AuthUser,
     max: int = 3,
 ):
     """Busca cuentas PUC por palabras clave en la descripción del ítem."""
@@ -39,7 +41,7 @@ def get_sugerencias(
 
 
 @router.get("/{codigo}", response_model=CuentaOut)
-def get_cuenta(codigo: str, db: DB):
+def get_cuenta(codigo: str, db: DB, user: AuthUser):
     cuenta = cuentas_service.buscar_por_codigo(db, codigo)
     if not cuenta:
         raise HTTPException(404, f"Cuenta {codigo!r} no encontrada")
@@ -47,7 +49,7 @@ def get_cuenta(codigo: str, db: DB):
 
 
 @router.post("/", response_model=CuentaOut, status_code=201)
-def post_cuenta(body: CuentaCreate, db: DB):
+def post_cuenta(body: CuentaCreate, db: DB, user: AuthUser):
     if cuentas_service.buscar_por_codigo(db, body.codigo):
         raise HTTPException(409, f"El código {body.codigo!r} ya existe")
     cuenta = cuentas_service.crear_cuenta(

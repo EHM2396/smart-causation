@@ -1,3 +1,4 @@
+from api.routers.auth import router as auth_router                    # noqa: F401
 from api.routers.cuentas import router as cuentas_router              # noqa: F401
 from api.routers.impuestos import router as impuestos_router          # noqa: F401
 from api.routers.tipos_comprobante import router as tipos_router      # noqa: F401

@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.schemas import DecisionOut, ReglaCreate, ReglaOut
+from api.deps import AuthUser
 from db.models.aprendizaje import HistorialDecision, ReglaClasificacion
 from db.session import get_db
 from services import aprendizaje_service
@@ -21,7 +22,7 @@ DB = Annotated[Session, Depends(get_db)]
 # ── Reglas de clasificación ────────────────────────────────────────────────────
 
 @router.get("/reglas", response_model=list[ReglaOut])
-def get_reglas(db: DB, solo_activas: bool = True):
+def get_reglas(db: DB, user: AuthUser, solo_activas: bool = True):
     stmt = select(ReglaClasificacion).order_by(
         ReglaClasificacion.prioridad.desc()
     )
@@ -31,7 +32,7 @@ def get_reglas(db: DB, solo_activas: bool = True):
 
 
 @router.post("/reglas", response_model=ReglaOut, status_code=201)
-def post_regla(body: ReglaCreate, db: DB):
+def post_regla(body: ReglaCreate, db: DB, user: AuthUser):
     regla = aprendizaje_service.crear_regla(db, **body.model_dump())
     db.commit()
     return regla
@@ -42,6 +43,7 @@ def post_regla(body: ReglaCreate, db: DB):
 @router.get("/historial", response_model=list[DecisionOut])
 def get_historial(
     db: DB,
+    user: AuthUser,
     nit: Annotated[str | None, Query()] = None,
     solo_corregidas: bool = False,
     limit: int = 100,
