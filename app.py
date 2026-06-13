@@ -53,6 +53,41 @@ def _init_state():
 _init_state()
 
 
+@st.dialog("Agregar codigo de impuesto")
+def _dialog_nuevo_impuesto(tipo_prefill: str = "") -> None:
+    """Modal para crear un nuevo CodigoImpuesto desde cualquier parte de la app."""
+    st.markdown(f"**Tipo:** `{tipo_prefill or 'otro'}`")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        _imp_codigo  = st.text_input("Codigo SIIGO *", placeholder="ej. RETE1, RICA5")
+        _imp_tarifa  = st.number_input("Tarifa %", min_value=0.0, max_value=100.0, step=0.5, value=0.0)
+    with col_b:
+        _imp_nombre  = st.text_input("Nombre / descripcion", placeholder="ej. Retefuente servicios 1%")
+        _imp_cta_cre = st.text_input("Cuenta credito (PUC) *", placeholder="ej. 23650501")
+    if st.button("Guardar", type="primary", key="dlg_save_imp"):
+        if not _imp_codigo.strip() or not _imp_cta_cre.strip():
+            st.error("El codigo y la cuenta credito son obligatorios.")
+        else:
+            try:
+                with SessionLocal() as _db_dlg:
+                    if impuestos_service.buscar_por_codigo(_db_dlg, _imp_codigo.strip()):
+                        st.error(f"El codigo **{_imp_codigo.strip()}** ya existe.")
+                    else:
+                        impuestos_service.crear_impuesto(
+                            _db_dlg,
+                            codigo        = _imp_codigo.strip(),
+                            nombre        = _imp_nombre.strip() or None,
+                            tipo_impuesto = tipo_prefill or None,
+                            tarifa        = float(_imp_tarifa),
+                            cta_compras   = _imp_cta_cre.strip(),
+                        )
+                        _db_dlg.commit()
+                        st.success(f"Codigo **{_imp_codigo.strip()}** agregado correctamente.")
+                        st.rerun()
+            except Exception as _dlg_err:
+                st.error(f"Error al guardar: {_dlg_err}")
+
+
 def _mapear_cuenta_gasto_db(db, nit: str, descripcion: str) -> tuple[str | None, list[dict], str]:
     cuenta_regla = aprendizaje_service.aplicar_reglas(db, descripcion)
     if cuenta_regla:
@@ -132,11 +167,20 @@ with st.sidebar:
         tipos_comp = tipos_service.listar_como_opciones(_db_sid)
     if tipos_comp:
         opciones_tipos = [f"{t['codigo']} - {t['titulo']}" for t in tipos_comp]
-        sel_tipo = st.selectbox("Tipo de comprobante", opciones_tipos, key="sel_tipo_comp")
-        tipo_comp = sel_tipo.split(" - ")[0].strip()
+        sel_tipo = st.selectbox(
+            "Tipo de comprobante",
+            opciones_tipos,
+            index=None,
+            placeholder="Selecciona un tipo...",
+            key="sel_tipo_comp",
+        )
+        tipo_comp = sel_tipo.split(" - ")[0].strip() if sel_tipo else ""
     else:
-        tipo_comp = st.text_input("Tipo de comprobante (codigo SIIGO)", value="12", max_chars=6)
+        tipo_comp = st.text_input("Tipo de comprobante (codigo SIIGO)", value="", max_chars=6)
         st.caption("Agrega tipos en la pestana Catalogos base.")
+
+    if not tipo_comp:
+        st.warning("⚠️ Selecciona el tipo de comprobante para continuar.")
 
     with SessionLocal() as _db_consec_sidebar:
         ultimo_guardado = consecutivos_service.get_ultimo(_db_consec_sidebar, tipo_comp)
@@ -243,6 +287,28 @@ with tab_caus:
 
         opciones_impuestos = {f"{i['cod']} ({i['porcentaje']}%)": i["cod"] for i in impuestos_disponibles}
 
+        OPTS_RETEFUENTE = {
+            f"{i['cod']} — {i['naturaleza']} {i['porcentaje']}%": i
+            for i in impuestos_disponibles
+            if "retefuente" in (i.get("naturaleza") or "").lower()
+        }
+        OPTS_RETEICA = {
+            f"{i['cod']} — {i['naturaleza']} {i['porcentaje']}%": i
+            for i in impuestos_disponibles
+            if "reteica" in (i.get("naturaleza") or "").lower()
+        }
+
+        # Botones para agregar codigos de retencion sin salir del flujo
+        _rc0, _rc1, _rc2 = st.columns([4, 1, 1])
+        with _rc0:
+            st.caption("¿No encuentras un codigo de retencion? Agrega uno antes de llenar el formulario.")
+        with _rc1:
+            if st.button("＋ Retefuente", use_container_width=True, key="open_dlg_rf"):
+                _dialog_nuevo_impuesto("Retefuente")
+        with _rc2:
+            if st.button("＋ ReteICA", use_container_width=True, key="open_dlg_ri"):
+                _dialog_nuevo_impuesto("ReteICA")
+
         with st.form("form_mapeo_cuentas"):
             mapeos_sesion: list[dict] = []
             hay_pendientes = False
@@ -307,6 +373,25 @@ with tab_caus:
                         key=f"cg_global_{idx_fac}",
                     )
                     cuenta_gasto_global = OPTS_GASTO_MAP.get(sel_gasto_global, "") if sel_gasto_global else ""
+
+                    # ── Retenciones a nivel de factura ────────────────────────
+                    _col_rf, _col_ri = st.columns(2)
+                    with _col_rf:
+                        sel_retefuente_fac = st.selectbox(
+                            "Codigo Retefuente (opcional)",
+                            options=list(OPTS_RETEFUENTE.keys()),
+                            index=None,
+                            placeholder="Buscar codigo retefuente...",
+                            key=f"retefuente_{idx_fac}",
+                        )
+                    with _col_ri:
+                        sel_reteica_fac = st.selectbox(
+                            "Codigo ReteICA (opcional)",
+                            options=list(OPTS_RETEICA.keys()),
+                            index=None,
+                            placeholder="Buscar codigo reteica...",
+                            key=f"reteica_{idx_fac}",
+                        )
 
                     for idx_item, item in enumerate(factura["items"]):
                         st.markdown(f"**Item {idx_item + 1}:** {item['descripcion']}")
@@ -490,13 +575,65 @@ with tab_caus:
                         })
                         st.divider()
 
+                    # ── Retenciones de factura (Retefuente / ReteICA) ─────────
+                    _total_base_fac = sum(float(it.get("base", 0) or 0) for it in factura.get("items", []))
+
+                    if sel_retefuente_fac and OPTS_RETEFUENTE.get(sel_retefuente_fac):
+                        _rf = OPTS_RETEFUENTE[sel_retefuente_fac]
+                        _rf_valor = round(_total_base_fac * float(_rf["porcentaje"]) / 100, 2)
+                        mapeos_sesion.append({
+                            "idx_factura":         idx_fac,
+                            "descripcion":         f"Retefuente {_rf['porcentaje']}%",
+                            "base":                _total_base_fac,
+                            "cod_impuesto":        _rf["cod"],
+                            "porcentaje":          _rf["porcentaje"],
+                            "valor_impuesto":      _rf_valor,
+                            "cuenta_gasto":        "",
+                            "cuenta_sugerida":     None,
+                            "fuente":              "manual",
+                            "ia_confianza":        None,
+                            "ia_explicacion":      None,
+                            "ia_modelo":           None,
+                            "cuenta_impuesto_deb": "",
+                            "cuenta_impuesto_cre": _rf["cuenta_credito"],
+                            "es_retencion":        True,
+                            "cuenta_pago":         cuenta_pago_fac,
+                            "cuenta_pago_nombre":  cuenta_pago_nombre_fac,
+                        })
+
+                    if sel_reteica_fac and OPTS_RETEICA.get(sel_reteica_fac):
+                        _ri = OPTS_RETEICA[sel_reteica_fac]
+                        _ri_valor = round(_total_base_fac * float(_ri["porcentaje"]) / 100, 2)
+                        mapeos_sesion.append({
+                            "idx_factura":         idx_fac,
+                            "descripcion":         f"ReteICA {_ri['porcentaje']}%",
+                            "base":                _total_base_fac,
+                            "cod_impuesto":        _ri["cod"],
+                            "porcentaje":          _ri["porcentaje"],
+                            "valor_impuesto":      _ri_valor,
+                            "cuenta_gasto":        "",
+                            "cuenta_sugerida":     None,
+                            "fuente":              "manual",
+                            "ia_confianza":        None,
+                            "ia_explicacion":      None,
+                            "ia_modelo":           None,
+                            "cuenta_impuesto_deb": "",
+                            "cuenta_impuesto_cre": _ri["cuenta_credito"],
+                            "es_retencion":        True,
+                            "cuenta_pago":         cuenta_pago_fac,
+                            "cuenta_pago_nombre":  cuenta_pago_nombre_fac,
+                        })
+
             btn_label = "Validar partida doble" if not hay_pendientes else "Validar (hay campos pendientes)"
             validar_mapeo = st.form_submit_button(btn_label, type="primary")
 
         if validar_mapeo:
-            st.session_state["mapeos"] = mapeos_sesion
-            st.session_state["paso"] = 3
-            st.rerun()
+            if not tipo_comp:
+                st.error("⚠️ Debes seleccionar el **Tipo de comprobante** en la barra lateral antes de validar.")
+            else:
+                st.session_state["mapeos"] = mapeos_sesion
+                st.session_state["paso"] = 3
+                st.rerun()
 
     # Paso 3: Validacion
     if st.session_state["paso"] >= 3 and st.session_state["mapeos"]:
