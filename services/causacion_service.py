@@ -149,6 +149,7 @@ def registrar_factura_causada(
     consecutivo: int,
     tipo_comprobante: str,
     archivo_origen: str = "",
+    datos_json: str | None = None,
 ) -> FacturaCausada:
     numero = factura.get("numero_dian") or factura.get("numero_factura", "")
     hoy = date.today()
@@ -163,6 +164,7 @@ def registrar_factura_causada(
         tipo_comprobante=tipo_comprobante,
         fecha_causacion=hoy,
         archivo_origen=archivo_origen,
+        datos_json=datos_json,
     )
     db.add(fc)
     db.flush()
