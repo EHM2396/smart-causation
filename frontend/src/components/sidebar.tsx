@@ -1,11 +1,12 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FileSpreadsheet, BookOpen, Zap } from "lucide-react";
+import { FileSpreadsheet, BookOpen, History, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/causacion", icon: FileSpreadsheet, label: "Causación", desc: "Procesar facturas DIAN" },
+  { href: "/historial", icon: History, label: "Historial", desc: "Facturas causadas" },
   { href: "/catalogos", icon: BookOpen, label: "Catálogos", desc: "Impuestos, PUC, comprobantes" },
 ];
 

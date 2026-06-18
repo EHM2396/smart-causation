@@ -107,8 +107,45 @@ export const api = {
     return res.blob();
   },
 
-  // Historial
-  getHistorial: () => req<HistorialItem[]>("/causacion/historial"),
+  // Historial de causaciones
+  getHistorial: (params?: { fechaDesde?: string; fechaHasta?: string; buscar?: string }) => {
+    const qp = new URLSearchParams();
+    if (params?.fechaDesde) qp.set("fecha_desde", params.fechaDesde);
+    if (params?.fechaHasta) qp.set("fecha_hasta", params.fechaHasta);
+    if (params?.buscar) qp.set("buscar", params.buscar);
+    const qs = qp.toString();
+    return req<HistorialItem[]>(`/causacion/historial${qs ? `?${qs}` : ""}`);
+  },
+
+  regenerarHistorial: async (id: number): Promise<Blob> => {
+    const res = await fetch(`${BASE}/causacion/historial/${id}/regenerar`, { method: "POST" });
+    if (!res.ok) {
+      const msg = await res.text().catch(() => res.statusText);
+      throw new Error(`Error regenerando: ${msg}`);
+    }
+    return res.blob();
+  },
+
+  limpiarHistorial: (params?: { fechaDesde?: string; fechaHasta?: string }) => {
+    const qp = new URLSearchParams();
+    if (params?.fechaDesde) qp.set("fecha_desde", params.fechaDesde);
+    if (params?.fechaHasta) qp.set("fecha_hasta", params.fechaHasta);
+    const qs = qp.toString();
+    return req<{ eliminados: number }>(`/causacion/historial${qs ? `?${qs}` : ""}`, { method: "DELETE" });
+  },
+
+  exportarLoteHistorial: async (params?: { fechaDesde?: string; fechaHasta?: string }): Promise<Blob> => {
+    const qp = new URLSearchParams();
+    if (params?.fechaDesde) qp.set("fecha_desde", params.fechaDesde);
+    if (params?.fechaHasta) qp.set("fecha_hasta", params.fechaHasta);
+    const qs = qp.toString();
+    const res = await fetch(`${BASE}/causacion/historial/exportar-lote${qs ? `?${qs}` : ""}`);
+    if (!res.ok) {
+      const msg = await res.text().catch(() => res.statusText);
+      throw new Error(msg);
+    }
+    return res.blob();
+  },
 
   // Aprendizaje / IA
   getIAReglas: () => req<IARegla[]>("/aprendizaje/reglas"),

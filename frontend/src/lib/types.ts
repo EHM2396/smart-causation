@@ -109,12 +109,17 @@ export interface BatchValidacionResponse {
 // ─── Historial ────────────────────────────────────────────────────────────────
 
 export interface HistorialItem {
-  consecutivo: string;
+  id: number;
+  consecutivo: string | null;
   numero_dian: string;
+  nit_proveedor: string | null;
   razon_social: string | null;
   fecha_factura: string | null;
   fecha_causacion: string | null;
   total: number;
+  tipo_comprobante: string | null;
+  archivo_origen: string | null;
+  tiene_datos: boolean;
 }
 
 export interface IARegla {

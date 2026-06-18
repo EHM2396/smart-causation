@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, Date, DateTime, Integer, Numeric, String, func
+from sqlalchemy import Boolean, Date, DateTime, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base import Base
@@ -71,6 +71,7 @@ class FacturaCausada(Base):
     tipo_comprobante: Mapped[str | None] = mapped_column(String(10))
     fecha_causacion: Mapped[date | None] = mapped_column(Date)
     archivo_origen: Mapped[str | None] = mapped_column(String(500))  # nombre del xlsx cargado
+    datos_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # factura + mapeos para regenerar
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

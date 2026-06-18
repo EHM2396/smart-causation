@@ -33,15 +33,13 @@ services:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-siigo}:${POSTGRES_PASSWORD:-siigo_pass}@postgres:5432/${POSTGRES_DB:-siigo_db}
       CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:8501,http://127.0.0.1:8501
     volumes:
+      - .:/app
       - ./data:/app/data
-      - ./Cuentas_contables.xlsx:/app/Cuentas_contables.xlsx:ro
-      - ./codigos_impuestos.xlsx:/app/codigos_impuestos.xlsx:ro
-      - ./Tipos_comprobante_contable.xlsx:/app/Tipos_comprobante_contable.xlsx:ro
     ports:
       - "8000:8000"
-    # Para pruebas locales: siembra catálogos XLSX y arranca API.
+    # Monta el código fuente, aplica migraciones y arranca la API.
     command: >
-      sh -c "python scripts/migrate_xlsx.py && uvicorn api.main:app --host 0.0.0.0 --port 8000"
+      sh -c "alembic upgrade head && python scripts/migrate_xlsx.py && uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload"
 
   # ── Next.js Frontend (pruebas) ─────────────────────────────────────────────
   frontend:

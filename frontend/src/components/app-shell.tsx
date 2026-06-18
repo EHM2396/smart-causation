@@ -15,6 +15,10 @@ const PAGE_META: Record<string, { title: string; description: string }> = {
     title: "Catálogos",
     description: "Administrá impuestos, cuentas PUC y tipos de comprobante",
   },
+  "/historial": {
+    title: "Historial",
+    description: "Registro de facturas causadas y regeneración de archivos SIIGO",
+  },
 };
 
 export function AppShell({ children }: { children: React.ReactNode }) {
