@@ -7,7 +7,6 @@ Arranque:
 
 from __future__ import annotations
 
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -43,26 +42,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── CORS ──────────────────────────────────────────────────────────────────────
-# Ajustar origins en producción; aquí se permite localhost para Streamlit.
-# CORS configurable por variable de entorno (CSV), con fallback local.
-cors_origins_env = os.getenv("CORS_ORIGINS", "").strip()
-if cors_origins_env == "*":
-    cors_origins = ["*"]
-elif cors_origins_env:
-    cors_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
-else:
-    cors_origins = [
-        "http://localhost:8501",
-        "http://127.0.0.1:8501",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=cors_origins != ["*"],
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
