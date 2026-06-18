@@ -12,9 +12,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Download, RefreshCw, Calendar, X, Trash2, AlertTriangle, PackageOpen } from "lucide-react";
+import { Download, RefreshCw, X, Trash2, AlertTriangle, PackageOpen } from "lucide-react";
 import { fmt } from "@/lib/utils";
 import type { HistorialItem } from "@/lib/types";
+import { DatePicker } from "@/components/ui/date-picker";
 
 // ─── Search function ─────────────────────────────────────────────────────────
 
@@ -24,41 +25,6 @@ const searchFn = (h: HistorialItem, q: string) =>
   (h.razon_social ?? "").toLowerCase().includes(q) ||
   (h.consecutivo ?? "").toLowerCase().includes(q) ||
   (h.tipo_comprobante ?? "").toLowerCase().includes(q);
-
-// ─── Date input component ─────────────────────────────────────────────────────
-
-function DateInput({
-  label,
-  value,
-  onChange,
-  max,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  max?: string;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>
-        {label}
-      </label>
-      <input
-        type="date"
-        value={value}
-        max={max}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-8 rounded-lg border px-2 text-xs focus:outline-none focus:ring-2"
-        style={{
-          borderColor: value ? "var(--brand)" : "var(--border-soft)",
-          backgroundColor: "var(--bg-surface)",
-          color: "var(--text-primary)",
-          colorScheme: "inherit",
-        }}
-      />
-    </div>
-  );
-}
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -230,9 +196,8 @@ export default function HistorialPage() {
         className="flex flex-wrap items-end gap-4 rounded-xl border px-4 py-3"
         style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)", boxShadow: "var(--shadow-card)" }}
       >
-        <Calendar className="h-4 w-4 shrink-0 self-end mb-1.5" style={{ color: "var(--text-muted)" }} />
-        <DateInput label="Desde" value={fechaDesde} onChange={setFechaDesde} max={fechaHasta || undefined} />
-        <DateInput label="Hasta" value={fechaHasta} onChange={setFechaHasta} max={new Date().toISOString().slice(0, 10)} />
+        <DatePicker label="Desde" value={fechaDesde} onChange={setFechaDesde} max={fechaHasta || undefined} />
+        <DatePicker label="Hasta" value={fechaHasta} onChange={setFechaHasta} max={new Date().toISOString().slice(0, 10)} />
 
         {/* Spacer */}
         <div className="flex-1" />
