@@ -14,10 +14,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "facturas_causadas",
-        sa.Column("datos_json", sa.Text(), nullable=True),
-    )
+    op.execute("ALTER TABLE facturas_causadas ADD COLUMN IF NOT EXISTS datos_json TEXT")
 
 
 def downgrade() -> None:
