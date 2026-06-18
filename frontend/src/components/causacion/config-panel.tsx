@@ -20,7 +20,7 @@ export function ConfigPanel() {
     queryFn: () => api.getConsecutivo(tipoComp),
     enabled: !!tipoComp,
   });
-  const { data: historial = [] } = useQuery({ queryKey: ["historial"], queryFn: api.getHistorial });
+  const { data: historial = [] } = useQuery({ queryKey: ["historial"], queryFn: () => api.getHistorial() });
 
   const handleSetConsec = async () => {
     if (!tipoComp || consecutivoManual <= 0) return;
