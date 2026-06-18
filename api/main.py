@@ -47,7 +47,9 @@ app = FastAPI(
 # Ajustar origins en producción; aquí se permite localhost para Streamlit.
 # CORS configurable por variable de entorno (CSV), con fallback local.
 cors_origins_env = os.getenv("CORS_ORIGINS", "").strip()
-if cors_origins_env:
+if cors_origins_env == "*":
+    cors_origins = ["*"]
+elif cors_origins_env:
     cors_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
 else:
     cors_origins = [
@@ -60,7 +62,7 @@ else:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_credentials=True,
+    allow_credentials=cors_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
