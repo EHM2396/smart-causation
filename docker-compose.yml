@@ -31,29 +31,47 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-siigo}:${POSTGRES_PASSWORD:-siigo_pass}@postgres:5432/${POSTGRES_DB:-siigo_db}
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:8501,http://127.0.0.1:8501
     volumes:
-      # Monta carpeta data para que la BD SQLite de aprendizaje persista
       - ./data:/app/data
-      # Monta archivos xlsx en modo sólo lectura
       - ./Cuentas_contables.xlsx:/app/Cuentas_contables.xlsx:ro
       - ./codigos_impuestos.xlsx:/app/codigos_impuestos.xlsx:ro
       - ./Tipos_comprobante_contable.xlsx:/app/Tipos_comprobante_contable.xlsx:ro
     ports:
       - "8000:8000"
-    # Ejecuta migraciones y luego arranca el servidor
+    # Para pruebas locales: siembra catálogos XLSX y arranca API.
     command: >
-      sh -c "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port 8000"
+      sh -c "python scripts/migrate_xlsx.py && uvicorn api.main:app --host 0.0.0.0 --port 8000"
 
-  # ── Streamlit Frontend ─────────────────────────────────────────────────────
+  # ── Next.js Frontend (pruebas) ─────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: siigo_frontend
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+
+  # ── Streamlit Frontend (legacy, opcional) ─────────────────────────────────
   streamlit:
+    profiles: ["legacy-streamlit"]
     build:
       context: .
       dockerfile: Dockerfile.streamlit
     container_name: siigo_streamlit
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       api:
         condition: service_started
     environment:
@@ -61,9 +79,6 @@ services:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-siigo}:${POSTGRES_PASSWORD:-siigo_pass}@postgres:5432/${POSTGRES_DB:-siigo_db}
     volumes:
       - ./data:/app/data
-      - ./Cuentas_contables.xlsx:/app/Cuentas_contables.xlsx:ro
-      - ./codigos_impuestos.xlsx:/app/codigos_impuestos.xlsx:ro
-      - ./Tipos_comprobante_contable.xlsx:/app/Tipos_comprobante_contable.xlsx:ro
     ports:
       - "8501:8501"
 
