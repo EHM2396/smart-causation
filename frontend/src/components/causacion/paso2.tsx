@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWizardStore } from "@/stores/wizard";
 import { api } from "@/lib/api";
@@ -8,7 +8,7 @@ import { Combobox } from "@/components/ui/combobox";
 import { Badge } from "@/components/ui/badge";
 import { NuevoImpuestoDialog } from "@/components/causacion/nuevo-impuesto-dialog";
 import { fmt } from "@/lib/utils";
-import { AlertTriangle, Plus, ChevronDown, ChevronUp } from "lucide-react";
+import { AlertTriangle, Plus, ChevronDown, ChevronUp, Sparkles, Loader2 } from "lucide-react";
 import type { MapeoItem, CuentaOpcion, ImpuestoOut } from "@/lib/types";
 
 // Helper: build combobox options from cuenta list
@@ -25,13 +25,14 @@ function impOpts(imps: ImpuestoOut[], tipos?: string[]) {
     }));
 }
 
-const FUENTE_BADGE: Record<string, { label: string; variant: "success" | "info" | "purple" | "warning" | "default" }> = {
-  aprendido: { label: "Aprendido", variant: "success" },
-  regla: { label: "Regla", variant: "info" },
-  sugerido: { label: "Sugerido", variant: "info" },
-  ia_alta: { label: "IA", variant: "purple" },
-  manual: { label: "Manual", variant: "default" },
+const ORIGEN_BADGE: Record<string, { label: string; variant: "success" | "info" | "purple" | "warning" | "default" }> = {
+  aprendizaje: { label: "Aprendido", variant: "success" },
+  regla:       { label: "Regla",     variant: "info" },
+  ia:          { label: "IA",        variant: "purple" },
+  manual:      { label: "Manual",    variant: "default" },
 };
+
+type Sugerencia = { cuenta: string | null; origen: string | null };
 
 export function Paso2() {
   const { facturas, tipoComp, setPaso, setMapeos } = useWizardStore();
@@ -51,6 +52,43 @@ export function Paso2() {
   const [rfItem, setRfItem] = useState<Record<string, string>>({});
   const [riItem, setRiItem] = useState<Record<string, string>>({});
   const [dlgOpen, setDlgOpen] = useState<"retefuente" | "reteica" | null>(null);
+
+  // ── Sugerencias del sistema de aprendizaje ────────────────────────────────
+  const [suggestions, setSuggestions] = useState<Record<string, Sugerencia>>({});
+  const [sugsLoading, setSugsLoading] = useState(false);
+
+  useEffect(() => {
+    if (facturas.length === 0) return;
+    setSugsLoading(true);
+
+    const items = facturas.flatMap((f, idx) =>
+      f.items.map((item, jdx) => ({ key: `${idx}_${jdx}`, nit: f.nit, descripcion: item.descripcion }))
+    );
+
+    Promise.all(
+      items.map(({ key, nit, descripcion }) =>
+        api.sugerirCuenta(nit, descripcion)
+          .then(r => ({ key, cuenta: r.cuenta_sugerida, origen: r.origen }))
+          .catch(() => ({ key, cuenta: null, origen: null }))
+      )
+    ).then(results => {
+      const map: Record<string, Sugerencia> = {};
+      results.forEach(({ key, cuenta, origen }) => { map[key] = { cuenta, origen }; });
+      setSuggestions(map);
+
+      // Pre-llenar solo si el usuario no eligió nada aún
+      setCuentaGastoItem(prev => {
+        const next = { ...prev };
+        results.forEach(({ key, cuenta }) => {
+          if (!next[key] && cuenta) next[key] = cuenta;
+        });
+        return next;
+      });
+
+      setSugsLoading(false);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [facturas]);
 
   const gastoOpts = cuentaOpts(cuentasGasto);
   const pagoOpts = cuentaOpts(cuentasPago);
@@ -77,6 +115,11 @@ export function Paso2() {
         const cod = item.cod_impuesto ?? "";
         const impInfo = cod ? getImpInfo(cod) : null;
 
+        const sug = suggestions[key];
+        const fuente = sug?.cuenta && cgFinal === sug.cuenta
+          ? (sug.origen ?? "aprendizaje")
+          : "manual";
+
         mapeos.push({
           idx_factura: idx,
           descripcion: item.descripcion,
@@ -85,7 +128,7 @@ export function Paso2() {
           porcentaje: impInfo?.tarifa ?? item.porcentaje ?? 0,
           valor_impuesto: item.valor_impuesto,
           cuenta_gasto: cgFinal,
-          fuente: "manual",
+          fuente,
           cuenta_impuesto_deb: impInfo?.cta_compras ?? "",
           cuenta_impuesto_cre: "",
           es_retencion: false,
@@ -166,7 +209,15 @@ export function Paso2() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold text-[var(--text-primary)]">Mapear cuentas contables</h2>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">{facturas.length} factura{facturas.length > 1 ? "s" : ""} listas para mapear</p>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+            {facturas.length} factura{facturas.length > 1 ? "s" : ""} listas para mapear
+            {sugsLoading && (
+              <span className="ml-2 inline-flex items-center gap-1" style={{ color: "var(--brand)" }}>
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Cargando sugerencias...
+              </span>
+            )}
+          </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => setDlgOpen("retefuente")}>
@@ -256,6 +307,13 @@ export function Paso2() {
                   const key = `${idx}_${jdx}`;
                   const impInfo = item.cod_impuesto ? getImpInfo(item.cod_impuesto) : null;
                   const retGlobalActiva = !!(rfGlobal[idx] || riGlobal[idx]);
+                  const sug = suggestions[key];
+                  const currentVal = cuentaGastoGlobal[idx] || cuentaGastoItem[key];
+                  const origenEfectivo = sug?.cuenta && currentVal === sug.cuenta
+                    ? (sug.origen ?? "aprendizaje")
+                    : currentVal ? "manual" : null;
+                  const badge = origenEfectivo ? ORIGEN_BADGE[origenEfectivo] ?? ORIGEN_BADGE.manual : null;
+                  const sinSugerencia = !sugsLoading && sug && sug.cuenta === null && !currentVal && !cuentaGastoGlobal[idx];
                   return (
                     <div key={jdx} className="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-elevated)] p-4 space-y-3">
                       <div className="flex items-center gap-2">
@@ -264,14 +322,30 @@ export function Paso2() {
                       </div>
                       <div className="grid grid-cols-4 gap-3">
                         <div className="col-span-2 space-y-1.5">
-                          <label className="text-xs text-[var(--text-muted)]">Cuenta gasto/costo</label>
+                          <div className="flex items-center gap-2">
+                            <label className="text-xs text-[var(--text-muted)]">Cuenta gasto/costo</label>
+                            {sugsLoading && (
+                              <Loader2 className="h-3 w-3 animate-spin" style={{ color: "var(--text-muted)" }} />
+                            )}
+                            {badge && !sugsLoading && (
+                              <Badge variant={badge.variant}>{badge.label}</Badge>
+                            )}
+                          </div>
                           <Combobox
                             options={gastoOpts}
-                            value={cuentaGastoGlobal[idx] || cuentaGastoItem[key]}
+                            value={currentVal}
                             onChange={(v) => setCuentaGastoItem((p) => ({ ...p, [key]: v }))}
                             disabled={!!cuentaGastoGlobal[idx]}
                             placeholder="Buscar cuenta..."
                           />
+                          {sinSugerencia && (
+                            <div className="flex items-start gap-1.5 mt-1 rounded-lg px-2.5 py-2" style={{ backgroundColor: "var(--warning-bg)", border: "1px solid var(--warning-border)" }}>
+                              <Sparkles className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: "var(--warning-text)" }} />
+                              <p className="text-xs leading-snug" style={{ color: "var(--warning-text)" }}>
+                                Sin mapeo previo para este \u00edtem. Selecciona la cuenta manualmente \u2014 el sistema aprender\u00e1 para la pr\u00f3xima vez.
+                              </p>
+                            </div>
+                          )}
                         </div>
                         <div className="space-y-1.5">
                           <label className="text-xs text-[var(--text-muted)]">Base</label>
