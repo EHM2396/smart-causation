@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { NuevoImpuestoDialog } from "@/components/causacion/nuevo-impuesto-dialog";
 import { fmt } from "@/lib/utils";
 import { AlertTriangle, Plus, ChevronDown, ChevronUp, Sparkles, Loader2 } from "lucide-react";
-import type { MapeoItem, CuentaOpcion, ImpuestoOut } from "@/lib/types";
+import type { MapeoItem, CuentaOpcion, ImpuestoOut, FuenteMapeo } from "@/lib/types";
 
 // Helper: build combobox options from cuenta list
 function cuentaOpts(cuentas: CuentaOpcion[]) {
@@ -33,6 +33,13 @@ const ORIGEN_BADGE: Record<string, { label: string; variant: "success" | "info" 
 };
 
 type Sugerencia = { cuenta: string | null; origen: string | null };
+
+function origenToFuente(origen: string | null): FuenteMapeo {
+  if (origen === "aprendizaje") return "aprendido";
+  if (origen === "regla") return "regla";
+  if (origen === "ia") return "ia_alta";
+  return "manual";
+}
 
 export function Paso2() {
   const { facturas, tipoComp, setPaso, setMapeos } = useWizardStore();
@@ -116,8 +123,8 @@ export function Paso2() {
         const impInfo = cod ? getImpInfo(cod) : null;
 
         const sug = suggestions[key];
-        const fuente = sug?.cuenta && cgFinal === sug.cuenta
-          ? (sug.origen ?? "aprendizaje")
+        const fuente: FuenteMapeo = sug?.cuenta && cgFinal === sug.cuenta
+          ? origenToFuente(sug.origen)
           : "manual";
 
         mapeos.push({
