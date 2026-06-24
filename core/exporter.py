@@ -128,7 +128,7 @@ def construir_movimientos(
             movimientos.append(_fila(
                 tipo_comprobante, consecutivo, fecha, nit,
                 cuenta_imp_c, None, val_imp,
-                f"Retención {pct}% - {desc}",
+                desc,
                 centro_costo, num_factura, cod_imp,
             ))
             total_creditos += val_imp
