@@ -77,7 +77,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Banner: email no verificado */}
+        {/* Banner: email no verificado — activo cuando EMAIL_ENABLED=true en backend */}
         {unverified && (
           <div className="mb-4 rounded-xl border p-4 space-y-3"
             style={{ backgroundColor: "rgba(245,158,11,0.08)", borderColor: "rgba(245,158,11,0.3)" }}>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2, MailCheck } from "lucide-react";
 import { api } from "@/lib/api";
@@ -16,8 +17,9 @@ export default function RegistroPage() {
   });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [registrado, setRegistrado] = useState(false);
+  const [registradoEmail, setRegistradoEmail] = useState("");
   const login = useAuthStore((s) => s.login);
+  const router = useRouter();
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
@@ -36,7 +38,11 @@ export default function RegistroPage() {
         nit_empresa: form.nit_empresa || undefined,
       });
       login(data);
-      setRegistrado(true);
+      if (!data.email_verificado) {
+        setRegistradoEmail(form.email);
+      } else {
+        router.replace("/causacion");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al registrarse");
     } finally {
@@ -57,7 +63,7 @@ export default function RegistroPage() {
           boxShadow: "var(--shadow-md)",
         }}
       >
-        {registrado ? (
+        {registradoEmail ? (
           <div className="space-y-5 text-center">
             <MailCheck className="mx-auto h-14 w-14" style={{ color: "#059669" }} />
             <div>
@@ -66,7 +72,7 @@ export default function RegistroPage() {
               </p>
               <p className="mt-2 text-sm" style={{ color: "var(--text-secondary)" }}>
                 Te enviamos un correo de verificación a{" "}
-                <strong>{form.email}</strong>.
+                <strong>{registradoEmail}</strong>.
                 <br />
                 Revisa tu bandeja y haz clic en el enlace para activar tu cuenta.
               </p>

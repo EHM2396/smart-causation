@@ -27,6 +27,7 @@ DB = Annotated[Session, Depends(get_db)]
 
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))  # 7 días
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://smart-causation-52ig.vercel.app")
+EMAIL_ENABLED = os.getenv("EMAIL_ENABLED", "false").lower() == "true"
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -164,7 +165,7 @@ def registro(body: RegistroRequest, background_tasks: BackgroundTasks, db: DB):
         nombre=body.nombre,
         rol="user",
         plan_id=plan.id if plan else None,
-        email_verificado=False,
+        email_verificado=not EMAIL_ENABLED,
     )
     db.add(usuario)
     db.flush()
@@ -179,14 +180,16 @@ def registro(body: RegistroRequest, background_tasks: BackgroundTasks, db: DB):
 
     db.add(UsuarioEmpresa(usuario_id=usuario.id, empresa_id=empresa.id, rol="owner"))
 
-    token_verif = _crear_token_email(db, usuario.id, "verificacion", minutos=1440)  # 24h
+    if EMAIL_ENABLED:
+        token_verif = _crear_token_email(db, usuario.id, "verificacion", minutos=1440)
     db.commit()
     db.refresh(usuario)
     db.refresh(empresa)
 
-    enlace = f"{FRONTEND_URL}/verify-email?token={token_verif}"
-    html = email_service.plantilla_verificacion(usuario.nombre, enlace)
-    background_tasks.add_task(email_service.send_email, to=email, subject="Verifica tu cuenta — Smart Causación", body_html=html)
+    if EMAIL_ENABLED:
+        enlace = f"{FRONTEND_URL}/verify-email?token={token_verif}"
+        html = email_service.plantilla_verificacion(usuario.nombre, enlace)
+        background_tasks.add_task(email_service.send_email, to=email, subject="Verifica tu cuenta — Smart Causación", body_html=html)
 
     return TokenResponse(
         access_token=_create_token(usuario.id),
@@ -196,14 +199,16 @@ def registro(body: RegistroRequest, background_tasks: BackgroundTasks, db: DB):
         rol=usuario.rol,
         empresa_id=empresa.id,
         empresa_nombre=empresa.nombre,
-        email_verificado=False,
+        email_verificado=not EMAIL_ENABLED,
     )
 
 
 @router.post("/forgot-password", response_model=MsgResponse)
 def forgot_password(body: EmailRequest, background_tasks: BackgroundTasks, db: DB):
+    if not EMAIL_ENABLED:
+        return MsgResponse(message="El restablecimiento de contraseña por correo no está disponible en este momento. Contacta al administrador.")
+
     usuario = db.scalar(select(Usuario).where(Usuario.email == body.email.lower().strip()))
-    # Respuesta genérica para no revelar si el email existe
     if not usuario or not usuario.activo:
         return MsgResponse(message="Si el correo está registrado recibirás un enlace en breve.")
 
