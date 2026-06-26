@@ -6,14 +6,24 @@ import type {
   IADecision,
   IARegla,
   ImpuestoOut,
+  LoginResponse,
   TipoComprobanteOpcion,
 } from "./types";
+import { useAuthStore } from "@/stores/auth";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const { token, empresaId } = useAuthStore.getState();
+  const authHeaders: Record<string, string> = {};
+  if (token) {
+    authHeaders["Authorization"] = `Bearer ${token}`;
+  }
+  if (empresaId != null) {
+    authHeaders["X-Empresa-Id"] = String(empresaId);
+  }
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    headers: { "Content-Type": "application/json", ...authHeaders, ...init?.headers },
     ...init,
   });
   if (!res.ok) {
@@ -23,9 +33,61 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function reqBlob(path: string, init?: RequestInit): Promise<Blob> {
+  const { token, empresaId } = useAuthStore.getState();
+  const authHeaders: Record<string, string> = {};
+  if (token) {
+    authHeaders["Authorization"] = `Bearer ${token}`;
+  }
+  if (empresaId != null) {
+    authHeaders["X-Empresa-Id"] = String(empresaId);
+  }
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { ...authHeaders, ...init?.headers },
+    ...init,
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => res.statusText);
+    throw new Error(msg);
+  }
+  return res.blob();
+}
+
+// ─── Helpers internos ────────────────────────────────────────────────────────
+
+async function _uploadExcel(path: string, file: File): Promise<{ insertados: number; actualizados: number; errores: { fila: number; error: string }[] }> {
+  const { token, empresaId } = useAuthStore.getState();
+  const form = new FormData();
+  form.append("archivo", file);
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (empresaId != null) headers["X-Empresa-Id"] = String(empresaId);
+  const res = await fetch(`${BASE}${path}`, { method: "POST", headers, body: form });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
 // ─── Catálogo ─────────────────────────────────────────────────────────────────
 
 export const api = {
+  // Auth
+  login: (email: string, password: string) =>
+    req<LoginResponse>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+  registro: (body: {
+    email: string;
+    password: string;
+    nombre: string;
+    nombre_empresa: string;
+    nit_empresa?: string;
+  }) => req<LoginResponse>("/auth/registro", { method: "POST", body: JSON.stringify(body) }),
+  me: () => req<{ id: number; email: string; nombre: string; rol: string; empresa_id: number | null; empresa_nombre: string | null }>("/auth/me"),
+
   // Cuentas
   getCuentasGasto: () => req<CuentaOpcion[]>("/cuentas/gasto"),
   getCuentasPago: () => req<CuentaOpcion[]>("/cuentas/pago"),
@@ -61,10 +123,15 @@ export const api = {
 
   // Parseo de facturas
   parsearFacturas: async (file: File) => {
+    const { token, empresaId } = useAuthStore.getState();
     const form = new FormData();
     form.append("archivo", file);
+    const headers: Record<string, string> = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (empresaId != null) headers["X-Empresa-Id"] = String(empresaId);
     const res = await fetch(`${BASE}/causacion/parsear`, {
       method: "POST",
+      headers,
       body: form,
     });
     if (!res.ok) throw new Error(`Parseo fallido ${res.status}`);
@@ -90,22 +157,17 @@ export const api = {
     }),
 
   // Generar batch (descarga)
-  batchGenerar: async (
-    body: {
-      items: { factura: object; mapeos_confirmados: object[] }[];
-      tipo_comprobante: string;
-      centro_costo: string;
-      confirmar: boolean;
-    }
-  ): Promise<Blob> => {
-    const res = await fetch(`${BASE}/causacion/batch/generar`, {
+  batchGenerar: (body: {
+    items: { factura: object; mapeos_confirmados: object[] }[];
+    tipo_comprobante: string;
+    centro_costo: string;
+    confirmar: boolean;
+  }): Promise<Blob> =>
+    reqBlob("/causacion/batch/generar", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`Error generando: ${res.status}`);
-    return res.blob();
-  },
+    }),
 
   // Historial de causaciones
   getHistorial: (params?: { fechaDesde?: string; fechaHasta?: string; buscar?: string }) => {
@@ -117,14 +179,8 @@ export const api = {
     return req<HistorialItem[]>(`/causacion/historial${qs ? `?${qs}` : ""}`);
   },
 
-  regenerarHistorial: async (id: number): Promise<Blob> => {
-    const res = await fetch(`${BASE}/causacion/historial/${id}/regenerar`, { method: "POST" });
-    if (!res.ok) {
-      const msg = await res.text().catch(() => res.statusText);
-      throw new Error(`Error regenerando: ${msg}`);
-    }
-    return res.blob();
-  },
+  regenerarHistorial: (id: number): Promise<Blob> =>
+    reqBlob(`/causacion/historial/${id}/regenerar`, { method: "POST" }),
 
   limpiarHistorial: (params?: { fechaDesde?: string; fechaHasta?: string }) => {
     const qp = new URLSearchParams();
@@ -134,20 +190,25 @@ export const api = {
     return req<{ eliminados: number }>(`/causacion/historial${qs ? `?${qs}` : ""}`, { method: "DELETE" });
   },
 
-  exportarLoteHistorial: async (params?: { fechaDesde?: string; fechaHasta?: string }): Promise<Blob> => {
+  exportarLoteHistorial: (params?: { fechaDesde?: string; fechaHasta?: string }): Promise<Blob> => {
     const qp = new URLSearchParams();
     if (params?.fechaDesde) qp.set("fecha_desde", params.fechaDesde);
     if (params?.fechaHasta) qp.set("fecha_hasta", params.fechaHasta);
     const qs = qp.toString();
-    const res = await fetch(`${BASE}/causacion/historial/exportar-lote${qs ? `?${qs}` : ""}`);
-    if (!res.ok) {
-      const msg = await res.text().catch(() => res.statusText);
-      throw new Error(msg);
-    }
-    return res.blob();
+    return reqBlob(`/causacion/historial/exportar-lote${qs ? `?${qs}` : ""}`);
   },
 
   // Aprendizaje / IA
   getIAReglas: () => req<IARegla[]>("/aprendizaje/reglas"),
   getIAHistorial: (limit = 100) => req<IADecision[]>(`/aprendizaje/historial?limit=${limit}`),
+
+  // Carga masiva catálogos
+  cargarExcelImpuestos: (file: File) => _uploadExcel("/impuestos/cargar-excel", file),
+  cargarExcelCuentas: (file: File) => _uploadExcel("/cuentas/cargar-excel", file),
+  cargarExcelTipos: (file: File) => _uploadExcel("/tipos-comprobante/cargar-excel", file),
+
+  // Plantillas Excel
+  descargarPlantillaImpuestos: () => reqBlob("/impuestos/plantilla"),
+  descargarPlantillaCuentas: () => reqBlob("/cuentas/plantilla"),
+  descargarPlantillaTipos: () => reqBlob("/tipos-comprobante/plantilla"),
 };

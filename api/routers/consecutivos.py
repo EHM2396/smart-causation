@@ -8,12 +8,15 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from api.dependencies import get_empresa_activa
+from db.models.auth import Empresa
 from db.session import get_db
 from services import consecutivos_service
 
 router = APIRouter(prefix="/consecutivos", tags=["Consecutivos"])
 
 DB = Annotated[Session, Depends(get_db)]
+EmpresaActiva = Annotated[Empresa, Depends(get_empresa_activa)]
 
 
 class ConsecutivoOut(BaseModel):
@@ -27,19 +30,19 @@ class ConsecutivoSetBody(BaseModel):
 
 
 @router.get("/{tipo_comp}", response_model=ConsecutivoOut)
-def get_consecutivo(tipo_comp: str, db: DB):
+def get_consecutivo(tipo_comp: str, db: DB, empresa: EmpresaActiva):
     """Retorna el último consecutivo registrado y el próximo a usar."""
-    ultimo = consecutivos_service.get_ultimo(db, tipo_comp)
+    ultimo = consecutivos_service.get_ultimo(db, tipo_comp, empresa_id=empresa.id)
     return ConsecutivoOut(tipo_comp=tipo_comp.upper(), ultimo=ultimo, proximo=ultimo + 1)
 
 
 @router.put("/{tipo_comp}", response_model=ConsecutivoOut)
-def set_consecutivo(tipo_comp: str, body: ConsecutivoSetBody, db: DB):
+def set_consecutivo(tipo_comp: str, body: ConsecutivoSetBody, db: DB, empresa: EmpresaActiva):
     """
     Ajusta el consecutivo manualmente.
     `nuevo_valor` es el **próximo** número que se usará (se guarda como nuevo_valor - 1).
     """
-    consecutivos_service.set_ultimo(db, tipo_comp, body.nuevo_valor - 1)
+    consecutivos_service.set_ultimo(db, tipo_comp, body.nuevo_valor - 1, empresa_id=empresa.id)
     db.commit()
-    ultimo = consecutivos_service.get_ultimo(db, tipo_comp)
+    ultimo = consecutivos_service.get_ultimo(db, tipo_comp, empresa_id=empresa.id)
     return ConsecutivoOut(tipo_comp=tipo_comp.upper(), ultimo=ultimo, proximo=ultimo + 1)

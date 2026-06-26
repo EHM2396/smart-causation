@@ -1,8 +1,6 @@
 """
 CuentasService – todas las consultas sobre el plan de cuentas PUC.
-
-Reemplaza las funciones de core/mapper.py que leían Cuentas_contables.xlsx.
-Recibe una sesión SQLAlchemy; nunca abre conexión propia.
+Todas las queries filtran por empresa_id (None = sin filtro, para compat. con Streamlit).
 """
 
 from __future__ import annotations
@@ -25,22 +23,22 @@ def _norm(texto: str) -> str:
 
 # ── Consultas base ─────────────────────────────────────────────────────────────
 
-def listar_todas(db: Session) -> Sequence[CuentaContable]:
-    """Retorna todas las cuentas activas."""
-    return db.scalars(
-        select(CuentaContable).where(CuentaContable.activo == True)
-    ).all()
+def listar_todas(db: Session, empresa_id: int | None = None) -> Sequence[CuentaContable]:
+    stmt = select(CuentaContable).where(CuentaContable.activo == True)
+    if empresa_id is not None:
+        stmt = stmt.where(CuentaContable.empresa_id == empresa_id)
+    return db.scalars(stmt).all()
 
 
-def buscar_por_codigo(db: Session, codigo: str) -> CuentaContable | None:
-    return db.scalar(
-        select(CuentaContable).where(CuentaContable.codigo == codigo.strip())
-    )
+def buscar_por_codigo(db: Session, codigo: str, empresa_id: int | None = None) -> CuentaContable | None:
+    stmt = select(CuentaContable).where(CuentaContable.codigo == codigo.strip())
+    if empresa_id is not None:
+        stmt = stmt.where(CuentaContable.empresa_id == empresa_id)
+    return db.scalar(stmt)
 
 
 # ── Selectores para la UI ─────────────────────────────────────────────────────
 
-# Tags visuales para cuentas fuera del rango gasto/costo estándar
 _TAGS_GASTO_EXT: dict[str, str] = {
     "14": "[Inv] ",
     "15": "[PP&E] ",
@@ -49,26 +47,26 @@ _TAGS_GASTO_EXT: dict[str, str] = {
 }
 
 
-def listar_cuentas_gasto(db: Session) -> list[dict]:
-    """
-    Cuentas de gasto/costo para la causación de facturas.
+def listar_cuentas_gasto(db: Session, empresa_id: int | None = None) -> list[dict]:
+    base = dict(
+        activo=True,
+        nivel=8,
+        fiscal=False,
+    )
 
-    Prioridad 1 (gastos y costos): clases 5, 6, 7.
-    Prioridad 2 (inventarios y activos): cuentas 14xxx y 15xxx.
-    Opcional (diferidos e intangibles): cuentas 16xxx y 17xxx.
-    Solo nivel auxiliar (8 dígitos), activas y no fiscales.
-    """
-    rows_std = db.scalars(
-        select(CuentaContable).where(
+    def _std_stmt():
+        s = select(CuentaContable).where(
             CuentaContable.activo == True,
             CuentaContable.nivel == 8,
             CuentaContable.clase.in_([5, 6, 7]),
             CuentaContable.fiscal == False,
         ).order_by(CuentaContable.codigo)
-    ).all()
+        if empresa_id is not None:
+            s = s.where(CuentaContable.empresa_id == empresa_id)
+        return s
 
-    rows_ext = db.scalars(
-        select(CuentaContable).where(
+    def _ext_stmt():
+        s = select(CuentaContable).where(
             CuentaContable.activo == True,
             CuentaContable.nivel == 8,
             CuentaContable.fiscal == False,
@@ -79,7 +77,12 @@ def listar_cuentas_gasto(db: Session) -> list[dict]:
                 CuentaContable.codigo.like("17%"),
             )
         ).order_by(CuentaContable.codigo)
-    ).all()
+        if empresa_id is not None:
+            s = s.where(CuentaContable.empresa_id == empresa_id)
+        return s
+
+    rows_std = db.scalars(_std_stmt()).all()
+    rows_ext = db.scalars(_ext_stmt()).all()
 
     result = [
         {"codigo": r.codigo, "nombre": r.nombre, "tag": "", "label": f"{r.codigo} – {r.nombre}"}
@@ -96,36 +99,26 @@ def listar_cuentas_gasto(db: Session) -> list[dict]:
     return result
 
 
-def listar_metodos_pago(db: Session) -> list[dict]:
-    """
-    Cuentas de pago de nivel auxiliar (8 dígitos), activas y no fiscales.
-
-    Incluye:
-      - Clase 2 completa: proveedores, cuentas por pagar, obligaciones.
-      - Clase 1, grupos 11 (Disponible) y 12 (Inversiones/bancos): efectivo
-        y equivalentes usados para registrar pagos directos.
-
-    Excluye el resto de clase 1 (inventarios 14, PP&E 15, etc.) porque
-    no son cuentas de pago en el contexto de causación de facturas.
-    """
-    rows = db.scalars(
-        select(CuentaContable).where(
-            CuentaContable.activo == True,
-            CuentaContable.nivel == 8,
-            CuentaContable.fiscal == False,
-            or_(
-                CuentaContable.clase == 2,
-                and_(
-                    CuentaContable.clase == 1,
-                    or_(
-                        CuentaContable.codigo.like("11%"),
-                        CuentaContable.codigo.like("12%"),
-                    )
+def listar_metodos_pago(db: Session, empresa_id: int | None = None) -> list[dict]:
+    stmt = select(CuentaContable).where(
+        CuentaContable.activo == True,
+        CuentaContable.nivel == 8,
+        CuentaContable.fiscal == False,
+        or_(
+            CuentaContable.clase == 2,
+            and_(
+                CuentaContable.clase == 1,
+                or_(
+                    CuentaContable.codigo.like("11%"),
+                    CuentaContable.codigo.like("12%"),
                 )
             )
-        ).order_by(CuentaContable.codigo)
-    ).all()
+        )
+    ).order_by(CuentaContable.codigo)
+    if empresa_id is not None:
+        stmt = stmt.where(CuentaContable.empresa_id == empresa_id)
 
+    rows = db.scalars(stmt).all()
     return [
         {"codigo": r.codigo, "nombre": r.nombre, "label": f"{r.codigo} – {r.nombre}"}
         for r in rows
@@ -133,23 +126,20 @@ def listar_metodos_pago(db: Session) -> list[dict]:
 
 
 def buscar_cuentas_sugeridas(
-    db: Session, descripcion: str, max_sugerencias: int = 3
+    db: Session, descripcion: str, max_sugerencias: int = 3, empresa_id: int | None = None
 ) -> list[dict]:
-    """
-    Busca en el PUC cuentas cuyo nombre contenga palabras de la descripción.
-    Retorna lista ordenada por relevancia.
-    Equivalente a core.mapper.buscar_cuentas_sugeridas().
-    """
     palabras = [p for p in _norm(descripcion).split() if len(p) > 3]
     if not palabras:
         return []
 
-    todas = db.scalars(
-        select(CuentaContable).where(
-            CuentaContable.activo == True,
-            CuentaContable.nivel == 8,
-        )
-    ).all()
+    stmt = select(CuentaContable).where(
+        CuentaContable.activo == True,
+        CuentaContable.nivel == 8,
+    )
+    if empresa_id is not None:
+        stmt = stmt.where(CuentaContable.empresa_id == empresa_id)
+
+    todas = db.scalars(stmt).all()
 
     scored = []
     for cuenta in todas:
@@ -171,6 +161,7 @@ def crear_cuenta(
     nombre: str,
     nivel: int | None = None,
     fiscal: bool = False,
+    empresa_id: int | None = None,
 ) -> CuentaContable:
     nivel = nivel or len(codigo)
     clase_digit = int(codigo[0]) if codigo and codigo[0].isdigit() else None
@@ -180,16 +171,35 @@ def crear_cuenta(
         clase=clase_digit,
         nivel=nivel,
         fiscal=fiscal,
+        empresa_id=empresa_id,
     )
     db.add(cuenta)
     db.flush()
     return cuenta
 
 
+def upsert_cuenta(
+    db: Session,
+    *,
+    codigo: str,
+    nombre: str,
+    fiscal: bool = False,
+    empresa_id: int,
+) -> tuple[CuentaContable, bool]:
+    """Inserta o actualiza una cuenta por (codigo, empresa_id). Retorna (objeto, creado)."""
+    existing = buscar_por_codigo(db, codigo, empresa_id=empresa_id)
+    if existing:
+        existing.nombre = nombre.strip()
+        existing.fiscal = fiscal
+        db.flush()
+        return existing, False
+    return crear_cuenta(db, codigo=codigo, nombre=nombre, fiscal=fiscal, empresa_id=empresa_id), True
+
+
 def actualizar_cuenta(
-    db: Session, codigo: str, **campos
+    db: Session, codigo: str, empresa_id: int | None = None, **campos
 ) -> CuentaContable | None:
-    cuenta = buscar_por_codigo(db, codigo)
+    cuenta = buscar_por_codigo(db, codigo, empresa_id=empresa_id)
     if not cuenta:
         return None
     for k, v in campos.items():

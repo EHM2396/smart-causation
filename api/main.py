@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.routers import (
     aprendizaje_router,
+    auth_router,
     causacion_router,
     consecutivos_router,
     cuentas_router,
@@ -51,6 +52,7 @@ app.add_middleware(
 )
 
 # ── Routers ───────────────────────────────────────────────────────────────────
+app.include_router(auth_router)
 app.include_router(cuentas_router)
 app.include_router(impuestos_router)
 app.include_router(tipos_router)

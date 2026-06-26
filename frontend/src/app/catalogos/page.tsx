@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { AlertCircle, Database, Receipt, BookOpen, Brain } from "lucide-react";
+import { AlertCircle, Database, Receipt, BookOpen, Brain, Upload, Download, CheckCircle2 } from "lucide-react";
 import type { CuentaOpcion, ImpuestoOut, TipoComprobanteOpcion, IARegla, IADecision } from "@/lib/types";
 
 // - Module-level stable search functions -
@@ -38,6 +38,97 @@ const searchDecision = (d: IADecision, q: string) =>
   (d.nit_proveedor ?? "").toLowerCase().includes(q) ||
   (d.descripcion_item ?? "").toLowerCase().includes(q) ||
   (d.cuenta_aplicada ?? "").toLowerCase().includes(q);
+
+// - Upload Excel panel -
+type UploadResult = { insertados: number; actualizados: number; errores: { fila: number; error: string }[] };
+
+function UploadExcelPanel({
+  onUpload,
+  onPlantilla,
+  onSuccess,
+}: {
+  onUpload: (file: File) => Promise<UploadResult>;
+  onPlantilla: () => Promise<Blob>;
+  onSuccess: () => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState<UploadResult | null>(null);
+  const [err, setErr] = useState("");
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setUploading(true);
+    setErr("");
+    setResult(null);
+    try {
+      const res = await onUpload(file);
+      setResult(res);
+      onSuccess();
+    } catch (ex) {
+      setErr((ex as Error).message);
+    }
+    setUploading(false);
+  };
+
+  const handlePlantilla = async () => {
+    try {
+      const blob = await onPlantilla();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "plantilla.xlsx";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setErr("No se pudo descargar la plantilla");
+    }
+  };
+
+  return (
+    <div
+      className="flex flex-wrap items-center gap-3 rounded-xl border p-3"
+      style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}
+    >
+      <label
+        className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-80 disabled:opacity-50"
+        style={{ backgroundColor: "var(--brand)", color: "#fff" }}
+      >
+        <Upload className="h-3.5 w-3.5" />
+        {uploading ? "Cargando..." : "Cargar desde Excel"}
+        <input type="file" accept=".xlsx,.xls" className="sr-only" onChange={handleFile} disabled={uploading} />
+      </label>
+
+      <button
+        type="button"
+        onClick={handlePlantilla}
+        className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-80"
+        style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)", backgroundColor: "var(--bg-surface)" }}
+      >
+        <Download className="h-3.5 w-3.5" />
+        Descargar plantilla
+      </button>
+
+      {result && !err && (
+        <div className="flex items-center gap-1.5 text-sm" style={{ color: "var(--success)" }}>
+          <CheckCircle2 className="h-4 w-4" />
+          {result.insertados} nuevos, {result.actualizados} actualizados
+          {result.errores.length > 0 && (
+            <span style={{ color: "var(--warning)" }}> · {result.errores.length} error(es)</span>
+          )}
+        </div>
+      )}
+
+      {err && (
+        <div className="flex items-center gap-1.5 text-sm" style={{ color: "var(--error)" }}>
+          <AlertCircle className="h-4 w-4" />
+          {err}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // - Error banner -
 function ErrBanner({ msg }: { msg: string }) {
@@ -213,6 +304,11 @@ function ImpuestosTab({
 
   return (
     <>
+      <UploadExcelPanel
+        onUpload={api.cargarExcelImpuestos}
+        onPlantilla={api.descargarPlantillaImpuestos}
+        onSuccess={() => qc.invalidateQueries({ queryKey: ["impuestos"] })}
+      />
       <DataTableShell
         title="Códigos de impuesto"
         total={dt.total}
@@ -367,6 +463,14 @@ function PlanCuentasTab({
 
   return (
     <>
+      <UploadExcelPanel
+        onUpload={api.cargarExcelCuentas}
+        onPlantilla={api.descargarPlantillaCuentas}
+        onSuccess={() => {
+          qc.invalidateQueries({ queryKey: ["cuentas-pago"] });
+          qc.invalidateQueries({ queryKey: ["cuentas-gasto"] });
+        }}
+      />
       <DataTableShell
         title="Plan de Cuentas PUC"
         total={dt.total}
@@ -515,6 +619,11 @@ function TiposTab({ tipos }: { tipos: TipoComprobanteOpcion[] }) {
 
   return (
     <>
+      <UploadExcelPanel
+        onUpload={api.cargarExcelTipos}
+        onPlantilla={api.descargarPlantillaTipos}
+        onSuccess={() => qc.invalidateQueries({ queryKey: ["tipos-comp"] })}
+      />
       <DataTableShell
         title="Tipos de Comprobante"
         total={dt.total}

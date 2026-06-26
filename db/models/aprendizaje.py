@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, Numeric, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base import Base
@@ -23,13 +23,14 @@ class MapeoPUC(Base):
     """
     Aprende la asociación entre (NIT del proveedor + keyword de descripción) y
     una cuenta del PUC. Se refuerza con cada uso confirmado.
-
-    confianza: valor entre 0 y 1 que escala con los usos y correcciones.
-               Útil para futura integración con modelos de ML.
+    Aislado por (usuario_id + empresa_id): dos usuarios en la misma empresa
+    mantienen aprendizajes independientes.
     """
     __tablename__ = "mapeos_puc"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    empresa_id: Mapped[int | None] = mapped_column(ForeignKey("empresas.id"), nullable=True, index=True)
+    usuario_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"), nullable=True, index=True)
     nit: Mapped[str | None] = mapped_column(String(20), index=True)
     keyword: Mapped[str | None] = mapped_column(String(255), index=True)
     cuenta_puc: Mapped[str] = mapped_column(String(10), nullable=False)
@@ -52,15 +53,15 @@ class MapeoPUC(Base):
 class HistorialDecision(Base):
     """
     Registra cada decisión de mapeo aplicada durante una causación.
-
+    Aislado por (usuario_id + empresa_id).
     fue_corregida: True si el usuario cambió la cuenta sugerida.
     origen: 'manual' | 'aprendizaje' | 'ia'
-
-    Este historial es el insumo principal para entrenar modelos de clasificación.
     """
     __tablename__ = "historial_decisiones"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    empresa_id: Mapped[int | None] = mapped_column(ForeignKey("empresas.id"), nullable=True, index=True)
+    usuario_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"), nullable=True, index=True)
     numero_dian: Mapped[str | None] = mapped_column(String(80), index=True)
     nit_proveedor: Mapped[str | None] = mapped_column(String(20), index=True)
     descripcion_item: Mapped[str | None] = mapped_column(Text)

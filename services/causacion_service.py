@@ -50,6 +50,8 @@ def sugerir_cuenta_gasto(
     *,
     nit: str | None,
     descripcion: str,
+    empresa_id: int | None = None,
+    usuario_id: int | None = None,
 ) -> str | None:
     """
     Intenta encontrar la mejor cuenta de gasto para un ítem de factura.
@@ -64,7 +66,7 @@ def sugerir_cuenta_gasto(
         return cuenta
 
     # 2. Mapeo aprendido
-    cuenta = aprendizaje_service.obtener_mapeo(db, nit, descripcion)
+    cuenta = aprendizaje_service.obtener_mapeo(db, nit, descripcion, empresa_id=empresa_id, usuario_id=usuario_id)
     return cuenta
 
 
@@ -80,6 +82,8 @@ def confirmar_mapeo(
     cuenta_aplicada: str,
     cod_impuesto: str | None = None,
     origen: str = "manual",
+    empresa_id: int | None = None,
+    usuario_id: int | None = None,
 ) -> None:
     """
     Registra el mapeo confirmado por el usuario y actualiza el historial.
@@ -97,6 +101,8 @@ def confirmar_mapeo(
         cod_impuesto=cod_impuesto,
         fue_corregida=fue_corregida,
         origen=origen,
+        empresa_id=empresa_id,
+        usuario_id=usuario_id,
     )
 
     aprendizaje_service.registrar_mapeo(
@@ -104,6 +110,8 @@ def confirmar_mapeo(
         nit=nit,
         descripcion=descripcion,
         cuenta_puc=cuenta_aplicada,
+        empresa_id=empresa_id,
+        usuario_id=usuario_id,
     )
 
 
@@ -117,6 +125,7 @@ def generar_siigo(
     tipo_comprobante: str = "12",
     centro_costo: str = "",
     prefijo: str = "FC",
+    empresa_id: int | None = None,
 ) -> tuple[bytes, int]:
     """
     Genera el xlsx de importación SIIGO para una factura.
@@ -124,7 +133,7 @@ def generar_siigo(
     Retorna:
         (bytes_del_archivo, consecutivo_asignado)
     """
-    consecutivo = consecutivos_service.siguiente(db, prefijo)
+    consecutivo = consecutivos_service.siguiente(db, prefijo, empresa_id=empresa_id)
 
     movimientos = exporter.construir_movimientos(
         factura=factura,
@@ -150,6 +159,7 @@ def registrar_factura_causada(
     tipo_comprobante: str,
     archivo_origen: str = "",
     datos_json: str | None = None,
+    empresa_id: int | None = None,
 ) -> FacturaCausada:
     numero = factura.get("numero_dian") or factura.get("numero_factura", "")
     hoy = date.today()
@@ -165,17 +175,19 @@ def registrar_factura_causada(
         fecha_causacion=hoy,
         archivo_origen=archivo_origen,
         datos_json=datos_json,
+        empresa_id=empresa_id,
     )
     db.add(fc)
     db.flush()
     return fc
 
 
-def esta_causada(db: Session, numero_dian: str) -> bool:
+def esta_causada(db: Session, numero_dian: str, empresa_id: int | None = None) -> bool:
     from sqlalchemy import select
-    return db.scalar(
-        select(FacturaCausada.id).where(FacturaCausada.numero_dian == numero_dian)
-    ) is not None
+    stmt = select(FacturaCausada.id).where(FacturaCausada.numero_dian == numero_dian)
+    if empresa_id is not None:
+        stmt = stmt.where(FacturaCausada.empresa_id == empresa_id)
+    return db.scalar(stmt) is not None
 
 
 # ── Helpers privados ──────────────────────────────────────────────────────────

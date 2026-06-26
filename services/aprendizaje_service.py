@@ -1,8 +1,7 @@
 """
 AprendizajeService – capa de aprendizaje y trazabilidad de decisiones.
-
-Reemplaza los mapeos aprendidos de db/memory.py (mapeos_puc).
-Agrega historial de decisiones y reglas de clasificación versionadas.
+El aprendizaje está aislado por (usuario_id + empresa_id):
+dos usuarios que operen la misma empresa tienen aprendizajes independientes.
 """
 
 from __future__ import annotations
@@ -27,23 +26,25 @@ def _norm(texto: str) -> str:
 # ── Mapeos PUC aprendidos ──────────────────────────────────────────────────────
 
 def obtener_mapeo(
-    db: Session, nit: str | None, descripcion: str
+    db: Session,
+    nit: str | None,
+    descripcion: str,
+    empresa_id: int | None = None,
+    usuario_id: int | None = None,
 ) -> str | None:
-    """
-    Busca la cuenta PUC más usada para un NIT + keyword de descripción.
-    Retorna el código PUC o None si no hay mapeo conocido.
-    """
     palabras = [p for p in _norm(descripcion).split() if len(p) > 3]
 
     for palabra in palabras:
-        row = db.scalar(
+        stmt = (
             select(MapeoPUC)
-            .where(
-                MapeoPUC.nit == nit,
-                MapeoPUC.keyword == palabra,
-            )
+            .where(MapeoPUC.nit == nit, MapeoPUC.keyword == palabra)
             .order_by(MapeoPUC.usos.desc(), MapeoPUC.confianza.desc())
         )
+        if empresa_id is not None:
+            stmt = stmt.where(MapeoPUC.empresa_id == empresa_id)
+        if usuario_id is not None:
+            stmt = stmt.where(MapeoPUC.usuario_id == usuario_id)
+        row = db.scalar(stmt)
         if row:
             return row.cuenta_puc
 
@@ -56,25 +57,26 @@ def registrar_mapeo(
     nit: str | None,
     descripcion: str,
     cuenta_puc: str,
+    empresa_id: int | None = None,
+    usuario_id: int | None = None,
 ) -> None:
-    """
-    Registra o refuerza la asociación NIT+keyword → cuenta PUC.
-    Incrementa `usos` y ajusta `confianza` si ya existe.
-    """
     palabras = [p for p in _norm(descripcion).split() if len(p) > 3]
     ahora = datetime.now(timezone.utc)
 
     for palabra in palabras:
-        row = db.scalar(
-            select(MapeoPUC).where(
-                MapeoPUC.nit == nit,
-                MapeoPUC.keyword == palabra,
-                MapeoPUC.cuenta_puc == cuenta_puc,
-            )
+        stmt = select(MapeoPUC).where(
+            MapeoPUC.nit == nit,
+            MapeoPUC.keyword == palabra,
+            MapeoPUC.cuenta_puc == cuenta_puc,
         )
+        if empresa_id is not None:
+            stmt = stmt.where(MapeoPUC.empresa_id == empresa_id)
+        if usuario_id is not None:
+            stmt = stmt.where(MapeoPUC.usuario_id == usuario_id)
+
+        row = db.scalar(stmt)
         if row:
             row.usos += 1
-            # Confianza aumenta con los usos: converge a 1 asintóticamente
             row.confianza = min(1.0, float(row.confianza) + 0.05)
             row.ultima_vez = ahora
         else:
@@ -86,6 +88,8 @@ def registrar_mapeo(
                 usos=1,
                 confianza=0.5,
                 ultima_vez=ahora,
+                empresa_id=empresa_id,
+                usuario_id=usuario_id,
             ))
     db.flush()
 
@@ -103,6 +107,8 @@ def registrar_decision(
     cod_impuesto: str | None,
     fue_corregida: bool = False,
     origen: str = "manual",
+    empresa_id: int | None = None,
+    usuario_id: int | None = None,
 ) -> HistorialDecision:
     decision = HistorialDecision(
         numero_dian=numero_dian,
@@ -113,6 +119,8 @@ def registrar_decision(
         cod_impuesto=cod_impuesto,
         fue_corregida=fue_corregida,
         origen=origen,
+        empresa_id=empresa_id,
+        usuario_id=usuario_id,
     )
     db.add(decision)
     db.flush()
@@ -123,15 +131,9 @@ def obtener_cod_impuesto(
     db: Session,
     nit: str | None,
     descripcion: str,
+    empresa_id: int | None = None,
+    usuario_id: int | None = None,
 ) -> str | None:
-    """
-    Sugiere un código de impuesto usando historial de decisiones confirmadas.
-
-    Estrategia:
-      1. Busca decisiones recientes con cod_impuesto para el mismo NIT.
-      2. Puntúa los códigos por coincidencias de keywords de la descripción.
-      3. Si no hay señal por NIT, intenta señal global (cualquier proveedor).
-    """
     palabras = [p for p in _norm(descripcion).split() if len(p) > 3]
     if not palabras:
         return None
@@ -145,6 +147,10 @@ def obtener_cod_impuesto(
         )
         if mismo_nit and nit:
             stmt = stmt.where(HistorialDecision.nit_proveedor == nit)
+        if empresa_id is not None:
+            stmt = stmt.where(HistorialDecision.empresa_id == empresa_id)
+        if usuario_id is not None:
+            stmt = stmt.where(HistorialDecision.usuario_id == usuario_id)
 
         rows = db.scalars(stmt).all()
         if not rows:
@@ -159,7 +165,6 @@ def obtener_cod_impuesto(
             if hits <= 0:
                 continue
             base = float(hits)
-            # Ligero bonus si no hubo corrección manual
             if not row.fue_corregida:
                 base += 0.25
             score[str(row.cod_impuesto)] += base
@@ -171,13 +176,9 @@ def obtener_cod_impuesto(
     return _mejor_codigo(mismo_nit=True) or _mejor_codigo(mismo_nit=False)
 
 
-# ── Reglas de clasificación versionadas ──────────────────────────────────────
+# ── Reglas de clasificación (globales, definidas por el admin de plataforma) ───
 
 def aplicar_reglas(db: Session, descripcion: str) -> str | None:
-    """
-    Evalúa las reglas activas (ordenadas por prioridad desc.) contra la descripción.
-    Retorna la cuenta PUC de la primera regla que coincida, o None.
-    """
     reglas = db.scalars(
         select(ReglaClasificacion)
         .where(ReglaClasificacion.activa == True)

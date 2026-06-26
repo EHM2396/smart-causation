@@ -146,6 +146,19 @@ export interface IADecision {
   created_at: string;
 }
 
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+
+export interface LoginResponse {
+  access_token: string;
+  token_type: string;
+  usuario_id: number;
+  nombre: string;
+  email: string;
+  rol: string;
+  empresa_id: number;
+  empresa_nombre: string;
+}
+
 // ─── Wizard state ─────────────────────────────────────────────────────────────
 
 export type PasoWizard = 1 | 2 | 3 | 4;

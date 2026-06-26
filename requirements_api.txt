@@ -8,6 +8,10 @@ psycopg2-binary>=2.9.9
 pydantic>=2.0.0
 python-dotenv>=1.0.0
 
+# Autenticación JWT
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
 # Procesamiento de archivos (compartido con Streamlit)
 pandas>=2.0.0
 openpyxl>=3.1.0

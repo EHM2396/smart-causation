@@ -1,7 +1,6 @@
 """
 ImpuestosService – consultas sobre códigos de impuesto SIIGO.
-
-Reemplaza las funciones de core/mapper.py que leían codigos_impuestos.xlsx.
+Todas las queries filtran por empresa_id (None = sin filtro, para compat. con Streamlit).
 """
 
 from __future__ import annotations
@@ -16,44 +15,36 @@ from db.models.catalogo import CodigoImpuesto
 
 # ── Consultas ─────────────────────────────────────────────────────────────────
 
-def listar_todos(db: Session) -> Sequence[CodigoImpuesto]:
-    """Retorna todos los códigos activos."""
-    return db.scalars(
-        select(CodigoImpuesto).where(CodigoImpuesto.activo == True)
-    ).all()
+def listar_todos(db: Session, empresa_id: int | None = None) -> Sequence[CodigoImpuesto]:
+    stmt = select(CodigoImpuesto).where(CodigoImpuesto.activo == True)
+    if empresa_id is not None:
+        stmt = stmt.where(CodigoImpuesto.empresa_id == empresa_id)
+    return db.scalars(stmt).all()
 
 
-def buscar_por_codigo(db: Session, codigo: str) -> CodigoImpuesto | None:
-    return db.scalar(
-        select(CodigoImpuesto).where(CodigoImpuesto.codigo == codigo.strip())
+def buscar_por_codigo(db: Session, codigo: str, empresa_id: int | None = None) -> CodigoImpuesto | None:
+    stmt = select(CodigoImpuesto).where(CodigoImpuesto.codigo == codigo.strip())
+    if empresa_id is not None:
+        stmt = stmt.where(CodigoImpuesto.empresa_id == empresa_id)
+    return db.scalar(stmt)
+
+
+def buscar_por_tarifa(db: Session, tarifa: float, empresa_id: int | None = None) -> CodigoImpuesto | None:
+    stmt = select(CodigoImpuesto).where(
+        CodigoImpuesto.activo == True,
+        CodigoImpuesto.tarifa.between(tarifa - 0.5, tarifa + 0.5),
     )
+    if empresa_id is not None:
+        stmt = stmt.where(CodigoImpuesto.empresa_id == empresa_id)
+    candidatos = db.scalars(stmt).all()
 
-
-def buscar_por_tarifa(db: Session, tarifa: float) -> CodigoImpuesto | None:
-    """
-    Busca el impuesto de tipo IVA o Impoconsumo cuya tarifa coincida
-    con el porcentaje dado (tolerancia ±0.5).
-    Útil para inferir el código a partir del porcentaje del XML DIAN.
-    """
-    candidatos = db.scalars(
-        select(CodigoImpuesto).where(
-            CodigoImpuesto.activo == True,
-            CodigoImpuesto.tarifa.between(tarifa - 0.5, tarifa + 0.5),
-        )
-    ).all()
-
-    # Preferir IVA sobre otros tipos
     for imp in candidatos:
         if imp.tipo_impuesto and "iva" in imp.tipo_impuesto.lower():
             return imp
     return candidatos[0] if candidatos else None
 
 
-def listar_como_dict(db: Session) -> list[dict]:
-    """
-    Retorna lista de dicts compatible con la UI y con core.mapper.listar_impuestos().
-    Equivalente a core.mapper.listar_impuestos().
-    """
+def listar_como_dict(db: Session, empresa_id: int | None = None) -> list[dict]:
     return [
         {
             "cod":            imp.codigo,
@@ -62,16 +53,12 @@ def listar_como_dict(db: Session) -> list[dict]:
             "cuenta_credito": imp.cuenta_credito,
             "naturaleza":     imp.tipo_impuesto or "",
         }
-        for imp in listar_todos(db)
+        for imp in listar_todos(db, empresa_id=empresa_id)
     ]
 
 
-def buscar_como_dict(db: Session, codigo: str) -> dict | None:
-    """
-    Retorna dict compatible con core.mapper.buscar_impuesto().
-    Equivalente directo para sustituir el mapper.
-    """
-    imp = buscar_por_codigo(db, codigo)
+def buscar_como_dict(db: Session, codigo: str, empresa_id: int | None = None) -> dict | None:
+    imp = buscar_por_codigo(db, codigo, empresa_id=empresa_id)
     if not imp:
         return None
     return {
@@ -85,15 +72,31 @@ def buscar_como_dict(db: Session, codigo: str) -> dict | None:
 
 # ── CRUD ─────────────────────────────────────────────────────────────────────
 
-def crear_impuesto(db: Session, **campos) -> CodigoImpuesto:
-    imp = CodigoImpuesto(**campos)
+def crear_impuesto(db: Session, empresa_id: int | None = None, **campos) -> CodigoImpuesto:
+    imp = CodigoImpuesto(empresa_id=empresa_id, **campos)
     db.add(imp)
     db.flush()
     return imp
 
 
-def actualizar_impuesto(db: Session, codigo: str, **campos) -> CodigoImpuesto | None:
-    imp = buscar_por_codigo(db, codigo)
+def upsert_impuesto(db: Session, empresa_id: int, **campos) -> tuple[CodigoImpuesto, bool]:
+    """Inserta o actualiza un impuesto por (codigo, empresa_id). Retorna (objeto, creado)."""
+    codigo = str(campos.get("codigo", "")).strip()
+    existing = buscar_por_codigo(db, codigo, empresa_id=empresa_id)
+    if existing:
+        for k, v in campos.items():
+            if k != "codigo" and hasattr(existing, k) and v not in (None, ""):
+                setattr(existing, k, v)
+        db.flush()
+        return existing, False
+    imp = CodigoImpuesto(empresa_id=empresa_id, **campos)
+    db.add(imp)
+    db.flush()
+    return imp, True
+
+
+def actualizar_impuesto(db: Session, codigo: str, empresa_id: int | None = None, **campos) -> CodigoImpuesto | None:
+    imp = buscar_por_codigo(db, codigo, empresa_id=empresa_id)
     if not imp:
         return None
     for k, v in campos.items():

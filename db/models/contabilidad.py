@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, Date, DateTime, Integer, Numeric, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base import Base
@@ -37,6 +37,7 @@ class Proveedor(Base):
     cuenta_pagar: Mapped[str | None] = mapped_column(String(10))     # PUC cuentas por pagar
     ciudad: Mapped[str | None] = mapped_column(String(100))
     direccion: Mapped[str | None] = mapped_column(String(255))
+    empresa_id: Mapped[int | None] = mapped_column(ForeignKey("empresas.id"), nullable=True, index=True)
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
     ia_habilitada: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # None = heredar global (True)
     created_at: Mapped[datetime] = mapped_column(
@@ -62,6 +63,7 @@ class FacturaCausada(Base):
     __tablename__ = "facturas_causadas"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    empresa_id: Mapped[int | None] = mapped_column(ForeignKey("empresas.id"), nullable=True, index=True)
     numero_dian: Mapped[str] = mapped_column(String(80), unique=True, nullable=False, index=True)
     nit_proveedor: Mapped[str | None] = mapped_column(String(20), index=True)
     razon_social: Mapped[str | None] = mapped_column(String(255))
@@ -92,10 +94,15 @@ class Consecutivo(Base):
     __tablename__ = "consecutivos"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    prefijo: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
+    empresa_id: Mapped[int | None] = mapped_column(ForeignKey("empresas.id"), nullable=True, index=True)
+    prefijo: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     ultimo_num: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("prefijo", "empresa_id", name="uq_consecutivos_prefijo_empresa"),
     )
 
     def __repr__(self) -> str:

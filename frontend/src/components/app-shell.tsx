@@ -1,10 +1,14 @@
 "use client";
 
-import { Menu, X, Search } from "lucide-react";
-import { useState } from "react";
-import { usePathname } from "next/navigation";
+import { Menu, X, LogOut } from "lucide-react";
+import { useState, useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { Sidebar } from "@/components/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { useAuthStore } from "@/stores/auth";
+
+const AUTH_PATHS = ["/login", "/registro"];
 
 const PAGE_META: Record<string, { title: string; description: string }> = {
   "/causacion": {
@@ -24,6 +28,58 @@ const PAGE_META: Record<string, { title: string; description: string }> = {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const { token, usuario, logout, _hydrated } = useAuthStore();
+
+  const isAuthPage = AUTH_PATHS.some((p) => pathname.startsWith(p));
+
+  // Redirect only after hydration is complete to avoid F5 false-logout
+  useEffect(() => {
+    if (_hydrated && !isAuthPage && !token) {
+      router.replace("/login");
+    }
+  }, [_hydrated, isAuthPage, token, router]);
+
+  // Auto-logout after 10 minutes of inactivity
+  useEffect(() => {
+    if (isAuthPage || !token) return;
+
+    const TIMEOUT = 10 * 60 * 1000;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const reset = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        queryClient.clear();
+        logout();
+        router.replace("/login");
+      }, TIMEOUT);
+    };
+
+    const events = ["mousemove", "mousedown", "keydown", "touchstart", "scroll", "click"] as const;
+    events.forEach((e) => window.addEventListener(e, reset, { passive: true }));
+    reset();
+
+    return () => {
+      clearTimeout(timer);
+      events.forEach((e) => window.removeEventListener(e, reset));
+    };
+  }, [isAuthPage, token, logout, queryClient, router]);
+
+  // Render auth pages without the shell
+  if (isAuthPage) {
+    return <>{children}</>;
+  }
+
+  // Wait for hydration before deciding to redirect
+  if (!_hydrated) {
+    return null;
+  }
+
+  if (!token) {
+    return null;
+  }
 
   const match = Object.entries(PAGE_META).find(([key]) => pathname.startsWith(key));
   const pageMeta = match ? match[1] : { title: "Smart Causación", description: "" };
@@ -120,26 +176,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm"
-              style={{
-                borderColor: "var(--border-soft)",
-                color: "var(--text-muted)",
-                backgroundColor: "var(--bg-elevated)",
-              }}
-              aria-label="Buscar"
-            >
-              <Search className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Buscar...</span>
-              <kbd
-                className="ml-1 hidden rounded px-1.5 py-0.5 text-[10px] font-mono sm:inline"
-                style={{ backgroundColor: "var(--border-soft)", color: "var(--text-muted)" }}
-              >
-                ⌘K
-              </kbd>
-            </button>
             <ThemeToggle />
+            {usuario && (
+              <div className="flex items-center gap-2 border-l pl-2" style={{ borderColor: "var(--border-soft)" }}>
+                <span className="hidden text-xs lg:inline" style={{ color: "var(--text-muted)" }}>
+                  {usuario.nombre}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { queryClient.clear(); logout(); router.replace("/login"); }}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border"
+                  style={{ borderColor: "var(--border-soft)", color: "var(--text-muted)" }}
+                  title="Cerrar sesión"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
           </div>
         </header>
 

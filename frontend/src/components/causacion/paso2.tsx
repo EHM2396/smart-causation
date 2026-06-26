@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWizardStore } from "@/stores/wizard";
@@ -324,7 +324,7 @@ export function Paso2() {
                   return (
                     <div key={jdx} className="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-elevated)] p-4 space-y-3">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-medium text-[var(--text-muted)]">\u00cdtem {jdx + 1}</span>
+                        <span className="text-xs font-medium text-[var(--text-muted)]">Ítem {jdx + 1}</span>
                         <span className="text-sm text-[var(--text-secondary)]">{item.descripcion}</span>
                       </div>
                       <div className="grid grid-cols-4 gap-3">

@@ -14,12 +14,14 @@ from io import BytesIO
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from api.dependencies import get_current_user, get_empresa_activa
 from api.schemas import (
     CausacionRequest,
     CausacionResponse,
     SugerenciaRequest,
     SugerenciaResponse,
 )
+from db.models.auth import Empresa, Usuario
 from db.models.contabilidad import FacturaCausada
 from db.session import get_db
 from services import causacion_service, consecutivos_service
@@ -28,11 +30,14 @@ from core import exporter, validator
 router = APIRouter(prefix="/causacion", tags=["Causación"])
 
 DB = Annotated[Session, Depends(get_db)]
+EmpresaActiva = Annotated[Empresa, Depends(get_empresa_activa)]
+CurrentUser = Annotated[Usuario, Depends(get_current_user)]
 
 
 @router.post("/parsear", response_model=list[dict])
 async def parsear_facturas(
     archivo: UploadFile = File(..., description="Archivo XLSX de facturas DIAN"),
+    empresa: Empresa = Depends(get_empresa_activa),
 ):
     """
     Paso 1: Recibe el archivo XLSX de facturas electrónicas DIAN y retorna
@@ -47,13 +52,13 @@ async def parsear_facturas(
 
 
 @router.post("/sugerir-cuenta", response_model=SugerenciaResponse)
-def sugerir_cuenta(body: SugerenciaRequest, db: DB):
+def sugerir_cuenta(body: SugerenciaRequest, db: DB, empresa: EmpresaActiva, current_user: CurrentUser):
     """
     Dado un NIT y una descripción de ítem, sugiere la cuenta de gasto PUC.
-    Consulta reglas de clasificación y mapeos aprendidos.
+    Consulta reglas de clasificación y mapeos aprendidos del usuario+empresa.
     """
     cuenta = causacion_service.sugerir_cuenta_gasto(
-        db, nit=body.nit, descripcion=body.descripcion
+        db, nit=body.nit, descripcion=body.descripcion, empresa_id=empresa.id, usuario_id=current_user.id
     )
     origen = None
     if cuenta:
@@ -64,14 +69,14 @@ def sugerir_cuenta(body: SugerenciaRequest, db: DB):
 
 
 @router.post("/generar", response_model=CausacionResponse)
-def generar_causacion(body: CausacionRequest, db: DB):
+def generar_causacion(body: CausacionRequest, db: DB, empresa: EmpresaActiva, current_user: CurrentUser):
     """
     Paso final: genera el archivo SIIGO y registra la causación.
     Retorna metadatos; el archivo se descarga por /causacion/descargar/{numero_dian}.
     """
     numero_dian = body.factura.get("numero_dian", "")
 
-    if causacion_service.esta_causada(db, numero_dian):
+    if causacion_service.esta_causada(db, numero_dian, empresa_id=empresa.id):
         raise HTTPException(409, f"La factura {numero_dian!r} ya fue causada")
 
     mapeos = [m.model_dump() for m in body.mapeos_confirmados]
@@ -84,6 +89,7 @@ def generar_causacion(body: CausacionRequest, db: DB):
             tipo_comprobante=body.tipo_comprobante,
             centro_costo=body.centro_costo,
             prefijo=body.prefijo,
+            empresa_id=empresa.id,
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -98,6 +104,8 @@ def generar_causacion(body: CausacionRequest, db: DB):
             cuenta_sugerida=None,
             cuenta_aplicada=m["cuenta_gasto"],
             cod_impuesto=m.get("cod_impuesto"),
+            empresa_id=empresa.id,
+            usuario_id=current_user.id,
         )
 
     causacion_service.registrar_factura_causada(
@@ -105,6 +113,7 @@ def generar_causacion(body: CausacionRequest, db: DB):
         factura=body.factura,
         consecutivo=consecutivo,
         tipo_comprobante=body.tipo_comprobante,
+        empresa_id=empresa.id,
     )
 
     db.commit()
@@ -118,14 +127,14 @@ def generar_causacion(body: CausacionRequest, db: DB):
 
 
 @router.post("/generar-descarga")
-def generar_y_descargar(body: CausacionRequest, db: DB):
+def generar_y_descargar(body: CausacionRequest, db: DB, empresa: EmpresaActiva, current_user: CurrentUser):
     """
     Igual que /generar pero retorna el xlsx como descarga directa.
     Útil para integración rápida con la UI Streamlit mientras migra.
     """
     numero_dian = body.factura.get("numero_dian", "")
 
-    if causacion_service.esta_causada(db, numero_dian):
+    if causacion_service.esta_causada(db, numero_dian, empresa_id=empresa.id):
         raise HTTPException(409, f"La factura {numero_dian!r} ya fue causada")
 
     mapeos = [m.model_dump() for m in body.mapeos_confirmados]
@@ -138,6 +147,7 @@ def generar_y_descargar(body: CausacionRequest, db: DB):
             tipo_comprobante=body.tipo_comprobante,
             centro_costo=body.centro_costo,
             prefijo=body.prefijo,
+            empresa_id=empresa.id,
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -151,6 +161,8 @@ def generar_y_descargar(body: CausacionRequest, db: DB):
             cuenta_sugerida=None,
             cuenta_aplicada=m["cuenta_gasto"],
             cod_impuesto=m.get("cod_impuesto"),
+            empresa_id=empresa.id,
+            usuario_id=current_user.id,
         )
 
     causacion_service.registrar_factura_causada(
@@ -158,6 +170,7 @@ def generar_y_descargar(body: CausacionRequest, db: DB):
         factura=body.factura,
         consecutivo=consecutivo,
         tipo_comprobante=body.tipo_comprobante,
+        empresa_id=empresa.id,
     )
 
     db.commit()
@@ -206,12 +219,12 @@ class BatchValidacionResponse(BaseModel):
 
 
 @router.post("/batch/validar", response_model=BatchValidacionResponse)
-def batch_validar(body: BatchRequest, db: DB):
+def batch_validar(body: BatchRequest, db: DB, empresa: EmpresaActiva):
     """
     Construye los movimientos para N facturas y valida la partida doble.
     NO persiste nada. Usar antes de confirmar.
     """
-    ultimo = consecutivos_service.get_ultimo(db, body.tipo_comprobante)
+    ultimo = consecutivos_service.get_ultimo(db, body.tipo_comprobante, empresa_id=empresa.id)
     todos_movs: list[dict] = []
 
     for idx, item in enumerate(body.items):
@@ -253,17 +266,17 @@ def batch_validar(body: BatchRequest, db: DB):
 
 
 @router.post("/batch/generar")
-def batch_generar(body: BatchRequest, db: DB):
+def batch_generar(body: BatchRequest, db: DB, empresa: EmpresaActiva, current_user: CurrentUser):
     """
     Genera el xlsx consolidado para N facturas y opcionalmente confirma.
     Retorna el archivo como descarga directa.
     """
-    ultimo = consecutivos_service.get_ultimo(db, body.tipo_comprobante)
+    ultimo = consecutivos_service.get_ultimo(db, body.tipo_comprobante, empresa_id=empresa.id)
     todos_movs: list[dict] = []
 
     for idx, item in enumerate(body.items):
         numero_dian = item.factura.get("numero_dian", "")
-        if causacion_service.esta_causada(db, numero_dian):
+        if causacion_service.esta_causada(db, numero_dian, empresa_id=empresa.id):
             raise HTTPException(409, f"La factura {numero_dian!r} ya fue causada")
         consecutivo = ultimo + 1 + idx
         movs = exporter.construir_movimientos(
@@ -291,6 +304,8 @@ def batch_generar(body: BatchRequest, db: DB):
                         cuenta_aplicada=m["cuenta_gasto"],
                         cod_impuesto=m.get("cod_impuesto"),
                         origen=m.get("fuente", "manual"),
+                        empresa_id=empresa.id,
+                        usuario_id=current_user.id,
                     )
             causacion_service.registrar_factura_causada(
                 db,
@@ -298,6 +313,7 @@ def batch_generar(body: BatchRequest, db: DB):
                 consecutivo=consecutivo,
                 tipo_comprobante=body.tipo_comprobante,
                 archivo_origen=item.factura.get("_archivo", ""),
+                empresa_id=empresa.id,
                 datos_json=json.dumps(
                     {
                         "factura": item.factura,
@@ -309,7 +325,7 @@ def batch_generar(body: BatchRequest, db: DB):
                     default=str,
                 ),
             )
-        consecutivos_service.set_ultimo(db, body.tipo_comprobante, ultimo + len(body.items))
+        consecutivos_service.set_ultimo(db, body.tipo_comprobante, ultimo + len(body.items), empresa_id=empresa.id)
         db.commit()
 
     nombre = exporter.nombre_archivo_salida()
@@ -323,6 +339,7 @@ def batch_generar(body: BatchRequest, db: DB):
 @router.get("/historial/exportar-lote")
 def exportar_lote_historial(
     db: DB,
+    empresa: EmpresaActiva,
     fecha_desde: str | None = None,
     fecha_hasta: str | None = None,
     tipo_comprobante: str | None = None,
@@ -330,7 +347,7 @@ def exportar_lote_historial(
     """Genera un único XLSX SIIGO con todas las facturas del período que tienen datos almacenados."""
     stmt = (
         select(FacturaCausada)
-        .where(FacturaCausada.datos_json.is_not(None))
+        .where(FacturaCausada.datos_json.is_not(None), FacturaCausada.empresa_id == empresa.id)
         .order_by(FacturaCausada.id)
     )
     if fecha_desde:
@@ -380,6 +397,7 @@ def exportar_lote_historial(
 @router.get("/historial", response_model=list[dict])
 def get_historial_causadas(
     db: DB,
+    empresa: EmpresaActiva,
     fecha_desde: str | None = None,
     fecha_hasta: str | None = None,
     buscar: str | None = None,
@@ -389,6 +407,7 @@ def get_historial_causadas(
     """Listado filtrable de facturas causadas, orden descendente por fecha."""
     stmt = (
         select(FacturaCausada)
+        .where(FacturaCausada.empresa_id == empresa.id)
         .order_by(FacturaCausada.fecha_causacion.desc(), FacturaCausada.id.desc())
         .limit(limit)
     )
@@ -434,10 +453,10 @@ def get_historial_causadas(
 
 
 @router.post("/historial/{registro_id}/regenerar")
-def regenerar_historial(registro_id: int, db: DB):
+def regenerar_historial(registro_id: int, db: DB, empresa: EmpresaActiva):
     """Re-genera el xlsx de una factura causada previamente a partir de datos almacenados."""
     fc = db.get(FacturaCausada, registro_id)
-    if not fc:
+    if not fc or fc.empresa_id != empresa.id:
         raise HTTPException(404, "Registro no encontrado")
     if not fc.datos_json:
         raise HTTPException(
@@ -466,11 +485,12 @@ def regenerar_historial(registro_id: int, db: DB):
 @router.delete("/historial", response_model=dict)
 def limpiar_historial(
     db: DB,
+    empresa: EmpresaActiva,
     fecha_desde: str | None = None,
     fecha_hasta: str | None = None,
 ):
     """Elimina registros del historial, opcionalmente filtrados por rango de fechas."""
-    stmt = delete(FacturaCausada)
+    stmt = delete(FacturaCausada).where(FacturaCausada.empresa_id == empresa.id)
     if fecha_desde:
         try:
             stmt = stmt.where(FacturaCausada.fecha_causacion >= date.fromisoformat(fecha_desde))
