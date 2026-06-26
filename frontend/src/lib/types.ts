@@ -157,6 +157,7 @@ export interface LoginResponse {
   rol: string;
   empresa_id: number;
   empresa_nombre: string;
+  email_verificado: boolean;
 }
 
 // ─── Wizard state ─────────────────────────────────────────────────────────────
