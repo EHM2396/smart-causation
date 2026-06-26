@@ -20,7 +20,59 @@ El usuario debe poder registrarse y empezar a usar la plataforma sin intervenci�
 - [ ] **Registro de usuario** — formulario `/registro` funcional: nombre, email, contraseña, selección de plan
 - [ ] **Verificación de email** — enviar email de confirmación antes de activar la cuenta (SendGrid o Resend)
 - [ ] **Recuperación de contraseña** — flujo "olvidé mi contraseña" con enlace por email y token de un solo uso
+- [ ] **Login social (Google / Microsoft)** — ver paso a paso detallado abajo
 - [ ] **Onboarding post-registro** — después del primer login, guiar al usuario a crear su empresa y cargar sus catálogos
+
+### Login social — paso a paso de implementación
+
+La estrategia es mantener el sistema JWT actual intacto. El backend maneja todo el flujo OAuth y al final emite el mismo JWT que el login normal. El frontend solo necesita un botón.
+
+**Cambios en base de datos (1 migración)**
+```
+ALTER TABLE usuarios ADD COLUMN proveedor VARCHAR(20) DEFAULT 'local';
+ALTER TABLE usuarios ALTER COLUMN password_hash DROP NOT NULL;
+```
+- `proveedor`: `'local'` (email+contraseña) o `'google'` / `'microsoft'`
+- `password_hash` pasa a ser nullable para cuentas OAuth
+
+**Paso 1 — Google Cloud Console**
+1. Ir a console.cloud.google.com → crear proyecto "Smart Causación"
+2. APIs & Services → Credentials → Create Credentials → OAuth 2.0 Client ID
+3. Tipo: Web application
+4. Authorized redirect URIs: `https://smart-causation.onrender.com/auth/google/callback`
+   (y `http://localhost:8000/auth/google/callback` para desarrollo)
+5. Guardar `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` como variables de entorno en Render
+
+**Paso 2 — Backend: nueva dependencia**
+```
+authlib==1.3.1   # agregar a requirements_api.txt
+```
+
+**Paso 3 — Backend: endpoints OAuth**
+Crear `api/routers/oauth.py` con dos endpoints:
+- `GET /auth/google` → redirige al consentimiento de Google
+- `GET /auth/google/callback` → recibe el code, obtiene email de Google, busca o crea el usuario en `usuarios`, emite JWT y redirige al frontend con el token en la URL: `https://smartcausacion.com/auth/callback?token=xxx&empresa_id=yyy`
+
+Lógica del callback:
+1. Si el email ya existe en `usuarios` (proveedor local o google) → login normal, emite JWT
+2. Si el email no existe → crear usuario con `proveedor='google'`, `password_hash=NULL`, asignar empresa por defecto según plan → emite JWT
+
+**Paso 4 — Frontend: página de callback**
+Crear `frontend/src/app/auth/callback/page.tsx`:
+- Lee `token`, `empresa_id`, `usuario_id`, etc. de los query params de la URL
+- Llama a `useAuthStore.login(data)` igual que el login normal
+- Redirige a `/causacion`
+
+**Paso 5 — Frontend: botón en login y registro**
+Agregar en ambas páginas:
+```tsx
+<a href="https://smart-causation.onrender.com/auth/google">
+  <button>Continuar con Google</button>
+</a>
+```
+
+**Para agregar Microsoft/GitHub después:**
+El mismo patrón se repite: registrar app en Azure AD o GitHub OAuth Apps, crear `/auth/microsoft` y `/auth/microsoft/callback`, agregar botón. El resto del sistema no cambia.
 
 ---
 

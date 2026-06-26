@@ -66,11 +66,14 @@ export function CausacionWizard() {
   const mapeados = mapeos.filter((m) => m.cuenta_gasto).length;
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full flex-col lg:flex-row">
+      {/* Config panel — top strip on mobile, right sidebar on desktop */}
+      <ConfigPanel />
+
       {/* Main */}
-      <div className="flex-1 overflow-y-auto px-8 py-8">
+      <div className="flex-1 overflow-y-auto px-4 py-6 lg:px-8 lg:py-8">
         {/* KPI bar */}
-        <div className="grid grid-cols-2 gap-3 mb-8 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 mb-6 sm:grid-cols-4 lg:mb-8">
           <KpiCard icon={FileText}    label="Facturas"       value={facturas.length} accent="#059669" sublabel={facturas.length ? "archivos cargados" : "Sin cargar aún"} />
           <KpiCard icon={Layers}      label="Ítems"          value={totalItems}      accent="#7c3aed" sublabel={totalItems ? "líneas de factura" : "Carga archivos primero"} />
           <KpiCard icon={CheckCircle2} label="Mapeadas"      value={mapeados}        accent="#0891b2" sublabel={mapeados ? `de ${totalItems} ítems` : "Pendiente mapeo"} />
@@ -78,7 +81,7 @@ export function CausacionWizard() {
         </div>
 
         {/* Steps */}
-        <div className="mb-8">
+        <div className="mb-6 lg:mb-8">
           <StepIndicator />
         </div>
 
@@ -90,9 +93,6 @@ export function CausacionWizard() {
           {paso === 4 && <Paso4 />}
         </div>
       </div>
-
-      {/* Config panel */}
-      <ConfigPanel />
     </div>
   );
 }

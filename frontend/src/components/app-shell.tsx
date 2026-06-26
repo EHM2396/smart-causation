@@ -146,7 +146,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               Smart Causación
             </span>
           </div>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <button
+              type="button"
+              onClick={() => { queryClient.clear(); logout(); router.replace("/login"); }}
+              className="flex h-9 w-9 items-center justify-center rounded-lg border"
+              style={{ borderColor: "var(--border-soft)", color: "var(--text-muted)" }}
+              title="Cerrar sesión"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </header>
 
         {/* Desktop topbar */}
