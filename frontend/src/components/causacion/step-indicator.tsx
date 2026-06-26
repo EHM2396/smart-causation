@@ -4,10 +4,10 @@ import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const PASOS = [
-  { n: 1, label: "Cargar facturas" },
-  { n: 2, label: "Mapear cuentas" },
-  { n: 3, label: "Validar partida" },
-  { n: 4, label: "Descargar" },
+  { n: 1, label: "Cargar facturas",  short: "Cargar"    },
+  { n: 2, label: "Mapear cuentas",   short: "Mapear"    },
+  { n: 3, label: "Validar partida",  short: "Validar"   },
+  { n: 4, label: "Descargar",        short: "Descargar" },
 ];
 
 export function StepIndicator() {
@@ -15,7 +15,7 @@ export function StepIndicator() {
 
   return (
     <div
-      className="flex items-center justify-between rounded-xl px-6 py-4"
+      className="flex items-center justify-between rounded-xl px-3 py-4 sm:px-6"
       style={{
         backgroundColor: "var(--bg-surface)",
         border: "1px solid var(--border-soft)",
@@ -56,7 +56,7 @@ export function StepIndicator() {
 
               {/* Label */}
               <span
-                className="text-xs font-medium whitespace-nowrap"
+                className="text-[10px] font-medium whitespace-nowrap sm:text-xs"
                 style={{
                   color: active
                     ? "var(--brand)"
@@ -65,7 +65,8 @@ export function StepIndicator() {
                     : "var(--text-muted)",
                 }}
               >
-                {p.label}
+                <span className="sm:hidden">{p.short}</span>
+                <span className="hidden sm:inline">{p.label}</span>
               </span>
             </div>
 
