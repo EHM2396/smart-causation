@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Loader2 } from "lucide-react";
+import { Loader2, MailWarning, CheckCircle2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
 
@@ -12,6 +12,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [unverified, setUnverified] = useState(false);
+  const [resendSent, setResendSent] = useState(false);
+  const [resending, setResending] = useState(false);
   const login = useAuthStore((s) => s.login);
   const router = useRouter();
 
@@ -19,15 +22,28 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     setError("");
+    setUnverified(false);
     try {
       const data = await api.login(email, password);
       login(data);
+      if (!data.email_verificado) {
+        setUnverified(true);
+        setLoading(false);
+        return;
+      }
       router.replace("/causacion");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al iniciar sesión");
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleResend() {
+    setResending(true);
+    await api.resendVerification(email);
+    setResendSent(true);
+    setResending(false);
   }
 
   return (
@@ -61,13 +77,44 @@ export default function LoginPage() {
           </p>
         </div>
 
+        {/* Banner: email no verificado */}
+        {unverified && (
+          <div className="mb-4 rounded-xl border p-4 space-y-3"
+            style={{ backgroundColor: "rgba(245,158,11,0.08)", borderColor: "rgba(245,158,11,0.3)" }}>
+            <div className="flex items-start gap-2">
+              <MailWarning className="h-5 w-5 mt-0.5 shrink-0" style={{ color: "#d97706" }} />
+              <div>
+                <p className="text-sm font-semibold" style={{ color: "#d97706" }}>
+                  Verifica tu correo electrónico
+                </p>
+                <p className="text-xs mt-1" style={{ color: "var(--text-secondary)" }}>
+                  Te enviamos un enlace a <strong>{email}</strong>. Debes verificar tu cuenta para continuar.
+                </p>
+              </div>
+            </div>
+            {resendSent ? (
+              <div className="flex items-center gap-1.5 text-xs" style={{ color: "#059669" }}>
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Correo reenviado — revisa tu bandeja.
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleResend}
+                disabled={resending}
+                className="flex items-center gap-1.5 text-xs font-medium disabled:opacity-60"
+                style={{ color: "#d97706" }}
+              >
+                {resending && <Loader2 className="h-3 w-3 animate-spin" />}
+                {resending ? "Enviando..." : "Reenviar correo de verificación"}
+              </button>
+            )}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label
-              htmlFor="email"
-              className="mb-1.5 block text-sm font-medium"
-              style={{ color: "var(--text-secondary)" }}
-            >
+            <label htmlFor="email" className="mb-1.5 block text-sm font-medium" style={{ color: "var(--text-secondary)" }}>
               Email
             </label>
             <input
@@ -79,22 +126,19 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="tu@empresa.com"
               className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors"
-              style={{
-                backgroundColor: "var(--bg-elevated)",
-                borderColor: "var(--border-soft)",
-                color: "var(--text-primary)",
-              }}
+              style={{ backgroundColor: "var(--bg-elevated)", borderColor: "var(--border-soft)", color: "var(--text-primary)" }}
             />
           </div>
 
           <div>
-            <label
-              htmlFor="password"
-              className="mb-1.5 block text-sm font-medium"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              Contraseña
-            </label>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label htmlFor="password" className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>
+                Contraseña
+              </label>
+              <Link href="/forgot-password" className="text-xs font-medium" style={{ color: "var(--brand)" }}>
+                ¿Olvidaste tu contraseña?
+              </Link>
+            </div>
             <input
               id="password"
               type="password"
@@ -104,19 +148,12 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors"
-              style={{
-                backgroundColor: "var(--bg-elevated)",
-                borderColor: "var(--border-soft)",
-                color: "var(--text-primary)",
-              }}
+              style={{ backgroundColor: "var(--bg-elevated)", borderColor: "var(--border-soft)", color: "var(--text-primary)" }}
             />
           </div>
 
           {error && (
-            <p
-              className="rounded-lg px-3 py-2 text-sm"
-              style={{ backgroundColor: "rgba(239,68,68,0.1)", color: "#ef4444" }}
-            >
+            <p className="rounded-lg px-3 py-2 text-sm" style={{ backgroundColor: "rgba(239,68,68,0.1)", color: "#ef4444" }}>
               {error}
             </p>
           )}
@@ -134,11 +171,7 @@ export default function LoginPage() {
 
         <p className="mt-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>
           ¿No tienes cuenta?{" "}
-          <Link
-            href="/registro"
-            className="font-medium"
-            style={{ color: "var(--brand)" }}
-          >
+          <Link href="/registro" className="font-medium" style={{ color: "var(--brand)" }}>
             Regístrate
           </Link>
         </p>

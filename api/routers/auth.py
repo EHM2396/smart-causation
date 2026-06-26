@@ -1,29 +1,32 @@
 """
-Router: /auth – autenticación y registro de usuarios.
+Router: /auth – autenticación, registro y flujo de email.
 """
 from __future__ import annotations
 
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 import bcrypt as _bcrypt
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from jose import jwt
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.dependencies import ALGORITHM, SECRET_KEY, get_current_user
-from db.models.auth import Empresa, Plan, Usuario, UsuarioEmpresa
+from db.models.auth import Empresa, Plan, TokenEmail, Usuario, UsuarioEmpresa
 from db.session import get_db
+from services import email_service
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 DB = Annotated[Session, Depends(get_db)]
 
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))  # 7 días
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://smart-causation-52ig.vercel.app")
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -50,6 +53,24 @@ class TokenResponse(BaseModel):
     rol: str
     empresa_id: int
     empresa_nombre: str
+    email_verificado: bool = True
+
+
+class EmailRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    nueva_password: str
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+class MsgResponse(BaseModel):
+    message: str
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -76,6 +97,33 @@ def _empresa_del_usuario(db: Session, usuario_id: int) -> Empresa | None:
     )
 
 
+def _crear_token_email(db: Session, usuario_id: int, tipo: str, minutos: int) -> str:
+    token = secrets.token_urlsafe(32)
+    db.add(TokenEmail(
+        usuario_id=usuario_id,
+        token=token,
+        tipo=tipo,
+        expira_at=datetime.now(timezone.utc) + timedelta(minutes=minutos),
+    ))
+    db.flush()
+    return token
+
+
+def _consumir_token(db: Session, token: str, tipo: str) -> TokenEmail:
+    row = db.scalar(
+        select(TokenEmail).where(TokenEmail.token == token, TokenEmail.tipo == tipo)
+    )
+    if not row:
+        raise HTTPException(status_code=400, detail="Token inválido")
+    if row.usado:
+        raise HTTPException(status_code=400, detail="El token ya fue utilizado")
+    if row.expira_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="El token ha expirado")
+    row.usado = True
+    db.flush()
+    return row
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/login", response_model=TokenResponse)
@@ -98,11 +146,12 @@ def login(body: LoginRequest, db: DB):
         rol=usuario.rol,
         empresa_id=empresa.id,
         empresa_nombre=empresa.nombre,
+        email_verificado=usuario.email_verificado,
     )
 
 
 @router.post("/registro", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-def registro(body: RegistroRequest, db: DB):
+def registro(body: RegistroRequest, background_tasks: BackgroundTasks, db: DB):
     email = body.email.lower().strip()
     if db.scalar(select(Usuario).where(Usuario.email == email)):
         raise HTTPException(status_code=409, detail="El email ya está registrado")
@@ -115,6 +164,7 @@ def registro(body: RegistroRequest, db: DB):
         nombre=body.nombre,
         rol="user",
         plan_id=plan.id if plan else None,
+        email_verificado=False,
     )
     db.add(usuario)
     db.flush()
@@ -128,9 +178,15 @@ def registro(body: RegistroRequest, db: DB):
     db.flush()
 
     db.add(UsuarioEmpresa(usuario_id=usuario.id, empresa_id=empresa.id, rol="owner"))
+
+    token_verif = _crear_token_email(db, usuario.id, "verificacion", minutos=1440)  # 24h
     db.commit()
     db.refresh(usuario)
     db.refresh(empresa)
+
+    enlace = f"{FRONTEND_URL}/verify-email?token={token_verif}"
+    html = email_service.plantilla_verificacion(usuario.nombre, enlace)
+    background_tasks.add_task(email_service.send_email, to=email, subject="Verifica tu cuenta — Smart Causación", body_html=html)
 
     return TokenResponse(
         access_token=_create_token(usuario.id),
@@ -140,7 +196,70 @@ def registro(body: RegistroRequest, db: DB):
         rol=usuario.rol,
         empresa_id=empresa.id,
         empresa_nombre=empresa.nombre,
+        email_verificado=False,
     )
+
+
+@router.post("/forgot-password", response_model=MsgResponse)
+def forgot_password(body: EmailRequest, background_tasks: BackgroundTasks, db: DB):
+    usuario = db.scalar(select(Usuario).where(Usuario.email == body.email.lower().strip()))
+    # Respuesta genérica para no revelar si el email existe
+    if not usuario or not usuario.activo:
+        return MsgResponse(message="Si el correo está registrado recibirás un enlace en breve.")
+
+    token_reset = _crear_token_email(db, usuario.id, "reset", minutos=30)
+    db.commit()
+
+    enlace = f"{FRONTEND_URL}/reset-password?token={token_reset}"
+    html = email_service.plantilla_recuperacion(usuario.nombre, enlace)
+    background_tasks.add_task(email_service.send_email, to=usuario.email, subject="Restablece tu contraseña — Smart Causación", body_html=html)
+
+    return MsgResponse(message="Si el correo está registrado recibirás un enlace en breve.")
+
+
+@router.post("/reset-password", response_model=MsgResponse)
+def reset_password(body: ResetPasswordRequest, db: DB):
+    if len(body.nueva_password) < 8:
+        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 8 caracteres")
+
+    row = _consumir_token(db, body.token, "reset")
+    usuario = db.get(Usuario, row.usuario_id)
+    if not usuario:
+        raise HTTPException(status_code=400, detail="Usuario no encontrado")
+
+    usuario.password_hash = _hash_password(body.nueva_password)
+    db.commit()
+    return MsgResponse(message="Contraseña actualizada correctamente.")
+
+
+@router.post("/verify-email", response_model=MsgResponse)
+def verify_email(body: VerifyEmailRequest, db: DB):
+    row = _consumir_token(db, body.token, "verificacion")
+    usuario = db.get(Usuario, row.usuario_id)
+    if not usuario:
+        raise HTTPException(status_code=400, detail="Usuario no encontrado")
+
+    usuario.email_verificado = True
+    db.commit()
+    return MsgResponse(message="Correo verificado correctamente. Ya puedes usar la plataforma.")
+
+
+@router.post("/resend-verification", response_model=MsgResponse)
+def resend_verification(body: EmailRequest, background_tasks: BackgroundTasks, db: DB):
+    usuario = db.scalar(select(Usuario).where(Usuario.email == body.email.lower().strip()))
+    if not usuario or not usuario.activo:
+        return MsgResponse(message="Si el correo está registrado recibirás un nuevo enlace.")
+    if usuario.email_verificado:
+        return MsgResponse(message="Tu correo ya está verificado.")
+
+    token_verif = _crear_token_email(db, usuario.id, "verificacion", minutos=1440)
+    db.commit()
+
+    enlace = f"{FRONTEND_URL}/verify-email?token={token_verif}"
+    html = email_service.plantilla_verificacion(usuario.nombre, enlace)
+    background_tasks.add_task(email_service.send_email, to=usuario.email, subject="Verifica tu cuenta — Smart Causación", body_html=html)
+
+    return MsgResponse(message="Si el correo está registrado recibirás un nuevo enlace.")
 
 
 @router.get("/me", response_model=dict)
@@ -151,6 +270,7 @@ def me(current_user: Annotated[Usuario, Depends(get_current_user)], db: DB):
         "email": current_user.email,
         "nombre": current_user.nombre,
         "rol": current_user.rol,
+        "email_verificado": current_user.email_verificado,
         "empresa_id": empresa.id if empresa else None,
         "empresa_nombre": empresa.nombre if empresa else None,
     }

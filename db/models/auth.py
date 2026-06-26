@@ -12,6 +12,7 @@ from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Text
 
 from db.base import Base
 
@@ -40,6 +41,7 @@ class Usuario(Base):
     rol: Mapped[str] = mapped_column(String(20), nullable=False, default="user")  # admin | user
     plan_id: Mapped[int | None] = mapped_column(ForeignKey("planes.id"), nullable=True)
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    email_verificado: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -56,7 +58,7 @@ class Empresa(Base):
     nombre: Mapped[str] = mapped_column(String(255), nullable=False)
     nit: Mapped[str | None] = mapped_column(String(20), nullable=True)
     activa: Mapped[bool] = mapped_column(Boolean, default=True)
-    owner_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), nullable=False)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     def __repr__(self) -> str:
@@ -79,3 +81,23 @@ class UsuarioEmpresa(Base):
 
     def __repr__(self) -> str:
         return f"<UsuarioEmpresa u={self.usuario_id} e={self.empresa_id} rol={self.rol}>"
+
+
+class TokenEmail(Base):
+    """
+    Tokens de un solo uso para verificación de email y reset de contraseña.
+    tipo: 'verificacion' | 'reset'
+    Expiran automáticamente; se marcan como usados al consumirse.
+    """
+    __tablename__ = "tokens_email"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    token: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)   # 'verificacion' | 'reset'
+    expira_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    usado: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self) -> str:
+        return f"<TokenEmail u={self.usuario_id} tipo={self.tipo} usado={self.usado}>"

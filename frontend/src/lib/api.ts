@@ -86,7 +86,42 @@ export const api = {
     nombre_empresa: string;
     nit_empresa?: string;
   }) => req<LoginResponse>("/auth/registro", { method: "POST", body: JSON.stringify(body) }),
-  me: () => req<{ id: number; email: string; nombre: string; rol: string; empresa_id: number | null; empresa_nombre: string | null }>("/auth/me"),
+  me: () => req<{ id: number; email: string; nombre: string; rol: string; email_verificado: boolean; empresa_id: number | null; empresa_nombre: string | null }>("/auth/me"),
+
+  // Email flows (no requieren auth)
+  forgotPassword: (email: string) =>
+    fetch(`${BASE}/auth/forgot-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    }).then((r) => r.json() as Promise<{ message: string }>),
+
+  resetPassword: (token: string, nueva_password: string) =>
+    fetch(`${BASE}/auth/reset-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, nueva_password }),
+    }).then(async (r) => {
+      if (!r.ok) { const t = await r.text(); throw new Error(t); }
+      return r.json() as Promise<{ message: string }>;
+    }),
+
+  verifyEmail: (token: string) =>
+    fetch(`${BASE}/auth/verify-email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    }).then(async (r) => {
+      if (!r.ok) { const t = await r.text(); throw new Error(t); }
+      return r.json() as Promise<{ message: string }>;
+    }),
+
+  resendVerification: (email: string) =>
+    fetch(`${BASE}/auth/resend-verification`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    }).then((r) => r.json() as Promise<{ message: string }>),
 
   // Cuentas
   getCuentasGasto: () => req<CuentaOpcion[]>("/cuentas/gasto"),
