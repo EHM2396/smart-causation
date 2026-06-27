@@ -8,6 +8,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Sidebar } from "@/components/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useAuthStore } from "@/stores/auth";
+import { useWizardStore } from "@/stores/wizard";
 
 const AUTH_PATHS = ["/login", "/registro"];
 
@@ -36,6 +37,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { token, usuario, logout, _hydrated } = useAuthStore();
+  const resetWizard = useWizardStore((s) => s.reset);
 
   const isAuthPage = AUTH_PATHS.some((p) => pathname.startsWith(p));
 
@@ -155,7 +157,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <ThemeToggle />
             <button
               type="button"
-              onClick={() => { queryClient.clear(); logout(); router.replace("/login"); }}
+              onClick={() => { resetWizard(); queryClient.clear(); logout(); router.replace("/login"); }}
               className="flex h-9 w-9 items-center justify-center rounded-lg border"
               style={{ borderColor: "var(--border-soft)", color: "var(--text-muted)" }}
               title="Cerrar sesión"
@@ -206,7 +208,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </Link>
                 <button
                   type="button"
-                  onClick={() => { queryClient.clear(); logout(); router.replace("/login"); }}
+                  onClick={() => { resetWizard(); queryClient.clear(); logout(); router.replace("/login"); }}
                   className="flex h-8 w-8 items-center justify-center rounded-lg border"
                   style={{ borderColor: "var(--border-soft)", color: "var(--text-muted)" }}
                   title="Cerrar sesión"

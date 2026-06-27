@@ -349,7 +349,7 @@ export function Paso2() {
                             <div className="flex items-start gap-1.5 mt-1 rounded-lg px-2.5 py-2" style={{ backgroundColor: "var(--warning-bg)", border: "1px solid var(--warning-border)" }}>
                               <Sparkles className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: "var(--warning-text)" }} />
                               <p className="text-xs leading-snug" style={{ color: "var(--warning-text)" }}>
-                                Sin mapeo previo para este \u00edtem. Selecciona la cuenta manualmente \u2014 el sistema aprender\u00e1 para la pr\u00f3xima vez.
+                                Sin mapeo previo para este ítem. Selecciona la cuenta manualmente — el sistema aprenderá para la próxima vez.
                               </p>
                             </div>
                           )}
