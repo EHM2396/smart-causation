@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Combobox } from "@/components/ui/combobox";
 import { Badge } from "@/components/ui/badge";
-import { DataTableShell, useDataTable } from "@/components/ui/data-table";
+import { DataTableShell, FilterChips, SortableTh, useDataTable } from "@/components/ui/data-table";
 import {
   Dialog,
   DialogContent,
@@ -507,8 +507,29 @@ function ImpuestosTab({
   const [cuentaCre, setCuentaCre] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+  const [filterTipo, setFilterTipo] = useState("all");
 
-  const dt = useDataTable(imps, searchImpuesto);
+  const impsFiltered = useMemo(() => {
+    if (filterTipo === "all") return imps;
+    return imps.filter((i) => {
+      const t = (i.tipo_impuesto ?? "").toLowerCase();
+      if (filterTipo === "iva") return t.includes("iva");
+      if (filterTipo === "retefuente") return t.includes("retefuente");
+      if (filterTipo === "reteica") return t.includes("reteica");
+      if (filterTipo === "otro") return !t.includes("iva") && !t.includes("rete");
+      return true;
+    });
+  }, [imps, filterTipo]);
+
+  const dt = useDataTable(impsFiltered, searchImpuesto, {
+    sortFns: {
+      codigo: (a, b) => a.codigo.localeCompare(b.codigo),
+      nombre: (a, b) => (a.nombre ?? "").localeCompare(b.nombre ?? ""),
+      tarifa: (a, b) => (a.tarifa ?? 0) - (b.tarifa ?? 0),
+      tipo: (a, b) => (a.tipo_impuesto ?? "").localeCompare(b.tipo_impuesto ?? ""),
+    },
+    defaultSort: { col: "codigo", dir: "asc" },
+  });
 
   const allCuentas: CuentaOpcion[] = [...cuentasPago, ...cuentasGasto];
   const cuentaOpts = allCuentas.map((c) => ({
@@ -572,15 +593,31 @@ function ImpuestosTab({
         onAdd={() => { setErr(""); setModalOpen(true); }}
         addLabel="Agregar impuesto"
         searchPlaceholder="Buscar por código, nombre o tipo..."
+        filters={
+          <FilterChips
+            label="Tipo"
+            value={filterTipo}
+            onChange={(v) => { setFilterTipo(v); }}
+            options={[
+              { value: "all", label: "Todos" },
+              { value: "iva", label: "IVA" },
+              { value: "retefuente", label: "Retefuente" },
+              { value: "reteica", label: "Reteica" },
+              { value: "otro", label: "Otro" },
+            ]}
+          />
+        }
       >
         <table className="w-full min-w-[700px] text-sm">
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
-              {["Código", "Nombre", "Tipo", "Tarifa %", "Cta. Débito", "Cta. Crédito", ""].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
-                  {h}
-                </th>
-              ))}
+              <SortableTh label="Código"   col="codigo" sortCol={dt.sortCol} sortDir={dt.sortDir} onSort={dt.onSort} />
+              <SortableTh label="Nombre"   col="nombre" sortCol={dt.sortCol} sortDir={dt.sortDir} onSort={dt.onSort} />
+              <SortableTh label="Tipo"     col="tipo"   sortCol={dt.sortCol} sortDir={dt.sortDir} onSort={dt.onSort} />
+              <SortableTh label="Tarifa %" col="tarifa" sortCol={dt.sortCol} sortDir={dt.sortDir} onSort={dt.onSort} />
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Cta. Débito</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Cta. Crédito</th>
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -704,8 +741,26 @@ function PlanCuentasTab({
     return [...uniq.values()].sort((a, b) => a.codigo.localeCompare(b.codigo));
   }, [cuentasPago, cuentasGasto]);
 
-  const dt = useDataTable(cuentas, searchCuenta);
+  const [filterTipoCuenta, setFilterTipoCuenta] = useState("all");
   const [deletingCodigo, setDeletingCodigo] = useState<string | null>(null);
+
+  const cuentasFiltradas = useMemo(() => {
+    if (filterTipoCuenta === "all") return cuentas;
+    const esPago  = (c: CuentaOpcion) => cuentasPago.some((x) => x.codigo === c.codigo);
+    const esGasto = (c: CuentaOpcion) => cuentasGasto.some((x) => x.codigo === c.codigo);
+    if (filterTipoCuenta === "pago")  return cuentas.filter((c) => esPago(c) && !esGasto(c));
+    if (filterTipoCuenta === "gasto") return cuentas.filter((c) => esGasto(c) && !esPago(c));
+    if (filterTipoCuenta === "ambos") return cuentas.filter((c) => esPago(c) && esGasto(c));
+    return cuentas;
+  }, [cuentas, filterTipoCuenta, cuentasPago, cuentasGasto]);
+
+  const dt = useDataTable(cuentasFiltradas, searchCuenta, {
+    sortFns: {
+      codigo: (a, b) => a.codigo.localeCompare(b.codigo),
+      nombre: (a, b) => a.nombre.localeCompare(b.nombre),
+    },
+    defaultSort: { col: "codigo", dir: "asc" },
+  });
 
   const handleAdd = async () => {
     if (!codigo.trim() || !nombre.trim()) {
@@ -752,15 +807,27 @@ function PlanCuentasTab({
         onAdd={() => { setErr(""); setModalOpen(true); }}
         addLabel="Agregar cuenta"
         searchPlaceholder="Buscar por código o nombre..."
+        filters={
+          <FilterChips
+            label="Tipo"
+            value={filterTipoCuenta}
+            onChange={setFilterTipoCuenta}
+            options={[
+              { value: "all",   label: "Todas" },
+              { value: "pago",  label: "Solo Pago" },
+              { value: "gasto", label: "Solo Gasto" },
+              { value: "ambos", label: "Pago y Gasto" },
+            ]}
+          />
+        }
       >
         <table className="w-full min-w-[560px] text-sm">
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
-              {["Código", "Nombre", "Tipo", ""].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
-                  {h}
-                </th>
-              ))}
+              <SortableTh label="Código" col="codigo" sortCol={dt.sortCol} sortDir={dt.sortDir} onSort={dt.onSort} />
+              <SortableTh label="Nombre" col="nombre" sortCol={dt.sortCol} sortDir={dt.sortDir} onSort={dt.onSort} />
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Tipo</th>
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -883,7 +950,13 @@ function TiposTab({ tipos }: { tipos: TipoComprobanteOpcion[] }) {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
 
-  const dt = useDataTable(tipos, searchTipo);
+  const dt = useDataTable(tipos, searchTipo, {
+    sortFns: {
+      codigo: (a, b) => a.codigo.localeCompare(b.codigo),
+      titulo: (a, b) => a.titulo.localeCompare(b.titulo),
+    },
+    defaultSort: { col: "codigo", dir: "asc" },
+  });
 
   const handleAdd = async () => {
     if (!codigo.trim() || !titulo.trim()) {
@@ -930,11 +1003,9 @@ function TiposTab({ tipos }: { tipos: TipoComprobanteOpcion[] }) {
         <table className="w-full min-w-[400px] text-sm">
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
-              {["Código", "Título", ""].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
-                  {h}
-                </th>
-              ))}
+              <SortableTh label="Código" col="codigo" sortCol={dt.sortCol} sortDir={dt.sortDir} onSort={dt.onSort} />
+              <SortableTh label="Título" col="titulo" sortCol={dt.sortCol} sortDir={dt.sortDir} onSort={dt.onSort} />
+              <th />
             </tr>
           </thead>
           <tbody>

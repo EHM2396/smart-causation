@@ -1,28 +1,50 @@
 "use client";
 
 import { useState, useMemo, useCallback } from "react";
-import { Search, ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, Plus, ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-react";
 
-// ─── Hook ─────────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export const PAGE_SIZES = [5, 10, 20, 50] as const;
 export type PageSize = (typeof PAGE_SIZES)[number];
+export type SortDir = "asc" | "desc";
+
+interface UseDataTableOptions<T> {
+  defaultPageSize?: PageSize;
+  sortFns?: Record<string, (a: T, b: T) => number>;
+  defaultSort?: { col: string; dir: SortDir };
+}
+
+// ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useDataTable<T>(
   data: T[],
   searchFn: (item: T, query: string) => boolean,
-  defaultPageSize: PageSize = 10
+  options?: UseDataTableOptions<T>
 ) {
+  const { defaultPageSize = 10, sortFns, defaultSort } = options ?? {};
+
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(defaultPageSize);
+  const [sortCol, setSortCol] = useState<string | null>(defaultSort?.col ?? null);
+  const [sortDir, setSortDir] = useState<SortDir>(defaultSort?.dir ?? "asc");
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return data;
-    const q = search.toLowerCase().trim();
-    return data.filter((item) => searchFn(item, q));
+    let result = data;
+    if (search.trim()) {
+      const q = search.toLowerCase().trim();
+      result = result.filter((item) => searchFn(item, q));
+    }
+    if (sortCol && sortFns?.[sortCol]) {
+      const fn = sortFns[sortCol];
+      result = [...result].sort((a, b) =>
+        sortDir === "asc" ? fn(a, b) : fn(b, a)
+      );
+    }
+    return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, search]);
+  }, [data, search, sortCol, sortDir]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -38,6 +60,15 @@ export function useDataTable<T>(
     setPage(1);
   }, []);
 
+  const handleSort = useCallback(
+    (col: string) => {
+      setSortDir((prev) => (sortCol === col ? (prev === "asc" ? "desc" : "asc") : "asc"));
+      setSortCol(col);
+      setPage(1);
+    },
+    [sortCol]
+  );
+
   return {
     search,
     onSearch: handleSearch,
@@ -49,7 +80,83 @@ export function useDataTable<T>(
     rows,
     totalFiltered: filtered.length,
     total: data.length,
+    sortCol,
+    sortDir,
+    onSort: handleSort,
   };
+}
+
+// ─── Sortable column header ───────────────────────────────────────────────────
+
+interface SortableThProps {
+  label: string;
+  col: string;
+  sortCol: string | null;
+  sortDir: SortDir;
+  onSort: (col: string) => void;
+}
+
+export function SortableTh({ label, col, sortCol, sortDir, onSort }: SortableThProps) {
+  const active = sortCol === col;
+  return (
+    <th
+      onClick={() => onSort(col)}
+      className="cursor-pointer select-none px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide group"
+      style={{ color: active ? "var(--brand)" : "var(--text-muted)" }}
+    >
+      <div className="flex items-center gap-1">
+        {label}
+        <span className="transition-opacity" style={{ opacity: active ? 1 : 0.35 }}>
+          {!active ? (
+            <ChevronsUpDown className="h-3 w-3" />
+          ) : sortDir === "asc" ? (
+            <ChevronUp className="h-3 w-3" />
+          ) : (
+            <ChevronDown className="h-3 w-3" />
+          )}
+        </span>
+      </div>
+    </th>
+  );
+}
+
+// ─── Filter chips ─────────────────────────────────────────────────────────────
+
+interface FilterChipsProps {
+  label: string;
+  options: { value: string; label: string }[];
+  value: string;
+  onChange: (v: string) => void;
+}
+
+export function FilterChips({ label, options, value, onChange }: FilterChipsProps) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>
+        {label}:
+      </span>
+      {options.map((opt) => {
+        const active = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            className="rounded-full px-2.5 py-0.5 text-xs font-medium transition-all"
+            style={{
+              backgroundColor: active
+                ? "color-mix(in srgb, var(--brand) 15%, transparent)"
+                : "var(--bg-elevated)",
+              color: active ? "var(--brand)" : "var(--text-muted)",
+              border: `1px solid ${active ? "var(--brand)" : "var(--border-soft)"}`,
+            }}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 // ─── Shell Component ──────────────────────────────────────────────────────────
@@ -68,6 +175,7 @@ interface DataTableShellProps {
   onAdd?: () => void;
   addLabel?: string;
   searchPlaceholder?: string;
+  filters?: React.ReactNode;
   children: React.ReactNode;
 }
 
@@ -85,6 +193,7 @@ export function DataTableShell({
   onAdd,
   addLabel = "Agregar",
   searchPlaceholder = "Buscar...",
+  filters,
   children,
 }: DataTableShellProps) {
   const showing = totalFiltered < total ? `${totalFiltered} de ${total}` : `${total}`;
@@ -151,6 +260,16 @@ export function DataTableShell({
         </div>
       </div>
 
+      {/* Filter chips row */}
+      {filters && (
+        <div
+          className="border-b px-4 py-2"
+          style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}
+        >
+          {filters}
+        </div>
+      )}
+
       {/* Table content */}
       <div className="overflow-x-auto">{children}</div>
 
@@ -183,9 +302,7 @@ export function DataTableShell({
         <div className="flex items-center gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
           <span>
             Pág.{" "}
-            <strong style={{ color: "var(--text-primary)" }}>
-              {page}
-            </strong>{" "}
+            <strong style={{ color: "var(--text-primary)" }}>{page}</strong>{" "}
             / {totalPages}
           </span>
           <button
