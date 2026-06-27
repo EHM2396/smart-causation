@@ -96,39 +96,71 @@ def descargar_plantilla(empresa: EmpresaActiva):
     )
 
 
+def _normalizar_col(col: str) -> str:
+    """Normaliza nombre de columna: minúsculas, sin espacios, sin tildes."""
+    import unicodedata
+    col = col.strip().lower().replace(" ", "_")
+    col = unicodedata.normalize("NFD", col)
+    col = "".join(c for c in col if unicodedata.category(c) != "Mn")
+    return col
+
+
 @router.post("/cargar-excel")
 async def cargar_excel(
     db: DB,
     empresa: EmpresaActiva,
     archivo: UploadFile = File(...),
 ):
-    """Importa cuentas PUC desde un Excel. Columnas obligatorias: codigo, nombre. Hace upsert."""
+    """
+    Importa cuentas PUC desde Excel. Aplica dos filtros obligatorios:
+      1. Código de exactamente 8 dígitos numéricos.
+      2. Columna 'Nivel agrupación' = 'Transaccional' (si la columna existe).
+    Hace upsert de las cuentas válidas.
+    """
     contenido = await archivo.read()
     try:
         df = pd.read_excel(BytesIO(contenido), dtype=str)
     except Exception as e:
         raise HTTPException(400, f"No se pudo leer el archivo: {e}")
 
-    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+    # Mapeo col_normalizada → col_original para acceder a los datos
+    col_map: dict[str, str] = {_normalizar_col(c): c for c in df.columns}
 
-    for col in ("codigo", "nombre"):
-        if col not in df.columns:
-            raise HTTPException(400, f"El archivo debe tener una columna '{col}'.")
+    if "codigo" not in col_map:
+        raise HTTPException(400, "El archivo debe tener una columna 'codigo'.")
+    if "nombre" not in col_map:
+        raise HTTPException(400, "El archivo debe tener una columna 'nombre'.")
+
+    tiene_nivel = "nivel_agrupacion" in col_map
 
     insertados = 0
     actualizados = 0
+    omitidos_codigo = 0    # código no tiene exactamente 8 dígitos
+    omitidos_nivel = 0     # nivel agrupación ≠ Transaccional
     errores: list[dict] = []
 
     for idx, row in df.iterrows():
-        fila = int(idx) + 2
-        codigo = str(row.get("codigo", "")).strip()
-        nombre = str(row.get("nombre", "")).strip()
+        fila = int(idx) + 2  # +2: encabezado en fila 1, df base-0
 
-        if not codigo or not nombre or nombre == "nan":
-            errores.append({"fila": fila, "error": "Código o nombre vacío"})
+        codigo = str(row.get(col_map["codigo"], "")).strip()
+        nombre = str(row.get(col_map["nombre"], "")).strip()
+
+        if not codigo or codigo == "nan" or not nombre or nombre == "nan":
+            continue  # fila vacía, ignorar silenciosamente
+
+        # ── Filtro 1: código exactamente 8 dígitos numéricos ──────────────
+        if not (codigo.isdigit() and len(codigo) == 8):
+            omitidos_codigo += 1
             continue
 
-        fiscal_raw = str(row.get("fiscal", "NO")).strip().upper()
+        # ── Filtro 2: nivel agrupación = Transaccional ────────────────────
+        if tiene_nivel:
+            nivel_val = str(row.get(col_map["nivel_agrupacion"], "")).strip().lower()
+            if nivel_val != "transaccional":
+                omitidos_nivel += 1
+                continue
+
+        fiscal_raw = str(row.get(col_map.get("fiscal", ""), "NO")).strip().upper()
         fiscal = fiscal_raw in ("SI", "SÍ", "S", "1", "TRUE", "YES")
 
         try:
@@ -147,7 +179,13 @@ async def cargar_excel(
             errores.append({"fila": fila, "error": str(e)})
 
     db.commit()
-    return {"insertados": insertados, "actualizados": actualizados, "errores": errores}
+    return {
+        "insertados": insertados,
+        "actualizados": actualizados,
+        "omitidos_codigo": omitidos_codigo,
+        "omitidos_nivel": omitidos_nivel,
+        "errores": errores,
+    }
 
 
 @router.get("/{codigo}", response_model=CuentaOut)

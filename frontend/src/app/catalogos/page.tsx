@@ -40,7 +40,7 @@ const searchDecision = (d: IADecision, q: string) =>
   (d.cuenta_aplicada ?? "").toLowerCase().includes(q);
 
 // - Upload Excel panel -
-type UploadResult = { insertados: number; actualizados: number; errores: { fila: number; error: string }[] };
+type UploadResult = { insertados: number; actualizados: number; omitidos_codigo?: number; omitidos_nivel?: number; errores: { fila: number; error: string }[] };
 
 function UploadExcelPanel({
   onUpload,
@@ -111,11 +111,21 @@ function UploadExcelPanel({
       </button>
 
       {result && !err && (
-        <div className="flex items-center gap-1.5 text-sm" style={{ color: "var(--success)" }}>
-          <CheckCircle2 className="h-4 w-4" />
-          {result.insertados} nuevos, {result.actualizados} actualizados
+        <div className="flex flex-col gap-0.5 text-sm">
+          <div className="flex items-center gap-1.5" style={{ color: "var(--success)" }}>
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+            {result.insertados} nuevas · {result.actualizados} actualizadas
+          </div>
+          {((result.omitidos_codigo ?? 0) > 0 || (result.omitidos_nivel ?? 0) > 0) && (
+            <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+              Omitidas: {result.omitidos_codigo ?? 0} sin 8 dígitos
+              {(result.omitidos_nivel ?? 0) > 0 && ` · ${result.omitidos_nivel} no Transaccional`}
+            </div>
+          )}
           {result.errores.length > 0 && (
-            <span style={{ color: "var(--warning)" }}> · {result.errores.length} error(es)</span>
+            <div className="text-xs" style={{ color: "var(--warning)" }}>
+              {result.errores.length} error(es) al procesar
+            </div>
           )}
         </div>
       )}

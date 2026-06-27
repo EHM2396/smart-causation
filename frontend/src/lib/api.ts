@@ -55,7 +55,7 @@ async function reqBlob(path: string, init?: RequestInit): Promise<Blob> {
 
 // ─── Helpers internos ────────────────────────────────────────────────────────
 
-async function _uploadExcel(path: string, file: File): Promise<{ insertados: number; actualizados: number; errores: { fila: number; error: string }[] }> {
+async function _uploadExcel(path: string, file: File): Promise<{ insertados: number; actualizados: number; omitidos_codigo?: number; omitidos_nivel?: number; errores: { fila: number; error: string }[] }> {
   const { token, empresaId } = useAuthStore.getState();
   const form = new FormData();
   form.append("archivo", file);
