@@ -8,6 +8,8 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
+import re
+
 import bcrypt as _bcrypt
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -74,6 +76,17 @@ class MsgResponse(BaseModel):
     message: str
 
 
+class PerfilUpdateRequest(BaseModel):
+    nombre: str
+    nombre_empresa: str
+    nit_empresa: str | None = None
+
+
+class CambiarPasswordRequest(BaseModel):
+    password_actual: str
+    nueva_password: str
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _verify_password(plain: str, hashed: str) -> bool:
@@ -87,6 +100,18 @@ def _hash_password(pw: str) -> str:
 def _create_token(user_id: int) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     return jwt.encode({"sub": str(user_id), "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def _validar_complejidad_password(password: str) -> str | None:
+    if len(password) < 8:
+        return "Mínimo 8 caracteres"
+    if not re.search(r"[A-Z]", password):
+        return "Debe incluir al menos una mayúscula"
+    if not re.search(r"\d", password):
+        return "Debe incluir al menos un número"
+    if not re.search(r'[!@#$%^&*()\-_=+\[\]{};:\'",.<>/?\\|`~]', password):
+        return "Debe incluir al menos un carácter especial"
+    return None
 
 
 def _empresa_del_usuario(db: Session, usuario_id: int) -> Empresa | None:
@@ -278,4 +303,47 @@ def me(current_user: Annotated[Usuario, Depends(get_current_user)], db: DB):
         "email_verificado": current_user.email_verificado,
         "empresa_id": empresa.id if empresa else None,
         "empresa_nombre": empresa.nombre if empresa else None,
+        "empresa_nit": empresa.nit if empresa else None,
     }
+
+
+@router.put("/perfil", response_model=MsgResponse)
+def actualizar_perfil(
+    body: PerfilUpdateRequest,
+    current_user: Annotated[Usuario, Depends(get_current_user)],
+    db: DB,
+):
+    nombre = body.nombre.strip()
+    if not nombre:
+        raise HTTPException(status_code=400, detail="El nombre no puede estar vacío")
+
+    current_user.nombre = nombre
+
+    empresa = _empresa_del_usuario(db, current_user.id)
+    if empresa:
+        nombre_empresa = body.nombre_empresa.strip()
+        if not nombre_empresa:
+            raise HTTPException(status_code=400, detail="El nombre de empresa no puede estar vacío")
+        empresa.nombre = nombre_empresa
+        empresa.nit = body.nit_empresa.strip() if body.nit_empresa else None
+
+    db.commit()
+    return MsgResponse(message="Perfil actualizado correctamente.")
+
+
+@router.put("/cambiar-password", response_model=MsgResponse)
+def cambiar_password(
+    body: CambiarPasswordRequest,
+    current_user: Annotated[Usuario, Depends(get_current_user)],
+    db: DB,
+):
+    if not _verify_password(body.password_actual, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="La contraseña actual es incorrecta")
+
+    error = _validar_complejidad_password(body.nueva_password)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+
+    current_user.password_hash = _hash_password(body.nueva_password)
+    db.commit()
+    return MsgResponse(message="Contraseña actualizada correctamente.")

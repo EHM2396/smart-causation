@@ -86,7 +86,13 @@ export const api = {
     nombre_empresa: string;
     nit_empresa?: string;
   }) => req<LoginResponse>("/auth/registro", { method: "POST", body: JSON.stringify(body) }),
-  me: () => req<{ id: number; email: string; nombre: string; rol: string; email_verificado: boolean; empresa_id: number | null; empresa_nombre: string | null }>("/auth/me"),
+  me: () => req<{ id: number; email: string; nombre: string; rol: string; email_verificado: boolean; empresa_id: number | null; empresa_nombre: string | null; empresa_nit: string | null }>("/auth/me"),
+
+  actualizarPerfil: (body: { nombre: string; nombre_empresa: string; nit_empresa?: string }) =>
+    req<{ message: string }>("/auth/perfil", { method: "PUT", body: JSON.stringify(body) }),
+
+  cambiarPassword: (body: { password_actual: string; nueva_password: string }) =>
+    req<{ message: string }>("/auth/cambiar-password", { method: "PUT", body: JSON.stringify(body) }),
 
   // Email flows (no requieren auth)
   forgotPassword: (email: string) =>

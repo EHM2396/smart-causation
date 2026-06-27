@@ -1,8 +1,9 @@
 "use client";
 
-import { Menu, X, LogOut } from "lucide-react";
+import { Menu, X, LogOut, UserCircle } from "lucide-react";
 import { useState, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import { Sidebar } from "@/components/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -22,6 +23,10 @@ const PAGE_META: Record<string, { title: string; description: string }> = {
   "/historial": {
     title: "Historial",
     description: "Registro de facturas causadas y regeneración de archivos SIIGO",
+  },
+  "/perfil": {
+    title: "Mi perfil",
+    description: "Información personal, empresa y contraseña",
   },
 };
 
@@ -190,9 +195,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <ThemeToggle />
             {usuario && (
               <div className="flex items-center gap-2 border-l pl-2" style={{ borderColor: "var(--border-soft)" }}>
-                <span className="hidden text-xs lg:inline" style={{ color: "var(--text-muted)" }}>
+                <Link
+                  href="/perfil"
+                  className="hidden items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors lg:flex"
+                  style={{ color: "var(--text-muted)" }}
+                  title="Mi perfil"
+                >
+                  <UserCircle className="h-3.5 w-3.5" />
                   {usuario.nombre}
-                </span>
+                </Link>
                 <button
                   type="button"
                   onClick={() => { queryClient.clear(); logout(); router.replace("/login"); }}
