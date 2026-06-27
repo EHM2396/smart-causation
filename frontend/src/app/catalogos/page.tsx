@@ -40,7 +40,7 @@ const searchDecision = (d: IADecision, q: string) =>
   (d.cuenta_aplicada ?? "").toLowerCase().includes(q);
 
 // - Upload Excel panel -
-type UploadResult = { insertados: number; actualizados: number; omitidos_codigo?: number; omitidos_nivel?: number; errores: { fila: number; error: string }[] };
+type UploadResult = { insertados: number; actualizados: number; omitidos_codigo?: number; omitidos_nivel?: number; omitidos?: number; formato?: string; errores: { fila: number; error: string }[] };
 
 function UploadExcelPanel({
   onUpload,
@@ -115,11 +115,21 @@ function UploadExcelPanel({
           <div className="flex items-center gap-1.5" style={{ color: "var(--success)" }}>
             <CheckCircle2 className="h-4 w-4 shrink-0" />
             {result.insertados} nuevas · {result.actualizados} actualizadas
+            {result.formato && (
+              <span className="rounded px-1.5 py-0.5 text-xs font-medium" style={{ backgroundColor: "var(--bg-elevated)", color: "var(--text-muted)", border: "1px solid var(--border-soft)" }}>
+                {result.formato === "siigo" ? "SIIGO" : "Plantilla"}
+              </span>
+            )}
           </div>
           {((result.omitidos_codigo ?? 0) > 0 || (result.omitidos_nivel ?? 0) > 0) && (
             <div className="text-xs" style={{ color: "var(--text-muted)" }}>
               Omitidas: {result.omitidos_codigo ?? 0} sin 8 dígitos
               {(result.omitidos_nivel ?? 0) > 0 && ` · ${result.omitidos_nivel} no Transaccional`}
+            </div>
+          )}
+          {(result.omitidos ?? 0) > 0 && (
+            <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+              Omitidas: {result.omitidos} filas de pie de página
             </div>
           )}
           {result.errores.length > 0 && (

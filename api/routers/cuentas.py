@@ -97,12 +97,25 @@ def descargar_plantilla(empresa: EmpresaActiva):
 
 
 def _normalizar_col(col: str) -> str:
-    """Normaliza nombre de columna: minúsculas, sin espacios, sin tildes."""
     import unicodedata
     col = col.strip().lower().replace(" ", "_")
     col = unicodedata.normalize("NFD", col)
     col = "".join(c for c in col if unicodedata.category(c) != "Mn")
     return col
+
+
+def _detectar_fila_header(raw: pd.DataFrame, max_scan: int = 12) -> int | None:
+    """
+    Detecta la fila de encabezados en archivos exportados de SIIGO.
+    SIIGO coloca metadata de empresa arriba; el encabezado real contiene
+    una celda que termina en 'digo' (de 'Código', con posible corrupción de encoding).
+    Retorna el índice de fila o None si no se detecta el formato SIIGO.
+    """
+    for i in range(min(max_scan, len(raw))):
+        first = str(raw.iloc[i, 0]).strip().lower()
+        if first.endswith("digo") or first.startswith("c") and "digo" in first:
+            return i
+    return None
 
 
 @router.post("/cargar-excel")
@@ -112,64 +125,84 @@ async def cargar_excel(
     archivo: UploadFile = File(...),
 ):
     """
-    Importa cuentas PUC desde Excel. Aplica dos filtros obligatorios:
-      1. Código de exactamente 8 dígitos numéricos.
-      2. Columna 'Nivel agrupación' = 'Transaccional' (si la columna existe).
-    Hace upsert de las cuentas válidas.
+    Importa cuentas PUC desde Excel. Acepta dos formatos:
+      - Exportación directa de SIIGO (con filas de metadata al inicio).
+      - Plantilla propia (columnas: codigo, nombre, fiscal).
+    Filtros obligatorios: código de 8 dígitos + Nivel agrupación = Transaccional.
     """
     contenido = await archivo.read()
     try:
-        df = pd.read_excel(BytesIO(contenido), dtype=str)
+        raw = pd.read_excel(BytesIO(contenido), dtype=str, header=None)
     except Exception as e:
         raise HTTPException(400, f"No se pudo leer el archivo: {e}")
 
-    # Mapeo col_normalizada → col_original para acceder a los datos
-    col_map: dict[str, str] = {_normalizar_col(c): c for c in df.columns}
+    # ── Detectar formato ───────────────────────────────────────────────────
+    # SIIGO siempre tiene filas de metadata antes del encabezado (header_row > 0).
+    # La plantilla propia tiene encabezados en fila 0 (header_row == 0 → no es SIIGO).
+    header_row = _detectar_fila_header(raw)
+    es_siigo = header_row is not None and header_row > 0
 
-    if "codigo" not in col_map:
-        raise HTTPException(400, "El archivo debe tener una columna 'codigo'.")
-    if "nombre" not in col_map:
-        raise HTTPException(400, "El archivo debe tener una columna 'nombre'.")
-
-    tiene_nivel = "nivel_agrupacion" in col_map
+    if es_siigo:
+        # Formato SIIGO: columnas por posición (el encoding corrompe los nombres)
+        # Orden: Código(0), Nombre(1), Categoría(2), Clase(3), Relación con(4),
+        #        Maneja vencimientos(5), Diferencia fiscal(6), Activo(7), Nivel agrupación(8)
+        df = raw.iloc[header_row + 1:].reset_index(drop=True)
+        COL_CODIGO  = 0
+        COL_NOMBRE  = 1
+        COL_FISCAL  = 6   # Diferencia fiscal
+        COL_NIVEL   = 8   # Nivel agrupación
+        tiene_nivel = raw.shape[1] > COL_NIVEL
+    else:
+        # Formato plantilla: leer normalmente con encabezados
+        try:
+            df = pd.read_excel(BytesIO(contenido), dtype=str)
+        except Exception as e:
+            raise HTTPException(400, f"No se pudo leer el archivo: {e}")
+        df.columns = [_normalizar_col(c) for c in df.columns]
+        if "codigo" not in df.columns:
+            raise HTTPException(400, "El archivo debe tener una columna 'codigo'.")
+        if "nombre" not in df.columns:
+            raise HTTPException(400, "El archivo debe tener una columna 'nombre'.")
+        tiene_nivel = "nivel_agrupacion" in df.columns
 
     insertados = 0
     actualizados = 0
-    omitidos_codigo = 0    # código no tiene exactamente 8 dígitos
-    omitidos_nivel = 0     # nivel agrupación ≠ Transaccional
+    omitidos_codigo = 0
+    omitidos_nivel  = 0
     errores: list[dict] = []
 
     for idx, row in df.iterrows():
-        fila = int(idx) + 2  # +2: encabezado en fila 1, df base-0
+        fila = int(idx) + (header_row + 2 if es_siigo else 2)
 
-        codigo = str(row.get(col_map["codigo"], "")).strip()
-        nombre = str(row.get(col_map["nombre"], "")).strip()
+        if es_siigo:
+            codigo = str(row.iloc[COL_CODIGO] if COL_CODIGO < len(row) else "").strip()
+            nombre = str(row.iloc[COL_NOMBRE] if COL_NOMBRE < len(row) else "").strip()
+            fiscal_raw = str(row.iloc[COL_FISCAL] if COL_FISCAL < len(row) else "").strip().lower()
+            nivel_raw  = str(row.iloc[COL_NIVEL]  if tiene_nivel and COL_NIVEL < len(row) else "").strip().lower()
+            fiscal = fiscal_raw in ("sí", "si", "s", "1", "true", "yes")
+        else:
+            codigo = str(row.get("codigo", "")).strip()
+            nombre = str(row.get("nombre", "")).strip()
+            fiscal_raw = str(row.get("fiscal", "NO")).strip().upper()
+            fiscal = fiscal_raw in ("SI", "SÍ", "S", "1", "TRUE", "YES")
+            nivel_raw = str(row.get("nivel_agrupacion", "")).strip().lower() if tiene_nivel else ""
 
         if not codigo or codigo == "nan" or not nombre or nombre == "nan":
-            continue  # fila vacía, ignorar silenciosamente
+            continue
 
-        # ── Filtro 1: código exactamente 8 dígitos numéricos ──────────────
+        # ── Filtro 1: código exactamente 8 dígitos ────────────────────────
         if not (codigo.isdigit() and len(codigo) == 8):
             omitidos_codigo += 1
             continue
 
         # ── Filtro 2: nivel agrupación = Transaccional ────────────────────
-        if tiene_nivel:
-            nivel_val = str(row.get(col_map["nivel_agrupacion"], "")).strip().lower()
-            if nivel_val != "transaccional":
-                omitidos_nivel += 1
-                continue
-
-        fiscal_raw = str(row.get(col_map.get("fiscal", ""), "NO")).strip().upper()
-        fiscal = fiscal_raw in ("SI", "SÍ", "S", "1", "TRUE", "YES")
+        if tiene_nivel and nivel_raw and nivel_raw != "transaccional":
+            omitidos_nivel += 1
+            continue
 
         try:
             _, creado = cuentas_service.upsert_cuenta(
-                db,
-                codigo=codigo,
-                nombre=nombre,
-                fiscal=fiscal,
-                empresa_id=empresa.id,
+                db, codigo=codigo, nombre=nombre, fiscal=fiscal, empresa_id=empresa.id,
             )
             if creado:
                 insertados += 1
@@ -184,6 +217,7 @@ async def cargar_excel(
         "actualizados": actualizados,
         "omitidos_codigo": omitidos_codigo,
         "omitidos_nivel": omitidos_nivel,
+        "formato": "siigo" if es_siigo else "plantilla",
         "errores": errores,
     }
 

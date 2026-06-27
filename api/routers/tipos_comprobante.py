@@ -81,36 +81,78 @@ def descargar_plantilla(empresa: EmpresaActiva):
     )
 
 
+def _detectar_fila_header_tc(raw: pd.DataFrame, max_scan: int = 12) -> int | None:
+    """
+    Detecta la fila de encabezados en archivos exportados de SIIGO (tipos comprobante).
+    Busca la fila que contiene "Código del comprobante" en la primera celda (con posible
+    corrupción de encoding → la celda contiene "digo").
+    """
+    for i in range(min(max_scan, len(raw))):
+        first = str(raw.iloc[i, 0]).strip().lower()
+        if "digo" in first and len(first) > 5:
+            return i
+    return None
+
+
 @router.post("/cargar-excel")
 async def cargar_excel(
     db: DB,
     empresa: EmpresaActiva,
     archivo: UploadFile = File(...),
 ):
-    """Importa tipos de comprobante desde un Excel. Columnas obligatorias: codigo, titulo."""
+    """
+    Importa tipos de comprobante desde Excel. Acepta dos formatos:
+      - Exportación directa de SIIGO (con filas de metadata al inicio).
+      - Plantilla propia (columnas: codigo, titulo).
+    """
     contenido = await archivo.read()
     try:
-        df = pd.read_excel(BytesIO(contenido), dtype=str)
+        raw = pd.read_excel(BytesIO(contenido), dtype=str, header=None)
     except Exception as e:
         raise HTTPException(400, f"No se pudo leer el archivo: {e}")
 
-    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+    # SIIGO siempre tiene filas de metadata antes del encabezado (header_row > 0).
+    header_row = _detectar_fila_header_tc(raw)
+    es_siigo = header_row is not None and header_row > 0
 
-    for col in ("codigo", "titulo"):
-        if col not in df.columns:
-            raise HTTPException(400, f"El archivo debe tener una columna '{col}'.")
+    if es_siigo:
+        # Formato SIIGO: Código del comprobante(0), Título comprobante(1), Editar(2-ignorar)
+        df = raw.iloc[header_row + 1:].reset_index(drop=True)
+        COL_CODIGO = 0
+        COL_TITULO = 1
+    else:
+        try:
+            df = pd.read_excel(BytesIO(contenido), dtype=str)
+        except Exception as e:
+            raise HTTPException(400, f"No se pudo leer el archivo: {e}")
+        df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+        for col in ("codigo", "titulo"):
+            if col not in df.columns:
+                raise HTTPException(400, f"El archivo debe tener una columna '{col}'.")
 
     insertados = 0
     actualizados = 0
+    omitidos = 0
     errores: list[dict] = []
 
     for idx, row in df.iterrows():
-        fila = int(idx) + 2
-        codigo = str(row.get("codigo", "")).strip()
-        titulo = str(row.get("titulo", "")).strip()
+        fila = int(idx) + (header_row + 2 if es_siigo else 2)
 
-        if not codigo or not titulo or titulo == "nan":
-            errores.append({"fila": fila, "error": "Código o título vacío"})
+        if es_siigo:
+            codigo = str(row.iloc[COL_CODIGO] if COL_CODIGO < len(row) else "").strip()
+            titulo = str(row.iloc[COL_TITULO] if COL_TITULO < len(row) else "").strip()
+        else:
+            codigo = str(row.get("codigo", "")).strip()
+            titulo = str(row.get("titulo", "")).strip()
+
+        if not codigo or codigo == "nan":
+            continue
+        if not titulo or titulo == "nan":
+            continue
+
+        # Ignorar filas de pie de página SIIGO (ej: "Procesado en: Junio 27 2026")
+        if codigo.lower().startswith("procesado"):
+            omitidos += 1
             continue
 
         try:
@@ -125,7 +167,13 @@ async def cargar_excel(
             errores.append({"fila": fila, "error": str(e)})
 
     db.commit()
-    return {"insertados": insertados, "actualizados": actualizados, "errores": errores}
+    return {
+        "insertados": insertados,
+        "actualizados": actualizados,
+        "omitidos": omitidos,
+        "formato": "siigo" if es_siigo else "plantilla",
+        "errores": errores,
+    }
 
 
 @router.post("/", response_model=TipoComprobanteOut, status_code=201)
