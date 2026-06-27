@@ -178,6 +178,31 @@ async def cargar_excel(
     }
 
 
+@router.post("/limpiar")
+def limpiar_catalogo(db: DB, empresa: EmpresaActiva):
+    """Desactiva todos los tipos de comprobante de la empresa (soft-delete)."""
+    from sqlalchemy import update as sa_update
+    from db.models.catalogo import TipoComprobante
+    result = db.execute(
+        sa_update(TipoComprobante)
+        .where(TipoComprobante.empresa_id == empresa.id, TipoComprobante.activo == True)
+        .values(activo=False)
+    )
+    db.commit()
+    return {"desactivados": result.rowcount}
+
+
+@router.delete("/{codigo}", status_code=200)
+def eliminar_tipo(codigo: str, db: DB, empresa: EmpresaActiva):
+    """Desactiva un tipo de comprobante por código (soft-delete)."""
+    tipo = tipos_service.buscar_por_codigo(db, codigo, empresa_id=empresa.id)
+    if not tipo:
+        raise HTTPException(404, f"Tipo {codigo!r} no encontrado")
+    tipo.activo = False
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/", response_model=TipoComprobanteOut, status_code=201)
 def post_tipo(body: TipoComprobanteCreate, db: DB, empresa: EmpresaActiva):
     if tipos_service.buscar_por_codigo(db, body.codigo, empresa_id=empresa.id):

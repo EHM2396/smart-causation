@@ -252,4 +252,14 @@ export const api = {
   descargarPlantillaImpuestos: () => reqBlob("/impuestos/plantilla"),
   descargarPlantillaCuentas: () => reqBlob("/cuentas/plantilla"),
   descargarPlantillaTipos: () => reqBlob("/tipos-comprobante/plantilla"),
+
+  // Limpieza de catálogos (soft-delete)
+  limpiarImpuestos: () => req<{ desactivados: number }>("/impuestos/limpiar", { method: "POST" }),
+  limpiarCuentas: () => req<{ desactivados: number }>("/cuentas/limpiar", { method: "POST" }),
+  limpiarTipos: () => req<{ desactivados: number }>("/tipos-comprobante/limpiar", { method: "POST" }),
+
+  // Eliminación individual (soft-delete)
+  eliminarImpuesto: (codigo: string) => req<{ ok: boolean }>(`/impuestos/${codigo}`, { method: "DELETE" }),
+  eliminarCuenta: (codigo: string) => req<{ ok: boolean }>(`/cuentas/${codigo}`, { method: "DELETE" }),
+  eliminarTipo: (codigo: string) => req<{ ok: boolean }>(`/tipos-comprobante/${codigo}`, { method: "DELETE" }),
 };

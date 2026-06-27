@@ -15,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { AlertCircle, Database, Receipt, BookOpen, Brain, Upload, Download, CheckCircle2 } from "lucide-react";
+import { AlertCircle, Database, Receipt, BookOpen, Brain, Upload, Download, CheckCircle2, Trash2, Loader2 } from "lucide-react";
 import type { CuentaOpcion, ImpuestoOut, TipoComprobanteOpcion, IARegla, IADecision } from "@/lib/types";
 
 // - Module-level stable search functions -
@@ -39,36 +39,59 @@ const searchDecision = (d: IADecision, q: string) =>
   (d.descripcion_item ?? "").toLowerCase().includes(q) ||
   (d.cuenta_aplicada ?? "").toLowerCase().includes(q);
 
-// - Upload Excel panel -
+// - Types -
 type UploadResult = { insertados: number; actualizados: number; omitidos_codigo?: number; omitidos_nivel?: number; omitidos?: number; formato?: string; errores: { fila: number; error: string }[] };
 
+// - Upload Excel panel with confirmation dialog + spinner -
 function UploadExcelPanel({
   onUpload,
   onPlantilla,
+  onLimpiar,
   onSuccess,
+  limpiarLabel = "Limpiar catálogo",
 }: {
   onUpload: (file: File) => Promise<UploadResult>;
   onPlantilla: () => Promise<Blob>;
+  onLimpiar?: () => Promise<{ desactivados: number }>;
   onSuccess: () => void;
+  limpiarLabel?: string;
 }) {
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<UploadResult | null>(null);
   const [err, setErr] = useState("");
 
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Confirmation before upload
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [confirmUploadOpen, setConfirmUploadOpen] = useState(false);
+
+  // Clear catalog
+  const [confirmLimpiarOpen, setConfirmLimpiarOpen] = useState(false);
+  const [limpiando, setLimpiando] = useState(false);
+  const [limpiarResult, setLimpiarResult] = useState<{ desactivados: number } | null>(null);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = "";
+    setErr("");
+    setResult(null);
+    setLimpiarResult(null);
+    setPendingFile(file);
+    setConfirmUploadOpen(true);
+  };
+
+  const handleConfirmUpload = async () => {
+    if (!pendingFile) return;
+    setConfirmUploadOpen(false);
     setUploading(true);
     setErr("");
     setResult(null);
     try {
-      const res = await onUpload(file);
+      const res = await onUpload(pendingFile);
       setResult(res);
       onSuccess();
     } catch (ex) {
       const raw = (ex as Error).message ?? "";
-      // Traducir errores técnicos del backend a mensajes entendibles
       if (raw.includes("columna 'codigo'") || raw.includes("columna 'titulo'") || raw.includes("columna 'nombre'")) {
         setErr("Archivo no válido para esta sección. Verifica que estés en el tab correcto o usa la plantilla de ejemplo.");
       } else if (raw.includes("No se pudo leer")) {
@@ -78,6 +101,7 @@ function UploadExcelPanel({
       }
     }
     setUploading(false);
+    setPendingFile(null);
   };
 
   const handlePlantilla = async () => {
@@ -94,67 +118,200 @@ function UploadExcelPanel({
     }
   };
 
+  const handleLimpiar = async () => {
+    if (!onLimpiar) return;
+    setConfirmLimpiarOpen(false);
+    setLimpiando(true);
+    setResult(null);
+    setErr("");
+    try {
+      const res = await onLimpiar();
+      setLimpiarResult(res);
+      onSuccess();
+    } catch (ex) {
+      setErr((ex as Error).message);
+    }
+    setLimpiando(false);
+  };
+
   return (
-    <div
-      className="flex flex-wrap items-center gap-3 rounded-xl border p-3"
-      style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}
-    >
-      <label
-        className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-80 disabled:opacity-50"
-        style={{ backgroundColor: "var(--brand)", color: "#fff" }}
+    <>
+      <div
+        className="flex flex-wrap items-center gap-3 rounded-xl border p-3"
+        style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}
       >
-        <Upload className="h-3.5 w-3.5" />
-        {uploading ? "Cargando..." : "Cargar desde Excel"}
-        <input type="file" accept=".xlsx,.xls" className="sr-only" onChange={handleFile} disabled={uploading} />
-      </label>
+        {/* Upload button */}
+        <label
+          className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-80"
+          style={{
+            backgroundColor: uploading ? "var(--border-strong)" : "var(--brand)",
+            color: "#fff",
+            pointerEvents: uploading ? "none" : "auto",
+          }}
+        >
+          {uploading ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Upload className="h-3.5 w-3.5" />
+          )}
+          {uploading ? "Procesando archivo..." : "Cargar desde Excel"}
+          <input type="file" accept=".xlsx,.xls" className="sr-only" onChange={handleFileSelect} disabled={uploading} />
+        </label>
 
-      <button
-        type="button"
-        onClick={handlePlantilla}
-        className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-80"
-        style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)", backgroundColor: "var(--bg-surface)" }}
-      >
-        <Download className="h-3.5 w-3.5" />
-        Descargar plantilla
-      </button>
+        {/* Download template */}
+        <button
+          type="button"
+          onClick={handlePlantilla}
+          className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-80"
+          style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)", backgroundColor: "var(--bg-surface)" }}
+        >
+          <Download className="h-3.5 w-3.5" />
+          Descargar plantilla
+        </button>
 
-      {result && !err && (
-        <div className="flex flex-col gap-0.5 text-sm">
-          <div className="flex items-center gap-1.5" style={{ color: "var(--success)" }}>
-            <CheckCircle2 className="h-4 w-4 shrink-0" />
-            {result.insertados} nuevas · {result.actualizados} actualizadas
-            {result.formato && (
-              <span className="rounded px-1.5 py-0.5 text-xs font-medium" style={{ backgroundColor: "var(--bg-elevated)", color: "var(--text-muted)", border: "1px solid var(--border-soft)" }}>
-                {result.formato === "siigo" ? "SIIGO" : "Plantilla"}
-              </span>
+        {/* Limpiar catálogo */}
+        {onLimpiar && (
+          <button
+            type="button"
+            onClick={() => { setLimpiarResult(null); setErr(""); setConfirmLimpiarOpen(true); }}
+            disabled={limpiando}
+            className="ml-auto flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-80 disabled:opacity-50"
+            style={{ borderColor: "var(--error-border)", color: "var(--error)", backgroundColor: "var(--error-bg)" }}
+          >
+            {limpiando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            {limpiando ? "Limpiando..." : limpiarLabel}
+          </button>
+        )}
+
+        {/* Upload result */}
+        {result && !err && (
+          <div className="w-full flex flex-col gap-0.5 text-sm pt-1 border-t" style={{ borderColor: "var(--border-soft)" }}>
+            <div className="flex items-center gap-1.5" style={{ color: "var(--success)" }}>
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              {result.insertados} nuevas · {result.actualizados} actualizadas
+              {result.formato && (
+                <span className="rounded px-1.5 py-0.5 text-xs font-medium" style={{ backgroundColor: "var(--bg-elevated)", color: "var(--text-muted)", border: "1px solid var(--border-soft)" }}>
+                  {result.formato === "siigo" ? "SIIGO" : "Plantilla"}
+                </span>
+              )}
+            </div>
+            {((result.omitidos_codigo ?? 0) > 0 || (result.omitidos_nivel ?? 0) > 0) && (
+              <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                Omitidas: {result.omitidos_codigo ?? 0} sin 8 dígitos
+                {(result.omitidos_nivel ?? 0) > 0 && ` · ${result.omitidos_nivel} no Transaccional`}
+              </div>
+            )}
+            {(result.omitidos ?? 0) > 0 && (
+              <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                Omitidas: {result.omitidos} filas de pie de página
+              </div>
+            )}
+            {result.errores.length > 0 && (
+              <div className="text-xs" style={{ color: "var(--warning)" }}>
+                {result.errores.length} error(es) al procesar
+              </div>
             )}
           </div>
-          {((result.omitidos_codigo ?? 0) > 0 || (result.omitidos_nivel ?? 0) > 0) && (
-            <div className="text-xs" style={{ color: "var(--text-muted)" }}>
-              Omitidas: {result.omitidos_codigo ?? 0} sin 8 dígitos
-              {(result.omitidos_nivel ?? 0) > 0 && ` · ${result.omitidos_nivel} no Transaccional`}
-            </div>
-          )}
-          {(result.omitidos ?? 0) > 0 && (
-            <div className="text-xs" style={{ color: "var(--text-muted)" }}>
-              Omitidas: {result.omitidos} filas de pie de página
-            </div>
-          )}
-          {result.errores.length > 0 && (
-            <div className="text-xs" style={{ color: "var(--warning)" }}>
-              {result.errores.length} error(es) al procesar
-            </div>
-          )}
-        </div>
-      )}
+        )}
 
-      {err && (
-        <div className="flex items-center gap-1.5 text-sm" style={{ color: "var(--error)" }}>
-          <AlertCircle className="h-4 w-4" />
-          {err}
-        </div>
-      )}
-    </div>
+        {/* Limpiar result */}
+        {limpiarResult && !err && (
+          <div className="w-full flex items-center gap-1.5 text-sm pt-1 border-t" style={{ borderColor: "var(--border-soft)", color: "var(--text-muted)" }}>
+            <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: "var(--success)" }} />
+            Se desactivaron {limpiarResult.desactivados} registros del catálogo.
+          </div>
+        )}
+
+        {err && (
+          <div className="w-full flex items-center gap-1.5 text-sm" style={{ color: "var(--error)" }}>
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {err}
+          </div>
+        )}
+      </div>
+
+      {/* Modal: confirmar carga */}
+      <Dialog open={confirmUploadOpen} onOpenChange={(o) => { if (!o) { setConfirmUploadOpen(false); setPendingFile(null); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirmar carga de archivo</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            <div
+              className="rounded-lg border px-3 py-2 text-sm"
+              style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)", color: "var(--text-secondary)" }}
+            >
+              <span className="font-medium" style={{ color: "var(--text-primary)" }}>{pendingFile?.name}</span>
+              <br />
+              <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                {pendingFile ? `${(pendingFile.size / 1024).toFixed(1)} KB` : ""}
+              </span>
+            </div>
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              Los registros existentes se actualizarán y los nuevos se agregarán al catálogo.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setConfirmUploadOpen(false); setPendingFile(null); }}
+                className="rounded-lg border px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-80"
+                style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)", backgroundColor: "var(--bg-surface)" }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmUpload}
+                className="flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-semibold transition-opacity hover:opacity-80"
+                style={{ backgroundColor: "var(--brand)", color: "#fff" }}
+              >
+                <Upload className="h-3.5 w-3.5" />
+                Confirmar carga
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: confirmar limpiar */}
+      <Dialog open={confirmLimpiarOpen} onOpenChange={setConfirmLimpiarOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>¿Limpiar catálogo?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            <div
+              className="rounded-lg border px-3 py-2 text-sm"
+              style={{ borderColor: "var(--error-border)", backgroundColor: "var(--error-bg)", color: "var(--error)" }}
+            >
+              Todos los registros actuales serán desactivados. Esta acción no se puede deshacer fácilmente.
+            </div>
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              Útil para reimportar el catálogo desde cero. Los registros se marcan como inactivos (no se eliminan físicamente).
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmLimpiarOpen(false)}
+                className="rounded-lg border px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-80"
+                style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)", backgroundColor: "var(--bg-surface)" }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleLimpiar}
+                className="flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-semibold transition-opacity hover:opacity-80"
+                style={{ backgroundColor: "var(--error)", color: "#fff" }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Sí, limpiar
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -280,6 +437,7 @@ function ImpuestosTab({
   cuentasGasto: CuentaOpcion[];
 }) {
   const qc = useQueryClient();
+  const [deletingCodigo, setDeletingCodigo] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [codigo, setCodigo] = useState("");
   const [nombre, setNombre] = useState("");
@@ -335,6 +493,8 @@ function ImpuestosTab({
       <UploadExcelPanel
         onUpload={api.cargarExcelImpuestos}
         onPlantilla={api.descargarPlantillaImpuestos}
+        onLimpiar={api.limpiarImpuestos}
+        limpiarLabel="Limpiar impuestos"
         onSuccess={() => qc.invalidateQueries({ queryKey: ["impuestos"] })}
       />
       <DataTableShell
@@ -355,7 +515,7 @@ function ImpuestosTab({
         <table className="w-full min-w-[700px] text-sm">
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
-              {["Código", "Nombre", "Tipo", "Tarifa %", "Cta. Débito", "Cta. Crédito"].map((h) => (
+              {["Código", "Nombre", "Tipo", "Tarifa %", "Cta. Débito", "Cta. Crédito", ""].map((h) => (
                 <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
                   {h}
                 </th>
@@ -381,11 +541,28 @@ function ImpuestosTab({
                 <td className="px-4 py-3 font-mono text-xs" style={{ color: "var(--text-muted)" }}>
                   {(i.tipo_impuesto ?? "").toLowerCase().includes("rete") ? i.cta_compras || "-" : "-"}
                 </td>
+                <td className="px-4 py-3">
+                  <button
+                    type="button"
+                    disabled={deletingCodigo === i.codigo}
+                    onClick={async () => {
+                      setDeletingCodigo(i.codigo);
+                      try { await api.eliminarImpuesto(i.codigo); qc.invalidateQueries({ queryKey: ["impuestos"] }); }
+                      catch { /* ignore */ }
+                      setDeletingCodigo(null);
+                    }}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg transition-opacity hover:opacity-80 disabled:opacity-40"
+                    style={{ color: "var(--error)" }}
+                    title="Eliminar"
+                  >
+                    {deletingCodigo === i.codigo ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                  </button>
+                </td>
               </tr>
             ))}
             {dt.rows.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>
+                <td colSpan={7} className="px-4 py-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>
                   Sin resultados para &ldquo;{dt.search}&rdquo;
                 </td>
               </tr>
@@ -469,6 +646,7 @@ function PlanCuentasTab({
   }, [cuentasPago, cuentasGasto]);
 
   const dt = useDataTable(cuentas, searchCuenta);
+  const [deletingCodigo, setDeletingCodigo] = useState<string | null>(null);
 
   const handleAdd = async () => {
     if (!codigo.trim() || !nombre.trim()) {
@@ -494,6 +672,8 @@ function PlanCuentasTab({
       <UploadExcelPanel
         onUpload={api.cargarExcelCuentas}
         onPlantilla={api.descargarPlantillaCuentas}
+        onLimpiar={api.limpiarCuentas}
+        limpiarLabel="Limpiar plan de cuentas"
         onSuccess={() => {
           qc.invalidateQueries({ queryKey: ["cuentas-pago"] });
           qc.invalidateQueries({ queryKey: ["cuentas-gasto"] });
@@ -517,7 +697,7 @@ function PlanCuentasTab({
         <table className="w-full min-w-[560px] text-sm">
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
-              {["Código", "Nombre", "Tipo"].map((h) => (
+              {["Código", "Nombre", "Tipo", ""].map((h) => (
                 <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
                   {h}
                 </th>
@@ -544,12 +724,32 @@ function PlanCuentasTab({
                       {esGasto && <Badge variant="success">Gasto / Costo</Badge>}
                     </div>
                   </td>
+                  <td className="px-4 py-2.5">
+                    <button
+                      type="button"
+                      disabled={deletingCodigo === c.codigo}
+                      onClick={async () => {
+                        setDeletingCodigo(c.codigo);
+                        try {
+                          await api.eliminarCuenta(c.codigo);
+                          qc.invalidateQueries({ queryKey: ["cuentas-pago"] });
+                          qc.invalidateQueries({ queryKey: ["cuentas-gasto"] });
+                        } catch { /* ignore */ }
+                        setDeletingCodigo(null);
+                      }}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg transition-opacity hover:opacity-80 disabled:opacity-40"
+                      style={{ color: "var(--error)" }}
+                      title="Eliminar"
+                    >
+                      {deletingCodigo === c.codigo ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    </button>
+                  </td>
                 </tr>
               );
             })}
             {dt.rows.length === 0 && (
               <tr>
-                <td colSpan={3} className="px-4 py-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>
+                <td colSpan={4} className="px-4 py-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>
                   Sin resultados para &ldquo;{dt.search}&rdquo;
                 </td>
               </tr>
@@ -619,6 +819,7 @@ function PlanCuentasTab({
 // -
 function TiposTab({ tipos }: { tipos: TipoComprobanteOpcion[] }) {
   const qc = useQueryClient();
+  const [deletingCodigo, setDeletingCodigo] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [codigo, setCodigo] = useState("");
   const [titulo, setTitulo] = useState("");
@@ -650,6 +851,8 @@ function TiposTab({ tipos }: { tipos: TipoComprobanteOpcion[] }) {
       <UploadExcelPanel
         onUpload={api.cargarExcelTipos}
         onPlantilla={api.descargarPlantillaTipos}
+        onLimpiar={api.limpiarTipos}
+        limpiarLabel="Limpiar comprobantes"
         onSuccess={() => qc.invalidateQueries({ queryKey: ["tipos-comp"] })}
       />
       <DataTableShell
@@ -670,7 +873,7 @@ function TiposTab({ tipos }: { tipos: TipoComprobanteOpcion[] }) {
         <table className="w-full min-w-[400px] text-sm">
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
-              {["Código", "Título"].map((h) => (
+              {["Código", "Título", ""].map((h) => (
                 <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
                   {h}
                 </th>
@@ -686,11 +889,28 @@ function TiposTab({ tipos }: { tipos: TipoComprobanteOpcion[] }) {
               >
                 <td className="px-4 py-2.5 font-mono text-xs font-semibold" style={{ color: "var(--text-primary)" }}>{t.codigo}</td>
                 <td className="px-4 py-2.5" style={{ color: "var(--text-secondary)" }}>{t.titulo}</td>
+                <td className="px-4 py-2.5">
+                  <button
+                    type="button"
+                    disabled={deletingCodigo === t.codigo}
+                    onClick={async () => {
+                      setDeletingCodigo(t.codigo);
+                      try { await api.eliminarTipo(t.codigo); qc.invalidateQueries({ queryKey: ["tipos-comp"] }); }
+                      catch { /* ignore */ }
+                      setDeletingCodigo(null);
+                    }}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg transition-opacity hover:opacity-80 disabled:opacity-40"
+                    style={{ color: "var(--error)" }}
+                    title="Eliminar"
+                  >
+                    {deletingCodigo === t.codigo ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                  </button>
+                </td>
               </tr>
             ))}
             {dt.rows.length === 0 && (
               <tr>
-                <td colSpan={2} className="px-4 py-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>
+                <td colSpan={3} className="px-4 py-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>
                   Sin resultados para &ldquo;{dt.search}&rdquo;
                 </td>
               </tr>

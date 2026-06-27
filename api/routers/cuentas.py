@@ -224,6 +224,31 @@ async def cargar_excel(
     }
 
 
+@router.post("/limpiar")
+def limpiar_catalogo(db: DB, empresa: EmpresaActiva):
+    """Desactiva todas las cuentas de la empresa (soft-delete)."""
+    from sqlalchemy import update as sa_update
+    from db.models.catalogo import CuentaContable
+    result = db.execute(
+        sa_update(CuentaContable)
+        .where(CuentaContable.empresa_id == empresa.id, CuentaContable.activo == True)
+        .values(activo=False)
+    )
+    db.commit()
+    return {"desactivados": result.rowcount}
+
+
+@router.delete("/{codigo}", status_code=200)
+def eliminar_cuenta(codigo: str, db: DB, empresa: EmpresaActiva):
+    """Desactiva una cuenta por código (soft-delete)."""
+    cuenta = cuentas_service.buscar_por_codigo(db, codigo, empresa_id=empresa.id)
+    if not cuenta:
+        raise HTTPException(404, f"Cuenta {codigo!r} no encontrada")
+    cuenta.activo = False
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/{codigo}", response_model=CuentaOut)
 def get_cuenta(codigo: str, db: DB, empresa: EmpresaActiva):
     cuenta = cuentas_service.buscar_por_codigo(db, codigo, empresa_id=empresa.id)

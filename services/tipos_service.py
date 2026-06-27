@@ -46,10 +46,14 @@ def crear_tipo(db: Session, *, codigo: str, titulo: str, empresa_id: int | None 
 
 
 def upsert_tipo(db: Session, *, codigo: str, titulo: str, empresa_id: int) -> tuple[TipoComprobante, bool]:
-    """Inserta o actualiza un tipo por (codigo, empresa_id). Retorna (objeto, creado)."""
+    """Inserta o actualiza un tipo por (codigo, empresa_id). Retorna (objeto, creado).
+    Si el tipo existe pero estaba inactivo (soft-deleted), lo reactiva.
+    """
     existing = buscar_por_codigo(db, codigo, empresa_id=empresa_id)
     if existing:
+        creado = not existing.activo
         existing.titulo = titulo.strip()
+        existing.activo = True
         db.flush()
-        return existing, False
+        return existing, creado
     return crear_tipo(db, codigo=codigo, titulo=titulo, empresa_id=empresa_id), True

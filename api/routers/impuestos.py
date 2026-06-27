@@ -156,6 +156,31 @@ def get_impuesto(codigo: str, db: DB, empresa: EmpresaActiva):
     return imp
 
 
+@router.post("/limpiar")
+def limpiar_catalogo(db: DB, empresa: EmpresaActiva):
+    """Desactiva todos los impuestos de la empresa (soft-delete)."""
+    from sqlalchemy import update as sa_update
+    from db.models.catalogo import CodigoImpuesto
+    result = db.execute(
+        sa_update(CodigoImpuesto)
+        .where(CodigoImpuesto.empresa_id == empresa.id, CodigoImpuesto.activo == True)
+        .values(activo=False)
+    )
+    db.commit()
+    return {"desactivados": result.rowcount}
+
+
+@router.delete("/{codigo}", status_code=200)
+def eliminar_impuesto(codigo: str, db: DB, empresa: EmpresaActiva):
+    """Desactiva un impuesto por código (soft-delete)."""
+    imp = impuestos_service.buscar_por_codigo(db, codigo, empresa_id=empresa.id)
+    if not imp:
+        raise HTTPException(404, f"Impuesto {codigo!r} no encontrado")
+    imp.activo = False
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/", response_model=ImpuestoOut, status_code=201)
 def post_impuesto(body: ImpuestoCreate, db: DB, empresa: EmpresaActiva):
     if impuestos_service.buscar_por_codigo(db, body.codigo, empresa_id=empresa.id):

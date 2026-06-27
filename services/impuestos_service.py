@@ -80,15 +80,19 @@ def crear_impuesto(db: Session, empresa_id: int | None = None, **campos) -> Codi
 
 
 def upsert_impuesto(db: Session, empresa_id: int, **campos) -> tuple[CodigoImpuesto, bool]:
-    """Inserta o actualiza un impuesto por (codigo, empresa_id). Retorna (objeto, creado)."""
+    """Inserta o actualiza un impuesto por (codigo, empresa_id). Retorna (objeto, creado).
+    Si existe pero estaba inactivo (soft-deleted), lo reactiva.
+    """
     codigo = str(campos.get("codigo", "")).strip()
     existing = buscar_por_codigo(db, codigo, empresa_id=empresa_id)
     if existing:
+        creado = not existing.activo
         for k, v in campos.items():
             if k != "codigo" and hasattr(existing, k) and v not in (None, ""):
                 setattr(existing, k, v)
+        existing.activo = True
         db.flush()
-        return existing, False
+        return existing, creado
     imp = CodigoImpuesto(empresa_id=empresa_id, **campos)
     db.add(imp)
     db.flush()

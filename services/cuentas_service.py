@@ -186,13 +186,17 @@ def upsert_cuenta(
     fiscal: bool = False,
     empresa_id: int,
 ) -> tuple[CuentaContable, bool]:
-    """Inserta o actualiza una cuenta por (codigo, empresa_id). Retorna (objeto, creado)."""
+    """Inserta o actualiza una cuenta por (codigo, empresa_id). Retorna (objeto, creado).
+    Si la cuenta existe pero estaba inactiva (soft-deleted), la reactiva.
+    """
     existing = buscar_por_codigo(db, codigo, empresa_id=empresa_id)
     if existing:
+        creado = not existing.activo  # fue "creada" si estaba inactiva
         existing.nombre = nombre.strip()
         existing.fiscal = fiscal
+        existing.activo = True
         db.flush()
-        return existing, False
+        return existing, creado
     return crear_cuenta(db, codigo=codigo, nombre=nombre, fiscal=fiscal, empresa_id=empresa_id), True
 
 
