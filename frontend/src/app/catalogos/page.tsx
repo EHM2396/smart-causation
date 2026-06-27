@@ -12,6 +12,7 @@ import { DataTableShell, useDataTable } from "@/components/ui/data-table";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -138,13 +139,15 @@ function UploadExcelPanel({
 
   const handleConfirmUpload = async () => {
     if (!pendingFile) return;
-    setLastFilename(pendingFile.name);
+    const file = pendingFile;
+    setLastFilename(file.name);
     setConfirmUploadOpen(false);
+    setPendingFile(null);   // limpiar antes de la carga para que el overlay se muestre
     setUploading(true);
     setErr("");
     setResult(null);
     try {
-      const res = await onUpload(pendingFile);
+      const res = await onUpload(file);
       setResult(res);
       onSuccess();
     } catch (ex) {
@@ -158,7 +161,6 @@ function UploadExcelPanel({
       }
     }
     setUploading(false);
-    setPendingFile(null);
   };
 
   const handlePlantilla = async () => {
@@ -194,7 +196,7 @@ function UploadExcelPanel({
   return (
     <>
       {/* Full-screen overlay blocks all interaction while uploading */}
-      {uploading && pendingFile === null && <UploadOverlay filename={lastFilename} />}
+      {uploading && <UploadOverlay filename={lastFilename} />}
 
       <div
         className="flex flex-wrap items-center gap-3 rounded-xl border p-3"
@@ -292,6 +294,7 @@ function UploadExcelPanel({
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Confirmar carga de archivo</DialogTitle>
+            <DialogDescription>Revisa el archivo antes de iniciar la carga al catálogo.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-1">
             <div
@@ -335,6 +338,7 @@ function UploadExcelPanel({
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>¿Limpiar catálogo?</DialogTitle>
+            <DialogDescription>Esta acción desactivará todos los registros actuales de la empresa.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-1">
             <div
@@ -633,9 +637,7 @@ function ImpuestosTab({
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Nuevo código de impuesto</DialogTitle>
-            <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-              Completa los campos para agregar un nuevo código al catálogo.
-            </p>
+            <DialogDescription>Completa los campos para agregar un nuevo código al catálogo.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 pt-2">
@@ -820,9 +822,7 @@ function PlanCuentasTab({
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Nueva cuenta PUC</DialogTitle>
-            <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-              Agrega una cuenta al plan de cuentas contable.
-            </p>
+            <DialogDescription>Agrega una cuenta al plan de cuentas contable.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 pt-2">
@@ -981,9 +981,7 @@ function TiposTab({ tipos }: { tipos: TipoComprobanteOpcion[] }) {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Nuevo tipo de comprobante</DialogTitle>
-            <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-              Agrega un nuevo tipo de comprobante contable al catálogo.
-            </p>
+            <DialogDescription>Agrega un nuevo tipo de comprobante contable al catálogo.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 pt-2">
