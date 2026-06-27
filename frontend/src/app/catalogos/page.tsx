@@ -67,7 +67,15 @@ function UploadExcelPanel({
       setResult(res);
       onSuccess();
     } catch (ex) {
-      setErr((ex as Error).message);
+      const raw = (ex as Error).message ?? "";
+      // Traducir errores técnicos del backend a mensajes entendibles
+      if (raw.includes("columna 'codigo'") || raw.includes("columna 'titulo'") || raw.includes("columna 'nombre'")) {
+        setErr("Archivo no válido para esta sección. Verifica que estés en el tab correcto o usa la plantilla de ejemplo.");
+      } else if (raw.includes("No se pudo leer")) {
+        setErr("No se pudo leer el archivo. Asegúrate de que sea un Excel (.xlsx) válido.");
+      } else {
+        setErr(raw);
+      }
     }
     setUploading(false);
   };

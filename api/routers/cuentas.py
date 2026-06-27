@@ -209,9 +209,11 @@ async def cargar_excel(
             else:
                 actualizados += 1
         except Exception as e:
+            db.rollback()  # recuperar sesión tras flush fallido
             errores.append({"fila": fila, "error": str(e)})
 
-    db.commit()
+    if insertados + actualizados > 0:
+        db.commit()
     return {
         "insertados": insertados,
         "actualizados": actualizados,
