@@ -15,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { AlertCircle, Database, Receipt, BookOpen, Brain, Upload, Download, CheckCircle2, Trash2, Loader2 } from "lucide-react";
+import { AlertCircle, Database, Receipt, BookOpen, Brain, Upload, Download, CheckCircle2, Trash2, Loader2, FileSpreadsheet } from "lucide-react";
 import type { CuentaOpcion, ImpuestoOut, TipoComprobanteOpcion, IARegla, IADecision } from "@/lib/types";
 
 // - Module-level stable search functions -
@@ -42,6 +42,61 @@ const searchDecision = (d: IADecision, q: string) =>
 // - Types -
 type UploadResult = { insertados: number; actualizados: number; omitidos_codigo?: number; omitidos_nivel?: number; omitidos?: number; formato?: string; errores: { fila: number; error: string }[] };
 
+// - Full-screen loading overlay shown while a file is being processed -
+function UploadOverlay({ filename }: { filename: string }) {
+  return (
+    <div
+      className="fixed inset-0 z-[9999] flex flex-col items-center justify-center gap-6"
+      style={{ backgroundColor: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
+    >
+      {/* Animated rings */}
+      <div className="relative flex h-24 w-24 items-center justify-center">
+        <span
+          className="absolute h-24 w-24 rounded-full border-4 border-transparent animate-spin"
+          style={{ borderTopColor: "#059669", borderRightColor: "#0891b2", animationDuration: "1s" }}
+        />
+        <span
+          className="absolute h-16 w-16 rounded-full border-4 border-transparent animate-spin"
+          style={{ borderTopColor: "#0891b2", animationDuration: "0.7s", animationDirection: "reverse" }}
+        />
+        <FileSpreadsheet className="h-8 w-8" style={{ color: "#fff" }} />
+      </div>
+
+      {/* Text */}
+      <div className="flex flex-col items-center gap-2 text-center">
+        <p className="text-lg font-semibold text-white">Procesando archivo</p>
+        <p className="max-w-xs truncate rounded-full px-3 py-0.5 text-sm" style={{ backgroundColor: "rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.8)" }}>
+          {filename}
+        </p>
+        <p className="text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>
+          No cierres esta ventana mientras termina la carga…
+        </p>
+      </div>
+
+      {/* Animated dots progress bar */}
+      <div className="flex gap-1.5">
+        {[0, 1, 2, 3, 4].map((i) => (
+          <span
+            key={i}
+            className="h-1.5 w-1.5 rounded-full"
+            style={{
+              backgroundColor: "#059669",
+              animation: `bounce 1.2s ease-in-out ${i * 0.15}s infinite`,
+            }}
+          />
+        ))}
+      </div>
+
+      <style>{`
+        @keyframes bounce {
+          0%, 80%, 100% { transform: scaleY(1); opacity: 0.4; }
+          40% { transform: scaleY(2); opacity: 1; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 // - Upload Excel panel with confirmation dialog + spinner -
 function UploadExcelPanel({
   onUpload,
@@ -62,6 +117,7 @@ function UploadExcelPanel({
 
   // Confirmation before upload
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [lastFilename, setLastFilename] = useState("");
   const [confirmUploadOpen, setConfirmUploadOpen] = useState(false);
 
   // Clear catalog
@@ -82,6 +138,7 @@ function UploadExcelPanel({
 
   const handleConfirmUpload = async () => {
     if (!pendingFile) return;
+    setLastFilename(pendingFile.name);
     setConfirmUploadOpen(false);
     setUploading(true);
     setErr("");
@@ -136,6 +193,9 @@ function UploadExcelPanel({
 
   return (
     <>
+      {/* Full-screen overlay blocks all interaction while uploading */}
+      {uploading && pendingFile === null && <UploadOverlay filename={lastFilename} />}
+
       <div
         className="flex flex-wrap items-center gap-3 rounded-xl border p-3"
         style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}
@@ -144,17 +204,14 @@ function UploadExcelPanel({
         <label
           className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-80"
           style={{
-            backgroundColor: uploading ? "var(--border-strong)" : "var(--brand)",
+            backgroundColor: "var(--brand)",
             color: "#fff",
             pointerEvents: uploading ? "none" : "auto",
+            opacity: uploading ? 0.6 : 1,
           }}
         >
-          {uploading ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Upload className="h-3.5 w-3.5" />
-          )}
-          {uploading ? "Procesando archivo..." : "Cargar desde Excel"}
+          <Upload className="h-3.5 w-3.5" />
+          Cargar desde Excel
           <input type="file" accept=".xlsx,.xls" className="sr-only" onChange={handleFileSelect} disabled={uploading} />
         </label>
 
