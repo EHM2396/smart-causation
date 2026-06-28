@@ -64,6 +64,15 @@ export interface Factura {
   _archivo?: string;
 }
 
+// ─── Sugerencia IA ────────────────────────────────────────────────────────────
+
+export interface Sugerencia {
+  cuenta: string | null;
+  origen: string | null;
+  explicacion_ia: string | null;
+  confianza_ia: number | null;
+}
+
 // ─── Mapeo ────────────────────────────────────────────────────────────────────
 
 export type FuenteMapeo = "aprendido" | "regla" | "sugerido" | "ia_alta" | "manual";

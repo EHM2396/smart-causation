@@ -12,7 +12,7 @@ import {
   AlertTriangle, Plus, Sparkles, Loader2,
   ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search,
 } from "lucide-react";
-import type { MapeoItem, CuentaOpcion, ImpuestoOut, FuenteMapeo } from "@/lib/types";
+import type { MapeoItem, CuentaOpcion, ImpuestoOut, FuenteMapeo, Sugerencia } from "@/lib/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -34,13 +34,6 @@ const ORIGEN_BADGE: Record<string, { label: string; variant: "success" | "info" 
   ia_baja:     { label: "IA · Baja",      variant: "default" },
   ia:          { label: "IA",             variant: "purple" },
   manual:      { label: "Manual",         variant: "default" },
-};
-
-type Sugerencia = {
-  cuenta: string | null;
-  origen: string | null;
-  explicacion_ia: string | null;
-  confianza_ia: number | null;
 };
 
 function origenToFuente(origen: string | null): FuenteMapeo {
@@ -68,7 +61,7 @@ function DataField({ label, value, mono = false }: { label: string; value: strin
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function Paso2() {
-  const { facturas, tipoComp, setPaso, setMapeos } = useWizardStore();
+  const { facturas, tipoComp, setPaso, setMapeos, suggestions, setSuggestions } = useWizardStore();
 
   const { data: cuentasGasto = [] } = useQuery({ queryKey: ["cuentas-gasto"], queryFn: api.getCuentasGasto });
   const { data: cuentasPago = [] } = useQuery({ queryKey: ["cuentas-pago"], queryFn: api.getCuentasPago });
@@ -88,14 +81,14 @@ export function Paso2() {
   const [riItem, setRiItem] = useState<Record<string, string>>({});
   const [dlgOpen, setDlgOpen] = useState<"retefuente" | "reteica" | null>(null);
 
-  const [suggestions, setSuggestions] = useState<Record<string, Sugerencia>>({});
   const [sugsLoading, setSugsLoading] = useState(false);
   const [searchItems, setSearchItems] = useState("");
 
   useEffect(() => {
     if (facturas.length === 0) return;
-    setSugsLoading(true);
-    const items = facturas.flatMap((f, idx) =>
+
+    // Solo pedir sugerencias para ítems que aún no tienen una en el store
+    const allItems = facturas.flatMap((f, idx) =>
       f.items.map((item, jdx) => ({
         key: `${idx}_${jdx}`,
         nit: f.nit,
@@ -103,8 +96,12 @@ export function Paso2() {
         tipo_proveedor: f.tipo_proveedor ?? "juridica",
       }))
     );
+    const pendientes = allItems.filter(({ key }) => !(key in suggestions));
+    if (pendientes.length === 0) return; // Todo ya está cacheado en el store
+
+    setSugsLoading(true);
     Promise.all(
-      items.map(({ key, nit, descripcion, tipo_proveedor }) =>
+      pendientes.map(({ key, nit, descripcion, tipo_proveedor }) =>
         api.sugerirCuenta(nit, descripcion, tipo_proveedor)
           .then(r => ({
             key,
@@ -116,11 +113,11 @@ export function Paso2() {
           .catch(() => ({ key, cuenta: null, origen: null, explicacion_ia: null, confianza_ia: null }))
       )
     ).then(results => {
-      const map: Record<string, Sugerencia> = {};
+      const nuevas: Record<string, Sugerencia> = {};
       results.forEach(({ key, cuenta, origen, explicacion_ia, confianza_ia }) => {
-        map[key] = { cuenta, origen, explicacion_ia, confianza_ia };
+        nuevas[key] = { cuenta, origen, explicacion_ia, confianza_ia };
       });
-      setSuggestions(map);
+      setSuggestions({ ...suggestions, ...nuevas });
       // Solo autocompletar con reglas y aprendizaje — la IA es sugerencia, el usuario debe aceptarla
       setCuentaGastoItem(prev => {
         const next = { ...prev };

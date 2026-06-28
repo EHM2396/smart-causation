@@ -5,6 +5,7 @@ import type {
   Factura,
   MapeoItem,
   PasoWizard,
+  Sugerencia,
 } from "@/lib/types";
 
 interface WizardState {
@@ -15,6 +16,7 @@ interface WizardState {
   mapeos: MapeoItem[];
   reporte: BatchValidacionResponse | null;
   xlsxBlob: Blob | null;
+  suggestions: Record<string, Sugerencia>;
 
   setPaso: (p: PasoWizard) => void;
   setTipoComp: (t: string) => void;
@@ -23,6 +25,7 @@ interface WizardState {
   setMapeos: (m: MapeoItem[]) => void;
   setReporte: (r: BatchValidacionResponse) => void;
   setXlsxBlob: (b: Blob) => void;
+  setSuggestions: (s: Record<string, Sugerencia>) => void;
   reset: () => void;
 }
 
@@ -34,6 +37,7 @@ const initial = {
   mapeos: [],
   reporte: null,
   xlsxBlob: null,
+  suggestions: {},
 };
 
 export const useWizardStore = create<WizardState>((set) => ({
@@ -45,5 +49,6 @@ export const useWizardStore = create<WizardState>((set) => ({
   setMapeos: (mapeos) => set({ mapeos }),
   setReporte: (reporte) => set({ reporte }),
   setXlsxBlob: (xlsxBlob) => set({ xlsxBlob }),
+  setSuggestions: (suggestions) => set({ suggestions }),
   reset: () => set(initial),
 }));
