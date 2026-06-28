@@ -87,17 +87,14 @@ def sugerir_cuenta_gasto(
     # 3. IA — fallback cuando no hay datos aprendidos
     try:
         from services import ai_service
-        if not ai_service.esta_disponible():
-            logger.debug("sugerir_cuenta_gasto: IA no disponible (key no configurada o openai no instalado)")
+        ia_ok = ai_service.esta_disponible()
+        logger.warning("[IA-DEBUG] esta_disponible=%s desc=%r empresa=%s", ia_ok, descripcion[:40], empresa_id)
+        if not ia_ok:
             return ResultadoSugerencia(cuenta=None, origen="ia_no_disponible")
 
         cuentas_gasto_list = cuentas_service.listar_cuentas_gasto(db, empresa_id=empresa_id)
+        logger.warning("[IA-DEBUG] cuentas_gasto=%d para empresa_id=%s", len(cuentas_gasto_list), empresa_id)
         if not cuentas_gasto_list:
-            logger.warning(
-                "sugerir_cuenta_gasto: catálogo de cuentas gasto vacío para empresa_id=%s "
-                "— la IA no puede sugerir sin cuentas en el catálogo",
-                empresa_id,
-            )
             return ResultadoSugerencia(cuenta=None, origen="sin_catalogo")
 
         codigos_imp = impuestos_service.listar_como_dict(db, empresa_id=empresa_id)
@@ -107,6 +104,7 @@ def sugerir_cuenta_gasto(
             codigos_impuesto=codigos_imp,
             tipo_proveedor=tipo_proveedor,
         )
+        logger.warning("[IA-DEBUG] sug=%s", sug)
         if sug and sug.cuenta_gasto:
             if sug.confianza >= 0.80:
                 origen_ia = "ia_alta"
@@ -120,13 +118,8 @@ def sugerir_cuenta_gasto(
                 explicacion=sug.explicacion,
                 confianza=sug.confianza,
             )
-        logger.debug(
-            "sugerir_cuenta_gasto: IA no encontró cuenta para '%s' (cuentas disponibles: %d)",
-            descripcion[:60],
-            len(cuentas_gasto_list),
-        )
     except Exception as exc:
-        logger.warning("sugerir_cuenta_gasto: excepción en paso IA (flujo continúa): %s", exc)
+        logger.warning("[IA-DEBUG] excepción: %s", exc, exc_info=True)
 
     return ResultadoSugerencia(cuenta=None, origen=None)
 
