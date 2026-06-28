@@ -317,7 +317,7 @@ export function Paso2() {
               <button
                 onClick={() => setModalCausadasOpen(true)}
                 className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-80"
-                style={{ borderColor: "color-mix(in srgb, var(--success) 40%, transparent)", color: "var(--success)", backgroundColor: "color-mix(in srgb, var(--success) 8%, transparent)" }}
+                style={{ borderColor: "rgba(245,158,11,0.4)", color: "rgb(245,158,11)", backgroundColor: "rgba(245,158,11,0.08)" }}
               >
                 <History className="h-3.5 w-3.5" />
                 Ya causadas ({facturasYaCausadas.length})

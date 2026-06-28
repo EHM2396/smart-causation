@@ -221,6 +221,14 @@ function DetailView({ fc, onBack }: { fc: FacturaCausadaInfo; onBack: () => void
   );
 }
 
+function getSubtotal(fc: FacturaCausadaInfo): number {
+  try {
+    if (!fc.datos_json) return 0;
+    const d: DatosJson = JSON.parse(fc.datos_json);
+    return d.mapeos.filter((m) => !m.es_retencion).reduce((s, m) => s + m.base, 0);
+  } catch { return 0; }
+}
+
 export function CausadasModal({ facturas, onClose }: Props) {
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
 
@@ -271,7 +279,7 @@ export function CausadasModal({ facturas, onClose }: Props) {
               <table className="w-full min-w-[640px] text-sm">
                 <thead>
                   <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
-                    {["#", "N° Factura", "Proveedor / NIT", "Fecha", "Total", "Consecutivo", "Causada el", ""].map((h) => (
+                    {["#", "N° Factura", "Proveedor / NIT", "Fecha", "Subtotal", "Total", "Consecutivo", "Causada el", ""].map((h) => (
                       <th
                         key={h}
                         className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide"
@@ -306,6 +314,9 @@ export function CausadasModal({ facturas, onClose }: Props) {
                         <p className="font-mono text-xs" style={{ color: "var(--text-muted)" }}>{fc.nit_proveedor}</p>
                       </td>
                       <td className="px-4 py-3 text-xs tabular-nums" style={{ color: "var(--text-secondary)" }}>{fc.fecha_factura ?? "—"}</td>
+                      <td className="px-4 py-3 font-mono text-sm tabular-nums" style={{ color: "var(--text-secondary)" }}>
+                        {fmt(getSubtotal(fc))}
+                      </td>
                       <td className="px-4 py-3 font-mono text-sm font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>
                         {fmt(fc.total ?? 0)}
                       </td>
