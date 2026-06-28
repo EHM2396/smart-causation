@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWizardStore } from "@/stores/wizard";
@@ -8,10 +8,14 @@ import { Combobox } from "@/components/ui/combobox";
 import { Badge } from "@/components/ui/badge";
 import { NuevoImpuestoDialog } from "@/components/causacion/nuevo-impuesto-dialog";
 import { fmt } from "@/lib/utils";
-import { AlertTriangle, Plus, ChevronDown, ChevronUp, Sparkles, Loader2 } from "lucide-react";
+import {
+  AlertTriangle, Plus, Sparkles, Loader2,
+  ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock,
+} from "lucide-react";
 import type { MapeoItem, CuentaOpcion, ImpuestoOut, FuenteMapeo } from "@/lib/types";
 
-// Helper: build combobox options from cuenta list
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 function cuentaOpts(cuentas: CuentaOpcion[]) {
   return cuentas.map((c) => ({ value: c.codigo, label: c.label ?? `${c.codigo} – ${c.nombre}` }));
 }
@@ -19,10 +23,7 @@ function cuentaOpts(cuentas: CuentaOpcion[]) {
 function impOpts(imps: ImpuestoOut[], tipos?: string[]) {
   return imps
     .filter((i) => !tipos || tipos.some((t) => (i.tipo_impuesto ?? "").toLowerCase().includes(t)))
-    .map((i) => ({
-      value: i.codigo,
-      label: `${i.codigo} — ${i.tipo_impuesto ?? ""} ${i.tarifa ?? 0}%`,
-    }));
+    .map((i) => ({ value: i.codigo, label: `${i.codigo} — ${i.tipo_impuesto ?? ""} ${i.tarifa ?? 0}%` }));
 }
 
 const ORIGEN_BADGE: Record<string, { label: string; variant: "success" | "info" | "purple" | "warning" | "default" }> = {
@@ -41,6 +42,23 @@ function origenToFuente(origen: string | null): FuenteMapeo {
   return "manual";
 }
 
+function DataField({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>{label}</p>
+      <p
+        className={`mt-1 truncate text-sm font-medium${mono ? " font-mono" : ""}`}
+        style={{ color: "var(--text-primary)" }}
+        title={value}
+      >
+        {value || "—"}
+      </p>
+    </div>
+  );
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export function Paso2() {
   const { facturas, tipoComp, setPaso, setMapeos } = useWizardStore();
 
@@ -48,7 +66,9 @@ export function Paso2() {
   const { data: cuentasPago = [] } = useQuery({ queryKey: ["cuentas-pago"], queryFn: api.getCuentasPago });
   const { data: impuestosRaw = [], refetch: refetchImps } = useQuery({ queryKey: ["impuestos"], queryFn: api.getImpuestos });
 
-  const [expanded, setExpanded] = useState<Record<number, boolean>>({ 0: true });
+  // null = lista de facturas, number = detalle de factura idx
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+
   const [cuentaPago, setCuentaPago] = useState<Record<number, string>>({});
   const [tipoProveedor, setTipoProveedor] = useState<Record<number, string>>({});
   const [nitEdit, setNitEdit] = useState<Record<number, string>>({});
@@ -60,18 +80,15 @@ export function Paso2() {
   const [riItem, setRiItem] = useState<Record<string, string>>({});
   const [dlgOpen, setDlgOpen] = useState<"retefuente" | "reteica" | null>(null);
 
-  // ── Sugerencias del sistema de aprendizaje ────────────────────────────────
   const [suggestions, setSuggestions] = useState<Record<string, Sugerencia>>({});
   const [sugsLoading, setSugsLoading] = useState(false);
 
   useEffect(() => {
     if (facturas.length === 0) return;
     setSugsLoading(true);
-
     const items = facturas.flatMap((f, idx) =>
       f.items.map((item, jdx) => ({ key: `${idx}_${jdx}`, nit: f.nit, descripcion: item.descripcion }))
     );
-
     Promise.all(
       items.map(({ key, nit, descripcion }) =>
         api.sugerirCuenta(nit, descripcion)
@@ -82,32 +99,24 @@ export function Paso2() {
       const map: Record<string, Sugerencia> = {};
       results.forEach(({ key, cuenta, origen }) => { map[key] = { cuenta, origen }; });
       setSuggestions(map);
-
-      // Pre-llenar solo si el usuario no eligió nada aún
       setCuentaGastoItem(prev => {
         const next = { ...prev };
-        results.forEach(({ key, cuenta }) => {
-          if (!next[key] && cuenta) next[key] = cuenta;
-        });
+        results.forEach(({ key, cuenta }) => { if (!next[key] && cuenta) next[key] = cuenta; });
         return next;
       });
-
       setSugsLoading(false);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [facturas]);
 
   const gastoOpts = cuentaOpts(cuentasGasto);
-  const pagoOpts = cuentaOpts(cuentasPago);
-  const rfOpts = impOpts(impuestosRaw, ["retefuente"]);
-  const riOpts = impOpts(impuestosRaw, ["reteica"]);
-  const allImpOpts = impOpts(impuestosRaw);
-
+  const pagoOpts  = cuentaOpts(cuentasPago);
+  const rfOpts    = impOpts(impuestosRaw, ["retefuente"]);
+  const riOpts    = impOpts(impuestosRaw, ["reteica"]);
   const getImpInfo = (cod: string) => impuestosRaw.find((i) => i.codigo === cod);
 
   const handleValidar = () => {
     const mapeos: MapeoItem[] = [];
-
     for (let idx = 0; idx < facturas.length; idx++) {
       const factura = facturas[idx];
       const cgGlobal = cuentaGastoGlobal[idx] ?? "";
@@ -121,29 +130,22 @@ export function Paso2() {
         const cgFinal = cgGlobal || cuentaGastoItem[key] || "";
         const cod = item.cod_impuesto ?? "";
         const impInfo = cod ? getImpInfo(cod) : null;
-
         const sug = suggestions[key];
         const fuente: FuenteMapeo = sug?.cuenta && cgFinal === sug.cuenta
           ? origenToFuente(sug.origen)
           : "manual";
 
         mapeos.push({
-          idx_factura: idx,
-          descripcion: item.descripcion,
-          base: item.base,
+          idx_factura: idx, descripcion: item.descripcion, base: item.base,
           cod_impuesto: impInfo?.codigo ?? cod,
           porcentaje: impInfo?.tarifa ?? item.porcentaje ?? 0,
           valor_impuesto: item.valor_impuesto,
-          cuenta_gasto: cgFinal,
-          fuente,
+          cuenta_gasto: cgFinal, fuente,
           cuenta_impuesto_deb: impInfo?.cta_compras ?? "",
-          cuenta_impuesto_cre: "",
-          es_retencion: false,
-          cuenta_pago: pago,
-          cuenta_pago_nombre: pagoNombre,
+          cuenta_impuesto_cre: "", es_retencion: false,
+          cuenta_pago: pago, cuenta_pago_nombre: pagoNombre,
         });
 
-        // Retención por item
         if (!globalRetActiva) {
           if (rfItem[key]) {
             const rf = getImpInfo(rfItem[key]);
@@ -170,7 +172,6 @@ export function Paso2() {
         }
       }
 
-      // Retención global
       const totalBase = factura.items.reduce((s, it) => s + it.base, 0);
       if (rfGlobal[idx]) {
         const rf = getImpInfo(rfGlobal[idx]);
@@ -195,13 +196,11 @@ export function Paso2() {
         });
       }
     }
-
     setMapeos(mapeos);
     setPaso(3);
   };
 
-  const toggle = (i: number) => setExpanded((p) => ({ ...p, [i]: !p[i] }));
-
+  // ── Guard ────────────────────────────────────────────────────────────────────
   if (!tipoComp) {
     return (
       <div className="flex items-center gap-3 rounded-xl border p-5" style={{ borderColor: "var(--warning-border)", backgroundColor: "var(--warning-bg)", color: "var(--warning-text)" }}>
@@ -211,196 +210,506 @@ export function Paso2() {
     );
   }
 
-  return (
-    <div className="space-y-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-semibold text-[var(--text-primary)]">Mapear cuentas contables</h2>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            {facturas.length} factura{facturas.length > 1 ? "s" : ""} listas para mapear
-            {sugsLoading && (
-              <span className="ml-2 inline-flex items-center gap-1" style={{ color: "var(--brand)" }}>
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Cargando sugerencias...
-              </span>
-            )}
-          </p>
+  // ── LIST VIEW ────────────────────────────────────────────────────────────────
+  if (selectedIdx === null) {
+    const listos = facturas.filter((_, i) => !!cuentaPago[i]).length;
+
+    return (
+      <div className="space-y-5">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>
+              Mapear cuentas contables
+            </h2>
+            <p className="mt-1 text-sm" style={{ color: "var(--text-secondary)" }}>
+              {facturas.length} factura{facturas.length !== 1 ? "s" : ""} parseadas · selecciona una para configurarla
+              {sugsLoading && (
+                <span className="ml-2 inline-flex items-center gap-1" style={{ color: "var(--brand)" }}>
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Cargando sugerencias IA…
+                </span>
+              )}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setPaso(1)}>← Volver</Button>
+            <Button size="sm" onClick={handleValidar}>Validar partida doble →</Button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setDlgOpen("retefuente")}>
-            <Plus className="h-3.5 w-3.5" /> Retefuente
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setDlgOpen("reteica")}>
-            <Plus className="h-3.5 w-3.5" /> ReteICA
-          </Button>
+
+        {/* Progress bar */}
+        <div
+          className="flex items-center gap-3 rounded-xl border px-4 py-3"
+          style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}
+        >
+          <div className="flex-1 h-1.5 overflow-hidden rounded-full" style={{ backgroundColor: "var(--border-soft)" }}>
+            <div
+              className="h-full rounded-full transition-all duration-300"
+              style={{ width: `${(listos / facturas.length) * 100}%`, backgroundColor: "var(--success)" }}
+            />
+          </div>
+          <span className="whitespace-nowrap text-xs" style={{ color: "var(--text-muted)" }}>
+            {listos} / {facturas.length} configuradas
+          </span>
+        </div>
+
+        {/* Invoice table */}
+        <div
+          className="overflow-hidden rounded-xl border"
+          style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)", boxShadow: "var(--shadow-card)" }}
+        >
+          <table className="w-full min-w-[640px] text-sm">
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
+                {["#", "N° Factura", "Proveedor / NIT", "Fecha", "Total", "Estado", ""].map((h) => (
+                  <th
+                    key={h}
+                    className={`px-4 py-3 text-xs font-semibold uppercase tracking-wide${h === "Total" ? " text-right" : " text-left"}`}
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {facturas.map((f, idx) => {
+                const isListo = !!cuentaPago[idx];
+                const numSugs = f.items.filter((_, jdx) => suggestions[`${idx}_${jdx}`]?.cuenta).length;
+                return (
+                  <tr
+                    key={idx}
+                    className="cursor-pointer transition-colors tr-row"
+                    style={{ borderBottom: idx < facturas.length - 1 ? "1px solid var(--border-soft)" : "none" }}
+                    onClick={() => setSelectedIdx(idx)}
+                  >
+                    <td className="px-4 py-3">
+                      <div
+                        className="flex h-7 w-7 items-center justify-center rounded-lg text-xs font-semibold"
+                        style={{ backgroundColor: "var(--info-bg)", color: "var(--info-text)", border: "1px solid var(--info-border)" }}
+                      >
+                        {idx + 1}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
+                      {f.numero_dian}
+                    </td>
+                    <td className="max-w-[220px] px-4 py-3">
+                      <p className="truncate text-sm font-medium" style={{ color: "var(--text-primary)" }} title={f.razon_social}>
+                        {f.razon_social}
+                      </p>
+                      <p className="font-mono text-xs" style={{ color: "var(--text-muted)" }}>{f.nit}</p>
+                    </td>
+                    <td className="px-4 py-3 tabular-nums text-xs" style={{ color: "var(--text-secondary)" }}>
+                      {f.fecha}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                      {fmt(f.total)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        {isListo ? (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+                            style={{ backgroundColor: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)", border: "1px solid color-mix(in srgb, var(--success) 30%, transparent)" }}
+                          >
+                            <CheckCircle2 className="h-3 w-3" /> Configurada
+                          </span>
+                        ) : (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+                            style={{ backgroundColor: "var(--warning-bg)", color: "var(--warning-text)", border: "1px solid var(--warning-border)" }}
+                          >
+                            <Clock className="h-3 w-3" /> Pendiente
+                          </span>
+                        )}
+                        {!sugsLoading && numSugs > 0 && !isListo && (
+                          <span className="inline-flex items-center gap-0.5 text-xs" style={{ color: "var(--brand)" }}>
+                            <Sparkles className="h-3 w-3" />{numSugs}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        className="flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-opacity hover:opacity-80"
+                        style={{
+                          borderColor: isListo ? "var(--border-soft)" : "var(--brand)",
+                          color: isListo ? "var(--text-muted)" : "var(--brand)",
+                          backgroundColor: isListo ? "var(--bg-elevated)" : "color-mix(in srgb, var(--brand) 8%, transparent)",
+                        }}
+                        onClick={(e) => { e.stopPropagation(); setSelectedIdx(idx); }}
+                      >
+                        {isListo ? "Editar" : "Configurar"} <ChevronRight className="h-3 w-3" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  // ── DETAIL VIEW ──────────────────────────────────────────────────────────────
+  const factura = facturas[selectedIdx];
+  const isFirst = selectedIdx === 0;
+  const isLast  = selectedIdx === facturas.length - 1;
+  const retGlobalActiva = !!(rfGlobal[selectedIdx] || riGlobal[selectedIdx]);
+
+  return (
+    <div className="space-y-4">
+      {/* Navigation bar */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setSelectedIdx(null)}
+          className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-80"
+          style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)", backgroundColor: "var(--bg-surface)" }}
+        >
+          <ArrowLeft className="h-3.5 w-3.5" /> Lista
+        </button>
+        <div className="flex-1" />
+        <button
+          disabled={isFirst}
+          onClick={() => setSelectedIdx(selectedIdx - 1)}
+          className="flex h-8 w-8 items-center justify-center rounded-lg border transition-opacity disabled:opacity-30 hover:opacity-80"
+          style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)", backgroundColor: "var(--bg-surface)" }}
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <span className="min-w-[90px] text-center text-sm" style={{ color: "var(--text-muted)" }}>
+          Factura <strong style={{ color: "var(--text-primary)" }}>{selectedIdx + 1}</strong> / {facturas.length}
+        </span>
+        <button
+          disabled={isLast}
+          onClick={() => setSelectedIdx(selectedIdx + 1)}
+          className="flex h-8 w-8 items-center justify-center rounded-lg border transition-opacity disabled:opacity-30 hover:opacity-80"
+          style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)", backgroundColor: "var(--bg-surface)" }}
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+
+      {/* Invoice header card */}
+      <div
+        className="rounded-xl border p-4"
+        style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)", boxShadow: "var(--shadow-card)" }}
+      >
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-5">
+          <DataField label="N° Factura DIAN" value={factura.numero_dian} mono />
+          <DataField label="Fecha emisión" value={factura.fecha} />
+          <div className="col-span-2">
+            <DataField label="Proveedor" value={factura.razon_social} />
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Total factura</p>
+            <p className="mt-1 text-xl font-bold tabular-nums" style={{ color: "var(--text-primary)" }}>{fmt(factura.total)}</p>
+          </div>
+        </div>
+        {factura.advertencias && factura.advertencias.length > 0 && (
+          <div
+            className="mt-3 flex items-start gap-2 rounded-lg px-3 py-2 text-xs"
+            style={{ backgroundColor: "var(--warning-bg)", border: "1px solid var(--warning-border)", color: "var(--warning-text)" }}
+          >
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <ul className="space-y-0.5">
+              {factura.advertencias.map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {/* Datos del proveedor */}
+      <div
+        className="rounded-xl border p-4 space-y-3"
+        style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}
+      >
+        <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Datos del proveedor</p>
+        <div className="grid grid-cols-3 gap-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>NIT proveedor</label>
+            <input
+              value={nitEdit[selectedIdx] ?? factura.nit}
+              onChange={(e) => setNitEdit((p) => ({ ...p, [selectedIdx]: e.target.value }))}
+              className="flex h-9 w-full rounded-lg border px-3 text-sm outline-none transition-colors focus:ring-2"
+              style={{ borderColor: "var(--border-strong)", backgroundColor: "var(--bg-surface)", color: "var(--text-primary)" }}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>Tipo proveedor</label>
+            <select
+              value={tipoProveedor[selectedIdx] ?? factura.tipo_proveedor ?? "juridica"}
+              onChange={(e) => setTipoProveedor((p) => ({ ...p, [selectedIdx]: e.target.value }))}
+              className="flex h-9 w-full rounded-lg border px-3 text-sm outline-none"
+              style={{ borderColor: "var(--border-strong)", backgroundColor: "var(--bg-surface)", color: "var(--text-primary)" }}
+            >
+              <option value="juridica">Jurídica</option>
+              <option value="natural">Natural</option>
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>Cuenta de pago</label>
+            <Combobox
+              options={pagoOpts}
+              value={cuentaPago[selectedIdx] ?? ""}
+              onChange={(v) => setCuentaPago((p) => ({ ...p, [selectedIdx]: v }))}
+              placeholder="Buscar cuenta de pago…"
+            />
+          </div>
         </div>
       </div>
 
-      {facturas.map((factura, idx) => (
-        <div key={idx} className="rounded-xl border border-[var(--border-soft)] bg-[var(--bg-surface)] overflow-hidden">
-          {/* Header */}
-          <button
-            onClick={() => toggle(idx)}
-            className="flex w-full items-center justify-between px-5 py-4 hover:bg-[var(--bg-elevated)] transition-colors"
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold" style={{ backgroundColor: "var(--info-bg)", color: "var(--info-text)", border: "1px solid var(--info-border)" }}>
-                {idx + 1}
-              </div>
-              <div className="min-w-0 text-left">
-                <p className="text-sm font-medium text-[var(--text-primary)] truncate">{factura.numero_dian} · {factura.razon_social}</p>
-                <p className="text-xs text-[var(--text-muted)]">NIT {factura.nit} · {factura.fecha} · {fmt(factura.total)}</p>
-              </div>
-            </div>
-            {expanded[idx] ? <ChevronUp className="h-4 w-4 text-[var(--text-muted)] shrink-0" /> : <ChevronDown className="h-4 w-4 text-[var(--text-muted)] shrink-0" />}
-          </button>
+      {/* Global config — key differentiator */}
+      <div
+        className="rounded-xl border p-4 space-y-3"
+        style={{ borderColor: "var(--info-border)", backgroundColor: "var(--info-bg)" }}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--info-text)" }}>
+            Global — aplica a todos los ítems de esta factura
+          </p>
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => setDlgOpen("retefuente")}
+              className="flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium transition-opacity hover:opacity-80"
+              style={{ borderColor: "var(--info-border)", color: "var(--info-text)", backgroundColor: "rgba(255,255,255,0.12)" }}
+            >
+              <Plus className="h-3 w-3" /> Retefuente
+            </button>
+            <button
+              type="button"
+              onClick={() => setDlgOpen("reteica")}
+              className="flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium transition-opacity hover:opacity-80"
+              style={{ borderColor: "var(--info-border)", color: "var(--info-text)", backgroundColor: "rgba(255,255,255,0.12)" }}
+            >
+              <Plus className="h-3 w-3" /> ReteICA
+            </button>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium" style={{ color: "var(--info-text)", opacity: 0.85 }}>Cuenta gasto/costo</label>
+            <Combobox
+              options={gastoOpts}
+              value={cuentaGastoGlobal[selectedIdx] ?? ""}
+              onChange={(v) => setCuentaGastoGlobal((p) => ({ ...p, [selectedIdx]: v }))}
+              placeholder="Aplica a todos los ítems…"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium" style={{ color: "var(--info-text)", opacity: 0.85 }}>Retefuente</label>
+            <Combobox
+              options={rfOpts}
+              value={rfGlobal[selectedIdx] ?? ""}
+              onChange={(v) => setRfGlobal((p) => ({ ...p, [selectedIdx]: v }))}
+              placeholder="Código retefuente…"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium" style={{ color: "var(--info-text)", opacity: 0.85 }}>ReteICA</label>
+            <Combobox
+              options={riOpts}
+              value={riGlobal[selectedIdx] ?? ""}
+              onChange={(v) => setRiGlobal((p) => ({ ...p, [selectedIdx]: v }))}
+              placeholder="Código reteica…"
+            />
+          </div>
+        </div>
+      </div>
 
-          {expanded[idx] && (
-            <div className="border-t border-[var(--border-soft)] px-5 py-5 space-y-5">
-              {/* NIT + tipo + cuenta pago */}
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-[var(--text-muted)]">NIT proveedor</label>
-                  <input
-                    value={nitEdit[idx] ?? factura.nit}
-                    onChange={(e) => setNitEdit((p) => ({ ...p, [idx]: e.target.value }))}
-                    className="flex h-9 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-[var(--text-muted)]">Tipo proveedor</label>
-                  <select
-                    value={tipoProveedor[idx] ?? factura.tipo_proveedor ?? "juridica"}
-                    onChange={(e) => setTipoProveedor((p) => ({ ...p, [idx]: e.target.value }))}
-                    className="flex h-9 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-                  >
-                    <option value="juridica">Jurídica</option>
-                    <option value="natural">Natural</option>
-                  </select>
-                </div>
-                <div className="flex flex-col items-end justify-center">
-                  <p className="text-xs text-[var(--text-muted)]">Total factura</p>
-                  <p className="text-xl font-bold text-[var(--text-primary)]">{fmt(factura.total)}</p>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-[var(--text-muted)]">Cuenta de pago</label>
-                <Combobox options={pagoOpts} value={cuentaPago[idx]} onChange={(v) => setCuentaPago((p) => ({ ...p, [idx]: v }))} placeholder="Buscar por código o nombre..." />
-              </div>
-
-              {/* Global box */}
-              <div className="rounded-lg border p-4 space-y-3" style={{ borderColor: "var(--info-border)", backgroundColor: "var(--info-bg)" }}>
-                <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--info-text)" }}>Global — aplica a todos los ítems</p>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-[var(--text-muted)]">Cuenta gasto/costo</label>
-                    <Combobox options={gastoOpts} value={cuentaGastoGlobal[idx]} onChange={(v) => setCuentaGastoGlobal((p) => ({ ...p, [idx]: v }))} placeholder="Aplica a todos..." />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-[var(--text-muted)]">Retefuente</label>
-                    <Combobox options={rfOpts} value={rfGlobal[idx]} onChange={(v) => setRfGlobal((p) => ({ ...p, [idx]: v }))} placeholder="Código retefuente..." />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-[var(--text-muted)]">ReteICA</label>
-                    <Combobox options={riOpts} value={riGlobal[idx]} onChange={(v) => setRiGlobal((p) => ({ ...p, [idx]: v }))} placeholder="Código reteica..." />
-                  </div>
-                </div>
-              </div>
-
-              {/* Items */}
-              <div className="space-y-3">
-                {factura.items.map((item, jdx) => {
-                  const key = `${idx}_${jdx}`;
-                  const impInfo = item.cod_impuesto ? getImpInfo(item.cod_impuesto) : null;
-                  const retGlobalActiva = !!(rfGlobal[idx] || riGlobal[idx]);
-                  const sug = suggestions[key];
-                  const currentVal = cuentaGastoGlobal[idx] || cuentaGastoItem[key];
-                  const origenEfectivo = sug?.cuenta && currentVal === sug.cuenta
-                    ? (sug.origen ?? "aprendizaje")
-                    : currentVal ? "manual" : null;
-                  const badge = origenEfectivo ? ORIGEN_BADGE[origenEfectivo] ?? ORIGEN_BADGE.manual : null;
-                  const sinSugerencia = !sugsLoading && sug && sug.cuenta === null && !currentVal && !cuentaGastoGlobal[idx];
-                  return (
-                    <div key={jdx} className="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-elevated)] p-4 space-y-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-medium text-[var(--text-muted)]">Ítem {jdx + 1}</span>
-                        <span className="text-sm text-[var(--text-secondary)]">{item.descripcion}</span>
-                      </div>
-                      <div className="grid grid-cols-4 gap-3">
-                        <div className="col-span-2 space-y-1.5">
-                          <div className="flex items-center gap-2">
-                            <label className="text-xs text-[var(--text-muted)]">Cuenta gasto/costo</label>
-                            {sugsLoading && (
-                              <Loader2 className="h-3 w-3 animate-spin" style={{ color: "var(--text-muted)" }} />
-                            )}
-                            {badge && !sugsLoading && (
-                              <Badge variant={badge.variant}>{badge.label}</Badge>
-                            )}
-                          </div>
-                          <Combobox
-                            options={gastoOpts}
-                            value={currentVal}
-                            onChange={(v) => setCuentaGastoItem((p) => ({ ...p, [key]: v }))}
-                            disabled={!!cuentaGastoGlobal[idx]}
-                            placeholder="Buscar cuenta..."
-                          />
-                          {sinSugerencia && (
-                            <div className="flex items-start gap-1.5 mt-1 rounded-lg px-2.5 py-2" style={{ backgroundColor: "var(--warning-bg)", border: "1px solid var(--warning-border)" }}>
-                              <Sparkles className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: "var(--warning-text)" }} />
-                              <p className="text-xs leading-snug" style={{ color: "var(--warning-text)" }}>
-                                Sin mapeo previo para este ítem. Selecciona la cuenta manualmente — el sistema aprenderá para la próxima vez.
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs text-[var(--text-muted)]">Base</label>
-                          <div className="flex h-9 items-center rounded-lg border border-[var(--border-soft)] bg-[var(--bg-surface)] px-3 text-sm font-medium text-emerald-600">
-                            {fmt(item.base)}
-                          </div>
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs text-[var(--text-muted)]">
-                            {impInfo ? "Cód. impuesto" : "Seleccionar impuesto"}
-                          </label>
-                          {impInfo ? (
-                            <div className="flex h-9 items-center gap-2 rounded-lg border border-[var(--border-soft)] bg-[var(--bg-surface)] px-3 text-sm">
-                              <span className="text-[var(--text-secondary)]">{impInfo.codigo}</span>
-                              <Badge variant="info">{impInfo.tipo_impuesto} {impInfo.tarifa}%</Badge>
-                            </div>
-                          ) : (
-                            <Combobox options={allImpOpts} value={""} onChange={() => {}} placeholder="Buscar..." />
-                          )}
-                        </div>
-                      </div>
-                      {/* Retención por item */}
-                      {retGlobalActiva ? (
-                        <p className="text-xs" style={{ color: "var(--info-text)", opacity: 0.7 }}>↑ Retención global activa — selectores por ítem deshabilitados</p>
-                      ) : (
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1.5">
-                            <label className="text-xs text-[var(--text-muted)]">Retefuente (solo este ítem)</label>
-                            <Combobox options={rfOpts} value={rfItem[key]} onChange={(v) => setRfItem((p) => ({ ...p, [key]: v }))} placeholder="Código retefuente..." />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-xs text-[var(--text-muted)]">ReteICA (solo este ítem)</label>
-                            <Combobox options={riOpts} value={riItem[key]} onChange={(v) => setRiItem((p) => ({ ...p, [key]: v }))} placeholder="Código reteica..." />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+      {/* Items table */}
+      <div
+        className="overflow-hidden rounded-xl border"
+        style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)", boxShadow: "var(--shadow-card)" }}
+      >
+        <div
+          className="flex items-center justify-between border-b px-4 py-3"
+          style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}
+        >
+          <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+            Ítems{" "}
+            <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>
+              ({factura.items.length})
+            </span>
+          </p>
+          {sugsLoading && (
+            <span className="flex items-center gap-1.5 text-xs" style={{ color: "var(--brand)" }}>
+              <Loader2 className="h-3 w-3 animate-spin" /> Cargando sugerencias IA…
+            </span>
           )}
         </div>
-      ))}
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Descripción</th>
+                <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Base</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Impuesto</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Cuenta gasto/costo</th>
+                {!retGlobalActiva && (
+                  <>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Retefuente</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>ReteICA</th>
+                  </>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {factura.items.map((item, jdx) => {
+                const key = `${selectedIdx}_${jdx}`;
+                const impInfo = item.cod_impuesto ? getImpInfo(item.cod_impuesto) : null;
+                const sug = suggestions[key];
+                const currentVal = cuentaGastoGlobal[selectedIdx] || cuentaGastoItem[key];
+                const origenEfectivo = sug?.cuenta && currentVal === sug.cuenta
+                  ? (sug.origen ?? "aprendizaje")
+                  : currentVal ? "manual" : null;
+                const badge = origenEfectivo ? (ORIGEN_BADGE[origenEfectivo] ?? ORIGEN_BADGE.manual) : null;
+                const sinSugerencia = !sugsLoading && sug && sug.cuenta === null && !currentVal && !cuentaGastoGlobal[selectedIdx];
 
-      <div className="flex items-center justify-between pt-2">
-        <Button variant="outline" onClick={() => setPaso(1)}>← Volver</Button>
-        <Button size="lg" onClick={handleValidar}>Validar partida doble →</Button>
+                return (
+                  <tr
+                    key={jdx}
+                    style={{ borderBottom: jdx < factura.items.length - 1 ? "1px solid var(--border-soft)" : "none" }}
+                  >
+                    {/* Descripción */}
+                    <td className="max-w-[200px] px-4 py-3">
+                      <p className="truncate text-sm" style={{ color: "var(--text-secondary)" }} title={item.descripcion}>
+                        {item.descripcion}
+                      </p>
+                    </td>
+
+                    {/* Base */}
+                    <td className="px-4 py-3 text-right tabular-nums font-medium" style={{ color: "var(--success)" }}>
+                      {fmt(item.base)}
+                    </td>
+
+                    {/* Impuesto */}
+                    <td className="px-4 py-3">
+                      {impInfo ? (
+                        <div className="space-y-0.5">
+                          <Badge variant="info">{impInfo.tipo_impuesto} {impInfo.tarifa}%</Badge>
+                          <p className="font-mono text-xs" style={{ color: "var(--text-muted)" }}>{impInfo.codigo}</p>
+                        </div>
+                      ) : (
+                        <span className="text-xs" style={{ color: "var(--text-muted)" }}>—</span>
+                      )}
+                    </td>
+
+                    {/* Cuenta gasto con badge IA */}
+                    <td className="min-w-[220px] px-4 py-3">
+                      <div className="space-y-1">
+                        {badge && !sugsLoading && (
+                          <Badge variant={badge.variant}>
+                            {(badge.variant === "purple" || badge.variant === "success") && (
+                              <Sparkles className="mr-0.5 inline h-2.5 w-2.5" />
+                            )}
+                            {badge.label}
+                          </Badge>
+                        )}
+                        <Combobox
+                          options={gastoOpts}
+                          value={currentVal ?? ""}
+                          onChange={(v) => setCuentaGastoItem((p) => ({ ...p, [key]: v }))}
+                          disabled={!!cuentaGastoGlobal[selectedIdx]}
+                          placeholder={cuentaGastoGlobal[selectedIdx] ? "← Usando cuenta global" : "Buscar cuenta…"}
+                        />
+                        {sinSugerencia && (
+                          <div
+                            className="flex items-start gap-1.5 rounded px-2 py-1.5"
+                            style={{ backgroundColor: "var(--warning-bg)", border: "1px solid var(--warning-border)" }}
+                          >
+                            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" style={{ color: "var(--warning-text)" }} />
+                            <p className="text-xs leading-snug" style={{ color: "var(--warning-text)" }}>
+                              Sin mapeo previo — selecciona la cuenta manualmente.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Retefuente / ReteICA por ítem (solo si no hay global) */}
+                    {!retGlobalActiva && (
+                      <>
+                        <td className="min-w-[160px] px-4 py-3">
+                          <Combobox
+                            options={rfOpts}
+                            value={rfItem[key] ?? ""}
+                            onChange={(v) => setRfItem((p) => ({ ...p, [key]: v }))}
+                            placeholder="Retefuente…"
+                          />
+                        </td>
+                        <td className="min-w-[160px] px-4 py-3">
+                          <Combobox
+                            options={riOpts}
+                            value={riItem[key] ?? ""}
+                            onChange={(v) => setRiItem((p) => ({ ...p, [key]: v }))}
+                            placeholder="ReteICA…"
+                          />
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                );
+              })}
+              {retGlobalActiva && (
+                <tr>
+                  <td
+                    colSpan={4}
+                    className="px-4 py-2.5 text-xs"
+                    style={{ backgroundColor: "color-mix(in srgb, var(--info-bg) 60%, transparent)", color: "var(--info-text)" }}
+                  >
+                    Retención global activa — los selectores por ítem están deshabilitados
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Footer navigation */}
+      <div className="flex items-center justify-between gap-2 pb-4 pt-2">
+        <div className="flex gap-2">
+          <button
+            onClick={() => setSelectedIdx(null)}
+            className="flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition-opacity hover:opacity-80"
+            style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)", backgroundColor: "var(--bg-surface)" }}
+          >
+            <ArrowLeft className="h-3.5 w-3.5" /> Lista
+          </button>
+          <button
+            disabled={isFirst}
+            onClick={() => setSelectedIdx(selectedIdx - 1)}
+            className="flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition-opacity disabled:opacity-30 hover:opacity-80"
+            style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)", backgroundColor: "var(--bg-surface)" }}
+          >
+            <ChevronLeft className="h-3.5 w-3.5" /> Anterior
+          </button>
+        </div>
+
+        <span className="text-sm tabular-nums" style={{ color: "var(--text-muted)" }}>
+          {selectedIdx + 1} / {facturas.length}
+        </span>
+
+        <div className="flex gap-2">
+          {!isLast ? (
+            <button
+              onClick={() => setSelectedIdx(selectedIdx + 1)}
+              className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold transition-opacity hover:opacity-90"
+              style={{ backgroundColor: "var(--brand)", color: "#fff" }}
+            >
+              Siguiente <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          ) : (
+            <Button size="lg" onClick={handleValidar}>
+              Validar partida doble →
+            </Button>
+          )}
+        </div>
       </div>
 
       <NuevoImpuestoDialog
