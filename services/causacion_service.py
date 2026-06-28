@@ -16,11 +16,14 @@ No tiene dependencias de Streamlit. Puede ser llamado desde:
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from io import BytesIO
 from typing import Any
 
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from core import exporter, parser
 from core.validator import validar_movimientos
@@ -84,8 +87,20 @@ def sugerir_cuenta_gasto(
     # 3. IA — fallback cuando no hay datos aprendidos
     try:
         from services import ai_service
+        if not ai_service.esta_disponible():
+            logger.debug("sugerir_cuenta_gasto: IA no disponible (key no configurada o openai no instalado)")
+            return ResultadoSugerencia(cuenta=None, origen="ia_no_disponible")
+
         cuentas_gasto_list = cuentas_service.listar_cuentas_gasto(db, empresa_id=empresa_id)
-        codigos_imp        = impuestos_service.listar_como_dict(db, empresa_id=empresa_id)
+        if not cuentas_gasto_list:
+            logger.warning(
+                "sugerir_cuenta_gasto: catálogo de cuentas gasto vacío para empresa_id=%s "
+                "— la IA no puede sugerir sin cuentas en el catálogo",
+                empresa_id,
+            )
+            return ResultadoSugerencia(cuenta=None, origen="sin_catalogo")
+
+        codigos_imp = impuestos_service.listar_como_dict(db, empresa_id=empresa_id)
         sug = ai_service.sugerir(
             descripcion=descripcion,
             cuentas_gasto=[{"codigo": c["codigo"], "nombre": c["nombre"]} for c in cuentas_gasto_list],
@@ -105,8 +120,13 @@ def sugerir_cuenta_gasto(
                 explicacion=sug.explicacion,
                 confianza=sug.confianza,
             )
-    except Exception:
-        pass  # IA falla silenciosamente — nunca bloquea el flujo
+        logger.debug(
+            "sugerir_cuenta_gasto: IA no encontró cuenta para '%s' (cuentas disponibles: %d)",
+            descripcion[:60],
+            len(cuentas_gasto_list),
+        )
+    except Exception as exc:
+        logger.warning("sugerir_cuenta_gasto: excepción en paso IA (flujo continúa): %s", exc)
 
     return ResultadoSugerencia(cuenta=None, origen=None)
 

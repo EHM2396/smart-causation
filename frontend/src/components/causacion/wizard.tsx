@@ -86,7 +86,7 @@ export function CausacionWizard() {
         </div>
 
         {/* Step content */}
-        <div className="max-w-4xl">
+        <div>
           {paso === 1 && <Paso1 />}
           {paso === 2 && <Paso2 />}
           {paso === 3 && <Paso3 />}

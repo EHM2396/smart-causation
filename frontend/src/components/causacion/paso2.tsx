@@ -10,7 +10,7 @@ import { NuevoImpuestoDialog } from "@/components/causacion/nuevo-impuesto-dialo
 import { fmt } from "@/lib/utils";
 import {
   AlertTriangle, Plus, Sparkles, Loader2,
-  ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock,
+  ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search,
 } from "lucide-react";
 import type { MapeoItem, CuentaOpcion, ImpuestoOut, FuenteMapeo } from "@/lib/types";
 
@@ -90,6 +90,7 @@ export function Paso2() {
 
   const [suggestions, setSuggestions] = useState<Record<string, Sugerencia>>({});
   const [sugsLoading, setSugsLoading] = useState(false);
+  const [searchItems, setSearchItems] = useState("");
 
   useEffect(() => {
     if (facturas.length === 0) return;
@@ -548,7 +549,7 @@ export function Paso2() {
         style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)", boxShadow: "var(--shadow-card)" }}
       >
         <div
-          className="flex items-center justify-between border-b px-4 py-3"
+          className="flex flex-wrap items-center gap-3 border-b px-4 py-3"
           style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}
         >
           <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
@@ -562,15 +563,35 @@ export function Paso2() {
               <Loader2 className="h-3 w-3 animate-spin" /> Cargando sugerencias IA…
             </span>
           )}
+          <div className="ml-auto flex items-center gap-2">
+            <div className="relative">
+              <Search
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5"
+                style={{ color: "var(--text-muted)" }}
+              />
+              <input
+                value={searchItems}
+                onChange={(e) => setSearchItems(e.target.value)}
+                placeholder="Buscar ítem…"
+                className="h-8 rounded-lg pl-8 pr-3 text-xs outline-none focus:ring-2 focus:ring-[var(--brand)]"
+                style={{
+                  width: "180px",
+                  border: "1px solid var(--border-strong)",
+                  backgroundColor: "var(--bg-surface)",
+                  color: "var(--text-primary)",
+                }}
+              />
+            </div>
+          </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
+          <table className="w-full min-w-[700px] text-sm">
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
-                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Descripción</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)", minWidth: "220px" }}>Descripción</th>
                 <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Base</th>
                 <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Impuesto</th>
-                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Cuenta gasto/costo</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)", minWidth: "260px" }}>Cuenta gasto/costo</th>
                 {!retGlobalActiva && (
                   <>
                     <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Retefuente</th>
@@ -580,7 +601,10 @@ export function Paso2() {
               </tr>
             </thead>
             <tbody>
-              {factura.items.map((item, jdx) => {
+              {factura.items
+                .map((item, jdx) => ({ item, jdx }))
+                .filter(({ item }) => !searchItems || item.descripcion.toLowerCase().includes(searchItems.toLowerCase()))
+                .map(({ item, jdx }) => {
                 const key = `${selectedIdx}_${jdx}`;
                 const impInfo = item.cod_impuesto ? getImpInfo(item.cod_impuesto) : null;
                 const sug = suggestions[key];
@@ -590,6 +614,8 @@ export function Paso2() {
                   : currentVal ? "manual" : null;
                 const badge = origenEfectivo ? (ORIGEN_BADGE[origenEfectivo] ?? ORIGEN_BADGE.manual) : null;
                 const sinSugerencia = !sugsLoading && sug && sug.cuenta === null && !currentVal && !cuentaGastoGlobal[selectedIdx];
+                const sinCatalogo = sug?.origen === "sin_catalogo";
+                const iaNoDisponible = sug?.origen === "ia_no_disponible";
 
                 return (
                   <tr
@@ -597,7 +623,7 @@ export function Paso2() {
                     style={{ borderBottom: jdx < factura.items.length - 1 ? "1px solid var(--border-soft)" : "none" }}
                   >
                     {/* Descripción */}
-                    <td className="max-w-[200px] px-4 py-3">
+                    <td className="px-4 py-3" style={{ minWidth: "220px", maxWidth: "300px" }}>
                       <p className="truncate text-sm" style={{ color: "var(--text-secondary)" }} title={item.descripcion}>
                         {item.descripcion}
                       </p>
@@ -653,15 +679,28 @@ export function Paso2() {
                           disabled={!!cuentaGastoGlobal[selectedIdx]}
                           placeholder={cuentaGastoGlobal[selectedIdx] ? "← Usando cuenta global" : "Buscar cuenta…"}
                         />
-                        {/* Solo muestra aviso si IA tampoco encontró nada */}
-                        {sinSugerencia && (
+                        {/* Avisos según motivo */}
+                        {sinCatalogo && (
                           <div
                             className="flex items-start gap-1.5 rounded px-2 py-1.5"
                             style={{ backgroundColor: "var(--warning-bg)", border: "1px solid var(--warning-border)" }}
                           >
                             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" style={{ color: "var(--warning-text)" }} />
                             <p className="text-xs leading-snug" style={{ color: "var(--warning-text)" }}>
-                              Sin mapeo previo ni sugerencia IA — selecciona manualmente.
+                              Carga tu catálogo PUC para activar sugerencias IA.
+                            </p>
+                          </div>
+                        )}
+                        {!sinCatalogo && sinSugerencia && (
+                          <div
+                            className="flex items-start gap-1.5 rounded px-2 py-1.5"
+                            style={{ backgroundColor: "var(--warning-bg)", border: "1px solid var(--warning-border)" }}
+                          >
+                            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" style={{ color: "var(--warning-text)" }} />
+                            <p className="text-xs leading-snug" style={{ color: "var(--warning-text)" }}>
+                              {iaNoDisponible
+                                ? "IA no configurada — selecciona manualmente."
+                                : "Sin mapeo previo — selecciona manualmente."}
                             </p>
                           </div>
                         )}
