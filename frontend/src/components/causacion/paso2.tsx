@@ -340,23 +340,50 @@ export function Paso2() {
           </span>
         </div>
 
-        {/* Invoice table */}
-        <div
-          className="relative overflow-hidden rounded-xl border"
-          style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)", boxShadow: "var(--shadow-card)" }}
-        >
-          {sugsLoading && (
-            <div
-              className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-xl"
-              style={{ backgroundColor: "color-mix(in srgb, var(--bg-surface) 88%, transparent)", backdropFilter: "blur(2px)" }}
-            >
-              <Loader2 className="h-7 w-7 animate-spin" style={{ color: "var(--brand)" }} />
-              <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Analizando sugerencias IA…</p>
-              <p className="text-xs text-center max-w-xs" style={{ color: "var(--text-muted)" }}>
-                Procesando {facturas.length} facturas. Por favor espera antes de configurar.
+        {/* Overlay pantalla completa mientras carga sugerencias IA */}
+        {sugsLoading && (
+          <div
+            className="fixed inset-0 z-[9999] flex flex-col items-center justify-center gap-6"
+            style={{ backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+          >
+            <div className="relative flex h-24 w-24 items-center justify-center">
+              <span
+                className="absolute h-24 w-24 rounded-full border-4 border-transparent animate-spin"
+                style={{ borderTopColor: "#059669", borderRightColor: "#0891b2", animationDuration: "1s" }}
+              />
+              <span
+                className="absolute h-16 w-16 rounded-full border-4 border-transparent animate-spin"
+                style={{ borderTopColor: "#0891b2", animationDuration: "0.7s", animationDirection: "reverse" }}
+              />
+              <Sparkles className="h-8 w-8" style={{ color: "#fff" }} />
+            </div>
+            <div className="flex flex-col items-center gap-2 text-center">
+              <p className="text-lg font-semibold text-white">Analizando sugerencias IA</p>
+              <p className="rounded-full px-3 py-0.5 text-sm" style={{ backgroundColor: "rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.8)" }}>
+                {facturas.length} facturas · {facturas.reduce((s, f) => s + f.items.length, 0)} ítems
+              </p>
+              <p className="text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>
+                Por favor espera antes de configurar las facturas…
               </p>
             </div>
-          )}
+            <div className="flex gap-1.5">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <span
+                  key={i}
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ backgroundColor: "#059669", animation: `sug-bounce 1.2s ease-in-out ${i * 0.15}s infinite` }}
+                />
+              ))}
+            </div>
+            <style>{`@keyframes sug-bounce { 0%,80%,100%{transform:scaleY(1);opacity:.4} 40%{transform:scaleY(2);opacity:1} }`}</style>
+          </div>
+        )}
+
+        {/* Invoice table */}
+        <div
+          className="overflow-hidden rounded-xl border"
+          style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)", boxShadow: "var(--shadow-card)" }}
+        >
           <table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
@@ -470,6 +497,7 @@ export function Paso2() {
   const isFirst = selectedIdx === 0;
   const isLast  = selectedIdx === facturas.length - 1;
   const retGlobalActiva = !!(rfGlobal[selectedIdx] || riGlobal[selectedIdx]);
+  const isVerificada = !!verificadas[selectedIdx];
   const cuentaPagoVacia = !cuentaPago[selectedIdx];
   // No pulsar si todos los ítems ya tienen cuenta asignada por aprendizaje/regla
   const todosItemsTienenCuenta = factura.items.every((_, jdx) => !!cuentaGastoItem[`${selectedIdx}_${jdx}`]);
@@ -540,6 +568,17 @@ export function Paso2() {
         )}
       </div>
 
+      {/* Banner de verificada */}
+      {isVerificada && (
+        <div
+          className="flex items-center gap-3 rounded-xl border px-4 py-3 text-sm font-medium"
+          style={{ borderColor: "color-mix(in srgb, var(--success) 40%, transparent)", backgroundColor: "color-mix(in srgb, var(--success) 10%, transparent)", color: "var(--success)" }}
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          Factura verificada — para editar, haz clic en "Verificada" arriba para quitar la verificación.
+        </div>
+      )}
+
       {/* Invoice header card */}
       <div
         className="rounded-xl border p-4"
@@ -581,7 +620,8 @@ export function Paso2() {
             <input
               value={nitEdit[selectedIdx] ?? factura.nit}
               onChange={(e) => setNitEdit((p) => ({ ...p, [selectedIdx]: e.target.value }))}
-              className="flex h-9 w-full rounded-lg border px-3 text-sm outline-none transition-colors focus:ring-2"
+              disabled={isVerificada}
+              className="flex h-9 w-full rounded-lg border px-3 text-sm outline-none transition-colors focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
               style={{ borderColor: "var(--border-strong)", backgroundColor: "var(--bg-surface)", color: "var(--text-primary)" }}
             />
           </div>
@@ -590,7 +630,8 @@ export function Paso2() {
             <select
               value={tipoProveedor[selectedIdx] ?? factura.tipo_proveedor ?? "juridica"}
               onChange={(e) => setTipoProveedor((p) => ({ ...p, [selectedIdx]: e.target.value }))}
-              className="flex h-9 w-full rounded-lg border px-3 text-sm outline-none"
+              disabled={isVerificada}
+              className="flex h-9 w-full rounded-lg border px-3 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50"
               style={{ borderColor: "var(--border-strong)", backgroundColor: "var(--bg-surface)", color: "var(--text-primary)" }}
             >
               <option value="juridica">Jurídica</option>
@@ -617,8 +658,9 @@ export function Paso2() {
                   <p className="text-xs" style={{ color: "var(--text-secondary)" }}>{(nombrePago ?? "").length > 45 ? (nombrePago ?? "").slice(0, 45) + "…" : (nombrePago ?? "")}</p>
                   <button
                     type="button"
+                    disabled={isVerificada}
                     onClick={() => setCuentaPago(p => ({ ...p, [selectedIdx]: cuentaPagoIASug.cuenta_pago_sugerida! }))}
-                    className="flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-opacity hover:opacity-80"
+                    className="flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
                     style={{ backgroundColor: "var(--brand)", color: "#fff" }}
                   >
                     <Sparkles className="h-3 w-3" /> Usar esta cuenta
@@ -632,6 +674,7 @@ export function Paso2() {
                 value={cuentaPago[selectedIdx] ?? ""}
                 onChange={(v) => setCuentaPago((p) => ({ ...p, [selectedIdx]: v }))}
                 placeholder="Buscar cuenta de pago…"
+                disabled={isVerificada}
               />
             </div>
           </div>
@@ -650,16 +693,18 @@ export function Paso2() {
           <div className="flex gap-1.5">
             <button
               type="button"
+              disabled={isVerificada}
               onClick={() => setDlgOpen("retefuente")}
-              className="flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium transition-opacity hover:opacity-80"
+              className="flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
               style={{ borderColor: "var(--info-border)", color: "var(--info-text)", backgroundColor: "rgba(255,255,255,0.12)" }}
             >
               <Plus className="h-3 w-3" /> Retefuente
             </button>
             <button
               type="button"
+              disabled={isVerificada}
               onClick={() => setDlgOpen("reteica")}
-              className="flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium transition-opacity hover:opacity-80"
+              className="flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
               style={{ borderColor: "var(--info-border)", color: "var(--info-text)", backgroundColor: "rgba(255,255,255,0.12)" }}
             >
               <Plus className="h-3 w-3" /> ReteICA
@@ -678,6 +723,7 @@ export function Paso2() {
                 value={cuentaGastoGlobal[selectedIdx] ?? ""}
                 onChange={(v) => setCuentaGastoGlobal((p) => ({ ...p, [selectedIdx]: v }))}
                 placeholder="Aplica a todos los ítems…"
+                disabled={isVerificada}
               />
             </div>
           </div>
@@ -688,6 +734,7 @@ export function Paso2() {
               value={rfGlobal[selectedIdx] ?? ""}
               onChange={(v) => setRfGlobal((p) => ({ ...p, [selectedIdx]: v }))}
               placeholder="Código retefuente…"
+              disabled={isVerificada}
             />
           </div>
           <div className="space-y-1.5">
@@ -697,6 +744,7 @@ export function Paso2() {
               value={riGlobal[selectedIdx] ?? ""}
               onChange={(v) => setRiGlobal((p) => ({ ...p, [selectedIdx]: v }))}
               placeholder="Código reteica…"
+              disabled={isVerificada}
             />
           </div>
         </div>
@@ -847,8 +895,9 @@ export function Paso2() {
                               )}
                               <button
                                 type="button"
+                                disabled={isVerificada}
                                 onClick={() => setCuentaGastoItem(p => ({ ...p, [key]: iaSugerencia.cuenta! }))}
-                                className="flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-opacity hover:opacity-80"
+                                className="flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
                                 style={{ backgroundColor: "var(--brand)", color: "#fff" }}
                               >
                                 <Sparkles className="h-3 w-3" /> Usar esta cuenta
@@ -861,7 +910,7 @@ export function Paso2() {
                           options={gastoOpts}
                           value={currentVal ?? ""}
                           onChange={(v) => setCuentaGastoItem((p) => ({ ...p, [key]: v }))}
-                          disabled={!!cuentaGastoGlobal[selectedIdx]}
+                          disabled={isVerificada || !!cuentaGastoGlobal[selectedIdx]}
                           placeholder={cuentaGastoGlobal[selectedIdx] ? "← Usando cuenta global" : iaSugerencia ? "Acepta sugerencia o busca otra…" : "Buscar cuenta…"}
                         />
 
@@ -892,6 +941,7 @@ export function Paso2() {
                             value={rfItem[key] ?? ""}
                             onChange={(v) => setRfItem((p) => ({ ...p, [key]: v }))}
                             placeholder="Retefuente…"
+                            disabled={isVerificada}
                           />
                         </td>
                         <td className="min-w-[160px] px-4 py-3">
@@ -900,6 +950,7 @@ export function Paso2() {
                             value={riItem[key] ?? ""}
                             onChange={(v) => setRiItem((p) => ({ ...p, [key]: v }))}
                             placeholder="ReteICA…"
+                            disabled={isVerificada}
                           />
                         </td>
                       </>
