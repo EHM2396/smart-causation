@@ -19,3 +19,6 @@ xlsxwriter>=3.1.0
 
 # Envío de correos transaccionales (verificación, recuperación de contraseña)
 fastapi-mail>=1.4.1
+
+# IA — sugerencias de cuentas contables vía OpenAI
+openai>=1.30.0

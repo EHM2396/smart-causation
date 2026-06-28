@@ -381,8 +381,19 @@ export function Paso2() {
   const isFirst = selectedIdx === 0;
   const isLast  = selectedIdx === facturas.length - 1;
   const retGlobalActiva = !!(rfGlobal[selectedIdx] || riGlobal[selectedIdx]);
+  const cuentaPagoVacia = !cuentaPago[selectedIdx];
+  const cuentaGastoGlobalVacia = !cuentaGastoGlobal[selectedIdx];
 
   return (
+    <>
+    <style>{`
+      @keyframes ring-pulse {
+        0%, 100% { box-shadow: 0 0 0 0px rgba(245,158,11,0.5); }
+        50%       { box-shadow: 0 0 0 4px rgba(245,158,11,0.12); }
+      }
+      .require-pulse { animation: ring-pulse 1.8s ease-in-out infinite; border-color: rgba(245,158,11,0.6) !important; }
+      .require-row   { background: color-mix(in srgb, #f59e0b 6%, transparent) !important; }
+    `}</style>
     <div className="space-y-4">
       {/* Navigation bar */}
       <div className="flex items-center gap-2">
@@ -473,13 +484,18 @@ export function Paso2() {
             </select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>Cuenta de pago</label>
-            <Combobox
-              options={pagoOpts}
-              value={cuentaPago[selectedIdx] ?? ""}
-              onChange={(v) => setCuentaPago((p) => ({ ...p, [selectedIdx]: v }))}
-              placeholder="Buscar cuenta de pago…"
-            />
+            <label className="text-xs font-medium flex items-center gap-1.5" style={{ color: cuentaPagoVacia ? "rgb(245,158,11)" : "var(--text-muted)" }}>
+              Cuenta de pago
+              {cuentaPagoVacia && <span className="text-[10px] font-semibold uppercase tracking-wide rounded px-1 py-0.5" style={{ backgroundColor: "rgba(245,158,11,0.15)", color: "rgb(245,158,11)" }}>Requerida</span>}
+            </label>
+            <div className={cuentaPagoVacia ? "require-pulse rounded-lg" : ""}>
+              <Combobox
+                options={pagoOpts}
+                value={cuentaPago[selectedIdx] ?? ""}
+                onChange={(v) => setCuentaPago((p) => ({ ...p, [selectedIdx]: v }))}
+                placeholder="Buscar cuenta de pago…"
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -514,13 +530,18 @@ export function Paso2() {
         </div>
         <div className="grid grid-cols-3 gap-3">
           <div className="space-y-1.5">
-            <label className="text-xs font-medium" style={{ color: "var(--info-text)", opacity: 0.85 }}>Cuenta gasto/costo</label>
-            <Combobox
-              options={gastoOpts}
-              value={cuentaGastoGlobal[selectedIdx] ?? ""}
-              onChange={(v) => setCuentaGastoGlobal((p) => ({ ...p, [selectedIdx]: v }))}
-              placeholder="Aplica a todos los ítems…"
-            />
+            <label className="text-xs font-medium flex items-center gap-1.5" style={{ color: "var(--info-text)", opacity: 0.85 }}>
+              Cuenta gasto/costo
+              {cuentaGastoGlobalVacia && <span className="text-[10px] font-semibold uppercase tracking-wide rounded px-1 py-0.5" style={{ backgroundColor: "rgba(245,158,11,0.25)", color: "rgb(245,158,11)", opacity: 1 }}>O por ítem</span>}
+            </label>
+            <div className={cuentaGastoGlobalVacia ? "require-pulse rounded-lg" : ""}>
+              <Combobox
+                options={gastoOpts}
+                value={cuentaGastoGlobal[selectedIdx] ?? ""}
+                onChange={(v) => setCuentaGastoGlobal((p) => ({ ...p, [selectedIdx]: v }))}
+                placeholder="Aplica a todos los ítems…"
+              />
+            </div>
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium" style={{ color: "var(--info-text)", opacity: 0.85 }}>Retefuente</label>
@@ -616,10 +637,12 @@ export function Paso2() {
                 const sinSugerencia = !sugsLoading && sug && sug.cuenta === null && !currentVal && !cuentaGastoGlobal[selectedIdx];
                 const sinCatalogo = sug?.origen === "sin_catalogo";
                 const iaNoDisponible = sug?.origen === "ia_no_disponible";
+                const itemSinCuenta = !currentVal && !cuentaGastoGlobal[selectedIdx];
 
                 return (
                   <tr
                     key={jdx}
+                    className={itemSinCuenta ? "require-row" : ""}
                     style={{ borderBottom: jdx < factura.items.length - 1 ? "1px solid var(--border-soft)" : "none" }}
                   >
                     {/* Descripción */}
@@ -797,5 +820,6 @@ export function Paso2() {
         cuentasGasto={cuentasGasto}
       />
     </div>
+    </>
   );
 }
