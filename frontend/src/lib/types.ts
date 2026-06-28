@@ -5,6 +5,7 @@ export interface CuentaOpcion {
   nombre: string;
   label: string;
   tag?: string;
+  clase?: number; // 1=Activo (Caja/Bancos), 2=Pasivo (Proveedores/CxP)
 }
 
 export interface ImpuestoOut {
