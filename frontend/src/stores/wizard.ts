@@ -9,6 +9,12 @@ import type {
   Sugerencia,
 } from "@/lib/types";
 
+interface TutorialMockMapeo {
+  cuentaPago: Record<number, string>;
+  cuentaGastoGlobal: Record<number, string>;
+  verificadas: Record<number, boolean>;
+}
+
 interface WizardState {
   paso: PasoWizard;
   tipoComp: string;
@@ -19,6 +25,8 @@ interface WizardState {
   reporte: BatchValidacionResponse | null;
   xlsxBlob: Blob | null;
   suggestions: Record<string, Sugerencia>;
+  tutorialActivo: boolean;
+  tutorialMockMapeo: TutorialMockMapeo | null;
 
   setPaso: (p: PasoWizard) => void;
   setTipoComp: (t: string) => void;
@@ -29,6 +37,8 @@ interface WizardState {
   setReporte: (r: BatchValidacionResponse) => void;
   setXlsxBlob: (b: Blob) => void;
   setSuggestions: (s: Record<string, Sugerencia>) => void;
+  setTutorialActivo: (v: boolean) => void;
+  setTutorialMockMapeo: (m: TutorialMockMapeo | null) => void;
   reset: () => void;
 }
 
@@ -42,6 +52,8 @@ const initial = {
   reporte: null,
   xlsxBlob: null,
   suggestions: {},
+  tutorialActivo: false,
+  tutorialMockMapeo: null,
 };
 
 export const useWizardStore = create<WizardState>((set) => ({
@@ -55,5 +67,7 @@ export const useWizardStore = create<WizardState>((set) => ({
   setReporte: (reporte) => set({ reporte }),
   setXlsxBlob: (xlsxBlob) => set({ xlsxBlob }),
   setSuggestions: (suggestions) => set({ suggestions }),
+  setTutorialActivo: (tutorialActivo) => set({ tutorialActivo }),
+  setTutorialMockMapeo: (tutorialMockMapeo) => set({ tutorialMockMapeo }),
   reset: () => set(initial),
 }));

@@ -49,10 +49,11 @@ const MOCK_FACTURAS: Factura[] = [
   },
 ];
 
-// Factura 0 = Pendiente, 1 = Configurada (cuentas pero sin verificar), 2 = Verificada
+// Factura 0 = Configurada, 1 = Pendiente, 2 = Verificada
+// (0 tiene cuentas para que el botón Verificar sea visible al entrar al detalle)
 const MOCK_MAPEO = {
-  cuentaPago: { 1: "22050501", 2: "22050501" },
-  cuentaGastoGlobal: { 1: "52300101", 2: "51300501" },
+  cuentaPago: { 0: "22050501", 2: "22050501" },
+  cuentaGastoGlobal: { 0: "52300101", 2: "51300501" },
   verificadas: { 2: true },
 };
 
@@ -80,8 +81,10 @@ interface Step {
   requiresPaso2?: boolean;
   requiresPaso3?: boolean;
   requiresPaso4?: boolean;
-  // Si se define, clicks invoice-row-{invoiceRowIdx} al entrar al paso
+  // Clicks invoice-row-{invoiceRowIdx} antes de buscar el elemento (para entrar a la vista de detalle)
   invoiceRowIdx?: number;
+  // Clicks "← Lista" antes de buscar el elemento (para volver a la vista de lista)
+  backToList?: boolean;
   isCatalogInfo?: boolean;
   requiresCatalogos?: boolean;
   catalogTab?: string;
@@ -177,6 +180,7 @@ const STEPS: Step[] = [
     body: "Aquí aparecen las facturas con tres posibles badges: 🟠 Pendiente = sin cuentas configuradas; 🟢 Configurada = cuentas asignadas pero no verificada; ✅ Verificada = revisada y lista para generar el archivo.",
     position: "top",
     requiresPaso2: true,
+    backToList: true,
   },
   {
     id: "invoice-detail",
@@ -218,7 +222,16 @@ const STEPS: Step[] = [
     body: "Cuando todas las cuentas estén configuradas, haz clic en ✓ Verificar (barra superior). Esto bloquea la factura para evitar cambios accidentales y la marca como lista para generar. Puedes quitar la verificación si necesitas editar.",
     position: "bottom",
     requiresPaso2: true,
-    invoiceRowIdx: 1,
+    invoiceRowIdx: 0,
+  },
+  {
+    id: "validar-partida-btn",
+    selector: "[data-tutorial='validar-partida-btn']",
+    title: "14 · Avanzar a Validar partida doble",
+    body: "Con las facturas configuradas, vuelve a la lista y haz clic aquí. El sistema verificará que los débitos = créditos en cada comprobante antes de generar el archivo SIIGO.",
+    position: "bottom",
+    requiresPaso2: true,
+    backToList: true,
   },
   // ── Paso 3 ──────────────────────────────────────────────────────────────────
   {
@@ -355,26 +368,55 @@ export function Tutorial() {
 
   const currentStep = STEPS[stepIdx];
 
-  // Actualizar posición del target — scroll inmediato luego captura rect
+  // Actualizar posición del target
+  // – Para pasos con invoiceRowIdx: click la fila primero, luego busca el elemento
+  // – Para pasos con backToList: click "← Lista" primero, luego busca el elemento
+  // – Para el resto: busca el elemento directamente
   useEffect(() => {
     if (phase !== "tour" || !currentStep.selector) {
       setTargetRect(null);
       return;
     }
+
+    let clickTimer: ReturnType<typeof setTimeout> | undefined;
+    let findTimer: ReturnType<typeof setTimeout> | undefined;
     let innerTimer: ReturnType<typeof setTimeout> | undefined;
-    const t = setTimeout(() => {
-      const el = document.querySelector(currentStep.selector!);
+
+    const doCapture = (selector: string) => {
+      const el = document.querySelector(selector);
       if (!el) { setTargetRect(null); return; }
-      // Scroll sin animación (block nearest = mínimo desplazamiento)
       el.scrollIntoView({ behavior: "auto", block: "nearest" });
-      // Captura rect en el siguiente frame para que el scroll ya esté aplicado
       innerTimer = setTimeout(() => {
         const r = el.getBoundingClientRect();
         setTargetRect({ top: r.top, left: r.left, width: r.width, height: r.height, bottom: r.bottom, right: r.right });
       }, 80);
-    }, 420);
-    return () => { clearTimeout(t); clearTimeout(innerTimer); };
-  }, [phase, stepIdx, currentStep.selector, pathname]);
+    };
+
+    if (currentStep.invoiceRowIdx !== undefined) {
+      // Hace click en la fila de la factura (puede ser no-op si ya estamos en detalle)
+      const rowIdx = currentStep.invoiceRowIdx;
+      clickTimer = setTimeout(() => {
+        document.querySelector<HTMLElement>(`[data-tutorial='invoice-row-${rowIdx}']`)?.click();
+      }, 150);
+      // Busca el elemento después de que React re-renderice
+      findTimer = setTimeout(() => doCapture(currentStep.selector!), 700);
+    } else if (currentStep.backToList) {
+      // Hace click en "← Lista" (puede ser no-op si ya estamos en la lista)
+      clickTimer = setTimeout(() => {
+        document.querySelector<HTMLElement>("[data-tutorial='back-to-list-btn']")?.click();
+      }, 150);
+      findTimer = setTimeout(() => doCapture(currentStep.selector!), 700);
+    } else {
+      findTimer = setTimeout(() => doCapture(currentStep.selector!), 420);
+    }
+
+    return () => {
+      clearTimeout(clickTimer);
+      clearTimeout(findTimer);
+      clearTimeout(innerTimer);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, stepIdx, pathname]);
 
   // Navegación a /catalogos
   useEffect(() => {
@@ -421,14 +463,7 @@ export function Tutorial() {
         setTipoComp(MOCK_TIPO_COMP);
         setPaso(2);
       }
-      // Navegar a una factura específica si el paso lo requiere
-      if (currentStep.invoiceRowIdx !== undefined) {
-        const rowIdx = currentStep.invoiceRowIdx;
-        const t = setTimeout(() => {
-          document.querySelector<HTMLElement>(`[data-tutorial='invoice-row-${rowIdx}']`)?.click();
-        }, 650);
-        return () => clearTimeout(t);
-      }
+      // Los clicks a invoice-row o back-to-list están en el efecto de scroll
     } else if (currentStep.isInfoStep) {
       // Paso final informativo: reset al paso 1 con fondo limpio
       if (paso !== 1) {

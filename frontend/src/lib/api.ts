@@ -114,6 +114,9 @@ export const api = {
   cambiarPassword: (body: { password_actual: string; nueva_password: string }) =>
     req<{ message: string }>("/auth/cambiar-password", { method: "PUT", body: JSON.stringify(body) }),
 
+  actualizarTutorial: (pendiente: boolean) =>
+    req<{ message: string }>("/auth/tutorial", { method: "PUT", body: JSON.stringify({ pendiente }) }),
+
   // Email flows (no requieren auth)
   forgotPassword: (email: string) =>
     fetch(`${BASE}/auth/forgot-password`, {

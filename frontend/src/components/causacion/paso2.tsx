@@ -62,7 +62,7 @@ function DataField({ label, value, mono = false }: { label: string; value: strin
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function Paso2() {
-  const { facturas, facturasYaCausadas, tipoComp, setPaso, setMapeos, suggestions, setSuggestions } = useWizardStore();
+  const { facturas, facturasYaCausadas, tipoComp, setPaso, setMapeos, suggestions, setSuggestions, tutorialActivo, tutorialMockMapeo } = useWizardStore();
   const [modalCausadasOpen, setModalCausadasOpen] = useState(false);
 
   const { data: cuentasGasto = [] } = useQuery({ queryKey: ["cuentas-gasto"], queryFn: api.getCuentasGasto });
@@ -87,6 +87,15 @@ export function Paso2() {
   const [searchItems, setSearchItems] = useState("");
   const [verificadas, setVerificadas] = useState<Record<number, boolean>>({});
   const lastIdxRef = useRef<number | null>(null);
+
+  // Pre-cargar estado de demo cuando el tutorial está activo
+  useEffect(() => {
+    if (!tutorialActivo || !tutorialMockMapeo) return;
+    setCuentaPago(tutorialMockMapeo.cuentaPago);
+    setCuentaGastoGlobal(tutorialMockMapeo.cuentaGastoGlobal);
+    setVerificadas(tutorialMockMapeo.verificadas);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tutorialActivo]);
 
   // Una factura está completamente configurada cuando tiene cuenta de pago
   // Y todos sus ítems tienen cuenta de gasto (global o por ítem)
@@ -158,6 +167,18 @@ export function Paso2() {
     }
 
     setSugsLoading(true);
+
+    // En tutorial no hacemos llamada real (NITs ficticios fallarían)
+    if (tutorialActivo) {
+      const emptySugs: Record<string, Sugerencia> = {};
+      pendientes.forEach(({ key }) => {
+        emptySugs[key] = { cuenta: null, origen: null, explicacion_ia: null, confianza_ia: null, cuenta_pago_sugerida: null, cuenta_pago_origen: null };
+      });
+      setSuggestions({ ...suggestions, ...emptySugs });
+      setSugsLoading(false);
+      return;
+    }
+
     api.sugerirCuentasBatch(pendientes)
       .then(({ resultados }) => {
         const nuevas: Record<string, Sugerencia> = {};
@@ -324,7 +345,7 @@ export function Paso2() {
               </button>
             )}
             <Button variant="outline" size="sm" onClick={() => setPaso(1)}>← Volver</Button>
-            <Button size="sm" onClick={handleValidar}>Validar partida doble →</Button>
+            <Button data-tutorial="validar-partida-btn" size="sm" onClick={handleValidar}>Validar partida doble →</Button>
           </div>
         </div>
 
@@ -385,6 +406,7 @@ export function Paso2() {
 
         {/* Invoice table */}
         <div
+          data-tutorial="invoice-list"
           className="overflow-hidden rounded-xl border"
           style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)", boxShadow: "var(--shadow-card)" }}
         >
@@ -412,6 +434,7 @@ export function Paso2() {
                   <tr
                     key={idx}
                     id={`invoice-row-${idx}`}
+                    data-tutorial={idx === 0 ? "invoice-row-0" : undefined}
                     className="cursor-pointer transition-colors tr-row"
                     style={{ borderBottom: idx < facturas.length - 1 ? "1px solid var(--border-soft)" : "none" }}
                     onClick={() => setSelectedIdx(idx)}
@@ -540,6 +563,7 @@ export function Paso2() {
       {/* Navigation bar */}
       <div className="flex items-center gap-2">
         <button
+          data-tutorial="back-to-list-btn"
           onClick={goBackToList}
           className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-80"
           style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)", backgroundColor: "var(--bg-surface)" }}
@@ -568,6 +592,7 @@ export function Paso2() {
         </button>
         {estaCompleta(selectedIdx) && (
           <button
+            data-tutorial="verificar-btn"
             onClick={() => setVerificadas(p => ({ ...p, [selectedIdx]: !p[selectedIdx] }))}
             className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-opacity hover:opacity-80"
             style={verificadas[selectedIdx]
@@ -594,6 +619,7 @@ export function Paso2() {
 
       {/* Invoice header card */}
       <div
+        data-tutorial="invoice-header"
         className="rounded-xl border p-4"
         style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)", boxShadow: "var(--shadow-card)" }}
       >
@@ -623,6 +649,7 @@ export function Paso2() {
 
       {/* Datos del proveedor */}
       <div
+        data-tutorial="cuenta-pago"
         className="rounded-xl border p-4 space-y-3"
         style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}
       >
@@ -696,6 +723,7 @@ export function Paso2() {
 
       {/* Global config — key differentiator */}
       <div
+        data-tutorial="cuenta-gasto"
         className="rounded-xl border p-4 space-y-3"
         style={{ borderColor: "var(--info-border)", backgroundColor: "var(--info-bg)" }}
       >
@@ -765,6 +793,7 @@ export function Paso2() {
 
       {/* Items table */}
       <div
+        data-tutorial="items-table"
         className="overflow-hidden rounded-xl border"
         style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)", boxShadow: "var(--shadow-card)" }}
       >

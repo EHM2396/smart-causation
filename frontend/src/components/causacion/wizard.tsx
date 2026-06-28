@@ -6,7 +6,10 @@ import { Paso2 } from "./paso2";
 import { Paso3 } from "./paso3";
 import { Paso4 } from "./paso4";
 import { ConfigPanel } from "./config-panel";
-import { FileText, Layers, CheckCircle2, Tag } from "lucide-react";
+import { FileText, Layers, CheckCircle2, Tag, AlertTriangle, BookOpen } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import Link from "next/link";
 
 function KpiCard({
   icon: Icon,
@@ -59,6 +62,58 @@ function KpiCard({
   );
 }
 
+function CatalogGate() {
+  const tutorialActivo = useWizardStore((s) => s.tutorialActivo);
+  const { data: cuentasGasto = [], isLoading: loadingCG } = useQuery({ queryKey: ["cuentas-gasto"], queryFn: api.getCuentasGasto });
+  const { data: impuestos   = [], isLoading: loadingImp } = useQuery({ queryKey: ["impuestos"],     queryFn: api.getImpuestos });
+  const { data: tipos       = [], isLoading: loadingTC }  = useQuery({ queryKey: ["tipos-comp"],    queryFn: api.getTiposComprobante });
+
+  if (tutorialActivo) return null;
+  if (loadingCG || loadingImp || loadingTC) return null;
+
+  const faltantes: string[] = [];
+  if (cuentasGasto.length === 0) faltantes.push("Plan de cuentas (PUC)");
+  if (impuestos.length === 0)    faltantes.push("Impuestos y retenciones");
+  if (tipos.length === 0)        faltantes.push("Tipos de comprobante");
+
+  if (faltantes.length === 0) return null;
+
+  return (
+    <div
+      className="mb-6 flex flex-col gap-4 rounded-xl border p-5"
+      style={{ borderColor: "var(--warning-border)", backgroundColor: "var(--warning-bg)" }}
+    >
+      <div className="flex items-start gap-3">
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" style={{ color: "var(--warning-text)" }} />
+        <div>
+          <p className="text-sm font-semibold" style={{ color: "var(--warning-text)" }}>
+            Catálogo incompleto — no es posible causar facturas
+          </p>
+          <p className="mt-1 text-xs" style={{ color: "var(--warning-text)", opacity: 0.8 }}>
+            Debes cargar la siguiente información antes de iniciar la causación:
+          </p>
+          <ul className="mt-2 space-y-1">
+            {faltantes.map((f) => (
+              <li key={f} className="flex items-center gap-2 text-xs font-medium" style={{ color: "var(--warning-text)" }}>
+                <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: "var(--warning-text)" }} />
+                {f}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+      <Link
+        href="/catalogos"
+        className="inline-flex w-fit items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-opacity hover:opacity-80"
+        style={{ backgroundColor: "var(--warning-text)", color: "#fff" }}
+      >
+        <BookOpen className="h-4 w-4" />
+        Ir a Catálogos
+      </Link>
+    </div>
+  );
+}
+
 export function CausacionWizard() {
   const { paso, facturas, tipoComp, mapeos } = useWizardStore();
 
@@ -84,6 +139,9 @@ export function CausacionWizard() {
         <div className="mb-6 lg:mb-8">
           <StepIndicator />
         </div>
+
+        {/* Catalog preflight check */}
+        <CatalogGate />
 
         {/* Step content */}
         <div>

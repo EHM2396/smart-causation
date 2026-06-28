@@ -85,6 +85,7 @@ export function Paso1() {
 
       {/* Drop zone */}
       <label
+        data-tutorial="dropzone"
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
         onDrop={(e) => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files); }}
@@ -223,7 +224,7 @@ export function Paso1() {
           )}
 
           {omitidas.length === 0 && (
-            <Button onClick={handleParse} disabled={!files.length} size="lg" className="w-full sm:w-auto">
+            <Button data-tutorial="parse-btn" onClick={handleParse} disabled={!files.length} size="lg" className="w-full sm:w-auto">
               {`Parsear ${files.length ? `${files.length} archivo${files.length > 1 ? "s" : ""}` : "facturas"}`}
             </Button>
           )}

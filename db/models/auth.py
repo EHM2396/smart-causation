@@ -42,6 +42,7 @@ class Usuario(Base):
     plan_id: Mapped[int | None] = mapped_column(ForeignKey("planes.id"), nullable=True)
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
     email_verificado: Mapped[bool] = mapped_column(Boolean, default=False)
+    tutorial_pendiente: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

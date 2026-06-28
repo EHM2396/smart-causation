@@ -183,6 +183,7 @@ export interface LoginResponse {
   empresa_id: number;
   empresa_nombre: string;
   email_verificado: boolean;
+  tutorial_pendiente: boolean;
 }
 
 // ─── Wizard state ─────────────────────────────────────────────────────────────

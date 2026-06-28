@@ -57,6 +57,11 @@ class TokenResponse(BaseModel):
     empresa_id: int
     empresa_nombre: str
     email_verificado: bool = True
+    tutorial_pendiente: bool = True
+
+
+class TutorialRequest(BaseModel):
+    pendiente: bool
 
 
 class EmailRequest(BaseModel):
@@ -173,6 +178,7 @@ def login(body: LoginRequest, db: DB):
         empresa_id=empresa.id,
         empresa_nombre=empresa.nombre,
         email_verificado=usuario.email_verificado,
+        tutorial_pendiente=usuario.tutorial_pendiente,
     )
 
 
@@ -225,6 +231,7 @@ def registro(body: RegistroRequest, background_tasks: BackgroundTasks, db: DB):
         empresa_id=empresa.id,
         empresa_nombre=empresa.nombre,
         email_verificado=not EMAIL_ENABLED,
+        tutorial_pendiente=True,
     )
 
 
@@ -301,10 +308,22 @@ def me(current_user: Annotated[Usuario, Depends(get_current_user)], db: DB):
         "nombre": current_user.nombre,
         "rol": current_user.rol,
         "email_verificado": current_user.email_verificado,
+        "tutorial_pendiente": current_user.tutorial_pendiente,
         "empresa_id": empresa.id if empresa else None,
         "empresa_nombre": empresa.nombre if empresa else None,
         "empresa_nit": empresa.nit if empresa else None,
     }
+
+
+@router.put("/tutorial", response_model=MsgResponse)
+def actualizar_tutorial(
+    body: TutorialRequest,
+    current_user: Annotated[Usuario, Depends(get_current_user)],
+    db: DB,
+):
+    current_user.tutorial_pendiente = body.pendiente
+    db.commit()
+    return MsgResponse(message="ok")
 
 
 @router.put("/perfil", response_model=MsgResponse)

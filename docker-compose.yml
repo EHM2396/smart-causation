@@ -32,6 +32,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-siigo}:${POSTGRES_PASSWORD:-siigo_pass}@postgres:5432/${POSTGRES_DB:-siigo_db}
       CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:8501,http://127.0.0.1:8501
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - .:/app
       - ./data:/app/data

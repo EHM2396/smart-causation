@@ -27,6 +27,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from db.models import Base, CuentaContable, CodigoImpuesto, TipoComprobante
@@ -112,12 +113,13 @@ def migrar_cuentas() -> int:
         return 0
 
     with SessionLocal() as session:
-        stmt = pg_insert(CuentaContable).values(registros)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["codigo"],
-            set_={"nombre": stmt.excluded.nombre, "fiscal": stmt.excluded.fiscal},
+        existing = session.scalar(
+            select(func.count()).select_from(CuentaContable).where(CuentaContable.empresa_id.is_(None))
         )
-        session.execute(stmt)
+        if existing:
+            print(f"  ℹ  Ya existen {existing} cuentas globales, saltando migración")
+            return existing
+        session.execute(pg_insert(CuentaContable).values(registros))
         session.commit()
 
     print(f"  ✓  {len(registros)} cuentas migradas")
@@ -182,17 +184,13 @@ def migrar_impuestos() -> int:
         return 0
 
     with SessionLocal() as session:
-        stmt = pg_insert(CodigoImpuesto).values(registros)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["codigo"],
-            set_={
-                "tarifa":        stmt.excluded.tarifa,
-                "cta_compras":   stmt.excluded.cta_compras,
-                "cta_ventas":    stmt.excluded.cta_ventas,
-                "tipo_impuesto": stmt.excluded.tipo_impuesto,
-            },
+        existing = session.scalar(
+            select(func.count()).select_from(CodigoImpuesto).where(CodigoImpuesto.empresa_id.is_(None))
         )
-        session.execute(stmt)
+        if existing:
+            print(f"  ℹ  Ya existen {existing} códigos de impuesto globales, saltando migración")
+            return existing
+        session.execute(pg_insert(CodigoImpuesto).values(registros))
         session.commit()
 
     print(f"  ✓  {len(registros)} impuestos migrados")
@@ -246,12 +244,13 @@ def migrar_tipos_comprobante() -> int:
         return 0
 
     with SessionLocal() as session:
-        stmt = pg_insert(TipoComprobante).values(registros)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["codigo"],
-            set_={"titulo": stmt.excluded.titulo},
+        existing = session.scalar(
+            select(func.count()).select_from(TipoComprobante).where(TipoComprobante.empresa_id.is_(None))
         )
-        session.execute(stmt)
+        if existing:
+            print(f"  ℹ  Ya existen {existing} tipos de comprobante globales, saltando migración")
+            return existing
+        session.execute(pg_insert(TipoComprobante).values(registros))
         session.commit()
 
     print(f"  ✓  {len(registros)} tipos de comprobante migrados")

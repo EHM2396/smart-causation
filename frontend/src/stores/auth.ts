@@ -11,10 +11,12 @@ interface AuthState {
     email: string;
     nombre: string;
     rol: string;
+    tutorial_pendiente: boolean;
   } | null;
   _hydrated: boolean;
   login: (data: LoginResponse) => void;
   logout: () => void;
+  setTutorialPendiente: (v: boolean) => void;
   _setHydrated: () => void;
 }
 
@@ -36,10 +38,13 @@ export const useAuthStore = create<AuthState>()(
             email: data.email,
             nombre: data.nombre,
             rol: data.rol,
+            tutorial_pendiente: data.tutorial_pendiente ?? true,
           },
         }),
       logout: () =>
         set({ token: null, empresaId: null, empresaNombre: null, usuario: null }),
+      setTutorialPendiente: (v) =>
+        set((s) => s.usuario ? { usuario: { ...s.usuario, tutorial_pendiente: v } } : {}),
       _setHydrated: () => set({ _hydrated: true }),
     }),
     {

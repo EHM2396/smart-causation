@@ -395,10 +395,10 @@ function ErrBanner({ msg }: { msg: string }) {
 
 // - Tabs config -
 const TABS = [
-  { id: "Codigos de Impuesto", label: "Impuestos", icon: Receipt },
-  { id: "Plan de Cuentas PUC", label: "Plan de Cuentas", icon: BookOpen },
-  { id: "Tipos de Comprobante", label: "Comprobantes", icon: Database },
-  { id: "Control IA", label: "Control IA", icon: Brain },
+  { id: "Codigos de Impuesto", label: "Impuestos", icon: Receipt, tutorialId: "tab-impuestos" },
+  { id: "Plan de Cuentas PUC", label: "Plan de Cuentas", icon: BookOpen, tutorialId: "tab-cuentas" },
+  { id: "Tipos de Comprobante", label: "Comprobantes", icon: Database, tutorialId: "tab-tipos" },
+  { id: "Control IA", label: "Control IA", icon: Brain, tutorialId: "tab-ia" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
@@ -452,11 +452,12 @@ export default function CatalogosPage() {
         className="flex gap-1 overflow-x-auto rounded-xl p-1"
         style={{ backgroundColor: "var(--bg-elevated)", border: "1px solid var(--border-soft)" }}
       >
-        {TABS.map(({ id, label, icon: Icon }) => {
+        {TABS.map(({ id, label, icon: Icon, tutorialId }) => {
           const active = tab === id;
           return (
             <button
               key={id}
+              data-tutorial={tutorialId}
               onClick={() => setTab(id)}
               className="flex shrink-0 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all"
               style={{

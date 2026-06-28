@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Loader2, CheckCircle2, AlertCircle, User, Building2, Lock, Eye, EyeOff } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Loader2, CheckCircle2, AlertCircle, User, Building2, Lock, Eye, EyeOff, BookOpen, RotateCcw } from "lucide-react";
 import { api } from "@/lib/api";
+import { useAuthStore } from "@/stores/auth";
 
 // ── Validación de contraseña ──────────────────────────────────────────────────
 
@@ -91,6 +93,9 @@ function FeedbackMsg({ fb }: { fb: Feedback }) {
 }
 
 export default function PerfilPage() {
+  const router = useRouter();
+  const { usuario, setTutorialPendiente } = useAuthStore();
+
   // ── Info personal + empresa ───────────────────────────────────────────────
   const [nombre, setNombre] = useState("");
   const [email, setEmail] = useState("");
@@ -354,6 +359,33 @@ export default function PerfilPage() {
           {loadingPw ? "Actualizando..." : "Cambiar contraseña"}
         </button>
       </form>
+
+      {/* ── Tutorial ────────────────────────────────────────────────────────── */}
+      <div
+        className="rounded-2xl border p-6 space-y-4"
+        style={{ backgroundColor: "var(--bg-surface)", borderColor: "var(--border-soft)" }}
+      >
+        <div className="flex items-center gap-2 pb-1" style={{ borderBottom: "1px solid var(--border-soft)" }}>
+          <BookOpen className="h-4 w-4" style={{ color: "var(--brand)" }} />
+          <h2 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Tutorial</h2>
+        </div>
+        <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+          Reinicia el tutorial paso a paso para volver a ver cómo funciona la plataforma desde el principio.
+        </p>
+        <button
+          type="button"
+          onClick={async () => {
+            await api.actualizarTutorial(true).catch(() => {});
+            setTutorialPendiente(true);
+            router.push("/causacion");
+          }}
+          className="flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-opacity hover:opacity-80"
+          style={{ backgroundColor: "var(--brand)", color: "#fff", border: "none", cursor: "pointer" }}
+        >
+          <RotateCcw className="h-4 w-4" />
+          Reiniciar tutorial
+        </button>
+      </div>
     </div>
   );
 }

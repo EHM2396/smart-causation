@@ -38,7 +38,7 @@ export function ConfigPanel() {
   const innerContent = (
     <>
       {/* Tipo comprobante */}
-      <div className="space-y-2">
+      <div data-tutorial="tipo-comprobante" className="space-y-2">
         <label className="text-xs text-[var(--sidebar-text)]">Tipo de comprobante</label>
         <Combobox
           options={tipoOpts}
