@@ -3,7 +3,7 @@ import { useState, useCallback } from "react";
 import { useWizardStore } from "@/stores/wizard";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fmt } from "@/lib/utils";
 import type { Factura } from "@/lib/types";
@@ -119,37 +119,62 @@ export function Paso1() {
         </div>
       </label>
 
-      {/* File list */}
-      {files.length > 0 && (
-        <div className="space-y-2">
-          {files.map((f) => (
-            <div key={f.name} className="flex items-center gap-3 rounded-lg border border-[var(--border-soft)] bg-[var(--bg-surface)] px-4 py-3">
-              <FileSpreadsheet className="h-5 w-5 shrink-0 text-emerald-400" />
-              <span className="flex-1 truncate text-sm text-[var(--text-secondary)]">{f.name}</span>
-              <span className="text-xs text-[var(--text-muted)]">{(f.size / 1024).toFixed(0)} KB</span>
-              <button onClick={() => removeFile(f.name)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          ))}
+      {/* Loading overlay */}
+      {loading ? (
+        <div
+          className="flex flex-col items-center gap-4 py-10 rounded-xl border"
+          style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}
+        >
+          <div
+            className="flex h-16 w-16 items-center justify-center rounded-2xl"
+            style={{ background: "linear-gradient(135deg, #eff6ff, #dbeafe)", boxShadow: "var(--shadow-sm)" }}
+          >
+            <Loader2 className="h-8 w-8 animate-spin" style={{ color: "var(--brand)" }} />
+          </div>
+          <div className="text-center">
+            <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+              Analizando {files.length} archivo{files.length > 1 ? "s" : ""}…
+            </p>
+            <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
+              Extrayendo facturas electrónicas del portal DIAN
+            </p>
+          </div>
         </div>
-      )}
-
-      {/* Errors */}
-      {errors.length > 0 && (
-        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 space-y-1">
-          {errors.map((e, i) => (
-            <div key={i} className="flex items-start gap-2 text-sm text-amber-400">
-              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-              {e}
+      ) : (
+        <>
+          {/* File list */}
+          {files.length > 0 && (
+            <div className="space-y-2">
+              {files.map((f) => (
+                <div key={f.name} className="flex items-center gap-3 rounded-lg border border-[var(--border-soft)] bg-[var(--bg-surface)] px-4 py-3">
+                  <FileSpreadsheet className="h-5 w-5 shrink-0 text-emerald-400" />
+                  <span className="flex-1 truncate text-sm text-[var(--text-secondary)]">{f.name}</span>
+                  <span className="text-xs text-[var(--text-muted)]">{(f.size / 1024).toFixed(0)} KB</span>
+                  <button onClick={() => removeFile(f.name)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
+          )}
 
-      <Button onClick={handleParse} disabled={!files.length || loading} size="lg" className="w-full sm:w-auto">
-        {loading ? "Procesando..." : `Parsear ${files.length ? `${files.length} archivo${files.length > 1 ? "s" : ""}` : "facturas"}`}
-      </Button>
+          {/* Errors */}
+          {errors.length > 0 && (
+            <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 space-y-1">
+              {errors.map((e, i) => (
+                <div key={i} className="flex items-start gap-2 text-sm text-amber-400">
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                  {e}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <Button onClick={handleParse} disabled={!files.length} size="lg" className="w-full sm:w-auto">
+            {`Parsear ${files.length ? `${files.length} archivo${files.length > 1 ? "s" : ""}` : "facturas"}`}
+          </Button>
+        </>
+      )}
     </div>
   );
 }

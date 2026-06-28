@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWizardStore } from "@/stores/wizard";
 import { api } from "@/lib/api";
@@ -83,6 +83,20 @@ export function Paso2() {
 
   const [sugsLoading, setSugsLoading] = useState(false);
   const [searchItems, setSearchItems] = useState("");
+  const lastIdxRef = useRef<number | null>(null);
+
+  // Volver a lista y restaurar posición del scroll
+  const goBackToList = () => {
+    lastIdxRef.current = selectedIdx;
+    setSelectedIdx(null);
+  };
+
+  // Hacer scroll al último ítem seleccionado al volver a la lista
+  useEffect(() => {
+    if (selectedIdx !== null || lastIdxRef.current === null) return;
+    const row = document.getElementById(`invoice-row-${lastIdxRef.current}`);
+    row?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [selectedIdx]);
 
   useEffect(() => {
     if (facturas.length === 0) return;
@@ -325,7 +339,7 @@ export function Paso2() {
           <table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
-                {["#", "N° Factura", "Proveedor / NIT", "Fecha", "Total", "Estado", ""].map((h) => (
+                {["#", "N° Factura", "Proveedor / NIT", "Fecha", "Subtotal", "Total", "Estado", ""].map((h) => (
                   <th
                     key={h}
                     className={`px-4 py-3 text-xs font-semibold uppercase tracking-wide${h === "Total" ? " text-right" : " text-left"}`}
@@ -340,9 +354,11 @@ export function Paso2() {
               {facturas.map((f, idx) => {
                 const isListo = !!cuentaPago[idx];
                 const numSugs = f.items.filter((_, jdx) => suggestions[`${idx}_${jdx}`]?.cuenta).length;
+                const subtotal = f.items.reduce((s, it) => s + it.base, 0);
                 return (
                   <tr
                     key={idx}
+                    id={`invoice-row-${idx}`}
                     className="cursor-pointer transition-colors tr-row"
                     style={{ borderBottom: idx < facturas.length - 1 ? "1px solid var(--border-soft)" : "none" }}
                     onClick={() => setSelectedIdx(idx)}
@@ -366,6 +382,9 @@ export function Paso2() {
                     </td>
                     <td className="px-4 py-3 tabular-nums text-xs" style={{ color: "var(--text-secondary)" }}>
                       {f.fecha}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono text-sm" style={{ color: "var(--text-secondary)" }}>
+                      {fmt(subtotal)}
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
                       {fmt(f.total)}
@@ -451,7 +470,7 @@ export function Paso2() {
       {/* Navigation bar */}
       <div className="flex items-center gap-2">
         <button
-          onClick={() => setSelectedIdx(null)}
+          onClick={goBackToList}
           className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-80"
           style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)", backgroundColor: "var(--bg-surface)" }}
         >

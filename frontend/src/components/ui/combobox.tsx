@@ -1,5 +1,6 @@
 "use client";
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronsUpDown, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -27,7 +28,12 @@ export function Combobox({
 }: ComboboxProps) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
-  const ref = React.useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = React.useState({ top: 0, left: 0, width: 0 });
+  const [mounted, setMounted] = React.useState(false);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
+  const dropdownRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => { setMounted(true); }, []);
 
   const selected = options.find((o) => o.value === value);
 
@@ -39,17 +45,97 @@ export function Combobox({
       )
     : options;
 
+  const updateCoords = React.useCallback(() => {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setCoords({
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: Math.max(rect.width, 280),
+      });
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (open) updateCoords();
+  }, [open, updateCoords]);
+
+  // Cerrar al hacer click fuera
   React.useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (!triggerRef.current?.contains(target) && !dropdownRef.current?.contains(target)) {
+        setOpen(false);
+      }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  const dropdown = open ? (
+    <div
+      ref={dropdownRef}
+      style={{
+        position: "fixed",
+        top: coords.top,
+        left: coords.left,
+        width: coords.width,
+        zIndex: 9999,
+        borderColor: "var(--border-soft)",
+        backgroundColor: "var(--bg-surface)",
+      }}
+      className="rounded-lg border shadow-xl"
+    >
+      <div className="flex items-center gap-2 border-b px-3 py-2" style={{ borderColor: "var(--border-soft)" }}>
+        <Search className="h-4 w-4 shrink-0" style={{ color: "var(--text-muted)" }} />
+        <input
+          autoFocus
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Escribe para filtrar..."
+          className="flex-1 bg-transparent text-sm focus:outline-none"
+          style={{ color: "var(--text-primary)" }}
+        />
+      </div>
+      <div className="max-h-60 overflow-y-auto">
+        {filtered.length === 0 ? (
+          <p className="py-4 text-center text-sm" style={{ color: "var(--text-muted)" }}>Sin resultados</p>
+        ) : (
+          filtered.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              title={opt.label}
+              onClick={() => {
+                onChange(opt.value);
+                setQuery("");
+                setOpen(false);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:opacity-80"
+              style={{
+                backgroundColor:
+                  opt.value === value
+                    ? "color-mix(in srgb, var(--brand) 18%, transparent)"
+                    : "transparent",
+                color: opt.value === value ? "var(--brand)" : "var(--text-secondary)",
+              }}
+            >
+              <Check
+                className={cn("h-4 w-4 shrink-0", opt.value === value ? "opacity-100" : "opacity-0")}
+                style={{ color: "var(--brand)" }}
+              />
+              <span className="truncate">{opt.label}</span>
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+  ) : null;
+
   return (
-    <div ref={ref} className={cn("relative", className)}>
+    <div className={cn("relative", className)}>
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
@@ -57,8 +143,7 @@ export function Combobox({
         className={cn(
           "flex h-10 w-full items-center justify-between rounded-lg border px-3 text-sm transition-colors",
           "focus:outline-none focus:ring-2",
-          "disabled:cursor-not-allowed disabled:opacity-40",
-          selected ? "" : ""
+          "disabled:cursor-not-allowed disabled:opacity-40"
         )}
         style={{
           borderColor: "var(--border-soft)",
@@ -71,59 +156,7 @@ export function Combobox({
         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0" style={{ color: "var(--text-muted)" }} />
       </button>
 
-      {open && (
-        <div
-          className="absolute z-50 mt-1 w-full rounded-lg border shadow-xl"
-          style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}
-        >
-          <div className="flex items-center gap-2 border-b px-3 py-2" style={{ borderColor: "var(--border-soft)" }}>
-            <Search className="h-4 w-4 shrink-0" style={{ color: "var(--text-muted)" }} />
-            <input
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Escribe para filtrar..."
-              className="flex-1 bg-transparent text-sm focus:outline-none"
-              style={{ color: "var(--text-primary)" }}
-            />
-          </div>
-          <div className="max-h-60 overflow-y-auto">
-            {filtered.length === 0 ? (
-              <p className="py-4 text-center text-sm" style={{ color: "var(--text-muted)" }}>Sin resultados</p>
-            ) : (
-              filtered.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  title={opt.label}
-                  onClick={() => {
-                    onChange(opt.value);
-                    setQuery("");
-                    setOpen(false);
-                  }}
-                  className={cn(
-                    "flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors",
-                    opt.value === value ? "" : ""
-                  )}
-                  style={{
-                    backgroundColor:
-                      opt.value === value
-                        ? "color-mix(in srgb, var(--brand) 18%, transparent)"
-                        : "transparent",
-                    color: opt.value === value ? "var(--brand)" : "var(--text-secondary)",
-                  }}
-                >
-                  <Check
-                    className={cn("h-4 w-4 shrink-0", opt.value === value ? "opacity-100" : "opacity-0")}
-                    style={{ color: "var(--brand)" }}
-                  />
-                  <span className="truncate">{opt.label}</span>
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      )}
+      {mounted && dropdown ? createPortal(dropdown, document.body) : null}
     </div>
   );
 }
