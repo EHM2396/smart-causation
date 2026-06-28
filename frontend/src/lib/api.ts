@@ -13,6 +13,14 @@ import { useAuthStore } from "@/stores/auth";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+function _handleUnauthorized(): never {
+  useAuthStore.getState().logout();
+  if (typeof window !== "undefined") {
+    window.location.href = "/login";
+  }
+  throw new Error("Sesión expirada. Por favor vuelve a iniciar sesión.");
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const { token, empresaId } = useAuthStore.getState();
   const authHeaders: Record<string, string> = {};
@@ -26,6 +34,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json", ...authHeaders, ...init?.headers },
     ...init,
   });
+  if (res.status === 401) _handleUnauthorized();
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`API ${res.status}: ${text}`);
@@ -46,6 +55,7 @@ async function reqBlob(path: string, init?: RequestInit): Promise<Blob> {
     headers: { ...authHeaders, ...init?.headers },
     ...init,
   });
+  if (res.status === 401) _handleUnauthorized();
   if (!res.ok) {
     const msg = await res.text().catch(() => res.statusText);
     throw new Error(msg);

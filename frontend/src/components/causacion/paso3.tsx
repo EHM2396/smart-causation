@@ -4,7 +4,7 @@ import { useWizardStore } from "@/stores/wizard";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { fmt } from "@/lib/utils";
-import { CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
+import { CheckCircle2, XCircle, AlertTriangle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { BatchValidacionResponse } from "@/lib/types";
 
@@ -13,6 +13,7 @@ export function Paso3() {
   const [reporte, setLocalReporte] = useState<BatchValidacionResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [generando, setGenerando] = useState(false);
 
   useEffect(() => {
     const run = async () => {
@@ -34,13 +35,21 @@ export function Paso3() {
   }, []);
 
   const handleGenerar = async () => {
-    const items = facturas.map((f, idx) => ({
-      factura: f,
-      mapeos_confirmados: mapeos.filter((m) => m.idx_factura === idx),
-    }));
-    const blob = await api.batchGenerar({ items, tipo_comprobante: tipoComp, centro_costo: centroCosto, confirmar: false });
-    setXlsxBlob(blob);
-    setPaso(4);
+    setGenerando(true);
+    setError("");
+    try {
+      const items = facturas.map((f, idx) => ({
+        factura: f,
+        mapeos_confirmados: mapeos.filter((m) => m.idx_factura === idx),
+      }));
+      const blob = await api.batchGenerar({ items, tipo_comprobante: tipoComp, centro_costo: centroCosto, confirmar: false });
+      setXlsxBlob(blob);
+      setPaso(4);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setGenerando(false);
+    }
   };
 
   if (loading) return (
@@ -129,8 +138,8 @@ export function Paso3() {
 
       <div className="flex items-center justify-between pt-2">
         <Button variant="outline" onClick={() => setPaso(2)}>← Volver al mapeo</Button>
-        <Button size="lg" onClick={handleGenerar} disabled={!reporte.global_cuadra} variant={reporte.global_cuadra ? "default" : "secondary"}>
-          Generar archivo SIIGO →
+        <Button size="lg" onClick={handleGenerar} disabled={!reporte.global_cuadra || generando} variant={reporte.global_cuadra ? "default" : "secondary"}>
+          {generando ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generando…</> : "Generar archivo SIIGO →"}
         </Button>
       </div>
     </div>
