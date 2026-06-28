@@ -146,7 +146,7 @@ export function Paso2() {
         pendientes.forEach(({ key }) => {
           fallback[key] = { cuenta: null, origen: null, explicacion_ia: null, confianza_ia: null, cuenta_pago_sugerida: null, cuenta_pago_origen: null };
         });
-        setSuggestions((prev: Record<string, Sugerencia>) => ({ ...prev, ...fallback }));
+        setSuggestions({ ...suggestions, ...fallback });
         setSugsLoading(false);
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
