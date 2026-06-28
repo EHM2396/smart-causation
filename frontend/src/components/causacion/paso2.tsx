@@ -83,7 +83,16 @@ export function Paso2() {
 
   const [sugsLoading, setSugsLoading] = useState(false);
   const [searchItems, setSearchItems] = useState("");
+  const [verificadas, setVerificadas] = useState<Record<number, boolean>>({});
   const lastIdxRef = useRef<number | null>(null);
+
+  // Una factura está completamente configurada cuando tiene cuenta de pago
+  // Y todos sus ítems tienen cuenta de gasto (global o por ítem)
+  const estaCompleta = (idx: number) => {
+    if (!cuentaPago[idx]) return false;
+    if (cuentaGastoGlobal[idx]) return true;
+    return facturas[idx]?.items.every((_, jdx) => !!cuentaGastoItem[`${idx}_${jdx}`]) ?? false;
+  };
 
   // Volver a lista y restaurar posición del scroll
   const goBackToList = () => {
@@ -289,7 +298,7 @@ export function Paso2() {
 
   // ── LIST VIEW ────────────────────────────────────────────────────────────────
   if (selectedIdx === null) {
-    const listos = facturas.filter((_, i) => !!cuentaPago[i]).length;
+    const listos = facturas.filter((_, i) => estaCompleta(i)).length;
 
     return (
       <div className="space-y-5">
@@ -333,9 +342,21 @@ export function Paso2() {
 
         {/* Invoice table */}
         <div
-          className="overflow-hidden rounded-xl border"
+          className="relative overflow-hidden rounded-xl border"
           style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)", boxShadow: "var(--shadow-card)" }}
         >
+          {sugsLoading && (
+            <div
+              className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-xl"
+              style={{ backgroundColor: "color-mix(in srgb, var(--bg-surface) 88%, transparent)", backdropFilter: "blur(2px)" }}
+            >
+              <Loader2 className="h-7 w-7 animate-spin" style={{ color: "var(--brand)" }} />
+              <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Analizando sugerencias IA…</p>
+              <p className="text-xs text-center max-w-xs" style={{ color: "var(--text-muted)" }}>
+                Procesando {facturas.length} facturas. Por favor espera antes de configurar.
+              </p>
+            </div>
+          )}
           <table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
@@ -352,7 +373,8 @@ export function Paso2() {
             </thead>
             <tbody>
               {facturas.map((f, idx) => {
-                const isListo = !!cuentaPago[idx];
+                const isListo = estaCompleta(idx);
+                const isVerificada = !!verificadas[idx];
                 const numSugs = f.items.filter((_, jdx) => suggestions[`${idx}_${jdx}`]?.cuenta).length;
                 const subtotal = f.items.reduce((s, it) => s + it.base, 0);
                 return (
@@ -391,10 +413,17 @@ export function Paso2() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
-                        {isListo ? (
+                        {isVerificada ? (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold"
+                            style={{ backgroundColor: "color-mix(in srgb, var(--success) 22%, transparent)", color: "var(--success)", border: "1.5px solid color-mix(in srgb, var(--success) 50%, transparent)" }}
+                          >
+                            <CheckCircle2 className="h-3 w-3" /> Verificada
+                          </span>
+                        ) : isListo ? (
                           <span
                             className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
-                            style={{ backgroundColor: "color-mix(in srgb, var(--success) 12%, transparent)", color: "var(--success)", border: "1px solid color-mix(in srgb, var(--success) 30%, transparent)" }}
+                            style={{ backgroundColor: "color-mix(in srgb, var(--success) 10%, transparent)", color: "var(--success)", border: "1px solid color-mix(in srgb, var(--success) 25%, transparent)", opacity: 0.85 }}
                           >
                             <CheckCircle2 className="h-3 w-3" /> Configurada
                           </span>
@@ -496,6 +525,19 @@ export function Paso2() {
         >
           <ChevronRight className="h-4 w-4" />
         </button>
+        {estaCompleta(selectedIdx) && (
+          <button
+            onClick={() => setVerificadas(p => ({ ...p, [selectedIdx]: !p[selectedIdx] }))}
+            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-opacity hover:opacity-80"
+            style={verificadas[selectedIdx]
+              ? { backgroundColor: "var(--success)", color: "#fff", border: "none" }
+              : { border: "1.5px solid var(--success)", color: "var(--success)", backgroundColor: "transparent" }
+            }
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            {verificadas[selectedIdx] ? "Verificada" : "Verificar"}
+          </button>
+        )}
       </div>
 
       {/* Invoice header card */}
