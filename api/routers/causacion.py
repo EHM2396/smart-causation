@@ -513,6 +513,16 @@ def get_historial_causadas(
                 sqlfunc.lower(FacturaCausada.razon_social).like(q),
             )
         )
+    def _subtotal(datos_json: str | None) -> float | None:
+        if not datos_json:
+            return None
+        try:
+            datos = json.loads(datos_json)
+            items = datos.get("factura", {}).get("items", [])
+            return float(sum(it.get("base", 0) for it in items))
+        except Exception:
+            return None
+
     rows = db.scalars(stmt).all()
     return [
         {
@@ -523,6 +533,7 @@ def get_historial_causadas(
             "razon_social": r.razon_social,
             "fecha_factura": str(r.fecha_factura) if r.fecha_factura else None,
             "fecha_causacion": str(r.fecha_causacion) if r.fecha_causacion else None,
+            "subtotal": _subtotal(r.datos_json),
             "total": float(r.total or 0),
             "tipo_comprobante": r.tipo_comprobante,
             "archivo_origen": r.archivo_origen,

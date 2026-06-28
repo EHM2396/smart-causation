@@ -11,7 +11,7 @@ import { CausadasModal } from "@/components/causacion/causadas-modal";
 import { fmt } from "@/lib/utils";
 import {
   AlertTriangle, Plus, Sparkles, Loader2,
-  ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search, History,
+  ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search, History, X,
 } from "lucide-react";
 import type { MapeoItem, CuentaOpcion, ImpuestoOut, FuenteMapeo, Sugerencia } from "@/lib/types";
 
@@ -62,7 +62,7 @@ function DataField({ label, value, mono = false }: { label: string; value: strin
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function Paso2() {
-  const { facturas, facturasYaCausadas, tipoComp, setPaso, setMapeos, suggestions, setSuggestions, tutorialActivo, tutorialMockMapeo } = useWizardStore();
+  const { facturas, facturasYaCausadas, tipoComp, setPaso, setFacturas, setMapeos, suggestions, setSuggestions, tutorialActivo, tutorialMockMapeo } = useWizardStore();
   const [modalCausadasOpen, setModalCausadasOpen] = useState(false);
 
   const { data: cuentasGasto = [] } = useQuery({ queryKey: ["cuentas-gasto"], queryFn: api.getCuentasGasto });
@@ -85,6 +85,8 @@ export function Paso2() {
 
   const [sugsLoading, setSugsLoading] = useState(false);
   const [searchItems, setSearchItems] = useState("");
+  const [searchFacturas, setSearchFacturas] = useState("");
+  const [filtroEstado, setFiltroEstado] = useState<"todos" | "pendiente" | "configurada" | "verificada">("todos");
   const [verificadas, setVerificadas] = useState<Record<number, boolean>>({});
   const lastIdxRef = useRef<number | null>(null);
 
@@ -217,7 +219,14 @@ export function Paso2() {
 
   const handleValidar = () => {
     const mapeos: MapeoItem[] = [];
+    const facturasVerificadas: typeof facturas = [];
+
     for (let idx = 0; idx < facturas.length; idx++) {
+      if (!verificadas[idx]) continue;
+
+      const newIdx = facturasVerificadas.length;
+      facturasVerificadas.push(facturas[idx]);
+
       const factura = facturas[idx];
       const cgGlobal = cuentaGastoGlobal[idx] ?? "";
       const globalRetActiva = !!(rfGlobal[idx] || riGlobal[idx]);
@@ -236,7 +245,7 @@ export function Paso2() {
           : "manual";
 
         mapeos.push({
-          idx_factura: idx, descripcion: item.descripcion, base: item.base,
+          idx_factura: newIdx, descripcion: item.descripcion, base: item.base,
           cod_impuesto: impInfo?.codigo ?? cod,
           porcentaje: impInfo?.tarifa ?? item.porcentaje ?? 0,
           valor_impuesto: item.valor_impuesto,
@@ -250,7 +259,7 @@ export function Paso2() {
           if (rfItem[key]) {
             const rf = getImpInfo(rfItem[key]);
             if (rf) mapeos.push({
-              idx_factura: idx, descripcion: `Retefuente ${rf.tarifa}%`,
+              idx_factura: newIdx, descripcion: `Retefuente ${rf.tarifa}%`,
               base: item.base, cod_impuesto: rf.codigo, porcentaje: rf.tarifa ?? 0,
               valor_impuesto: Math.round((item.base * (rf.tarifa ?? 0)) / 100),
               cuenta_gasto: "", fuente: "manual",
@@ -261,7 +270,7 @@ export function Paso2() {
           if (riItem[key]) {
             const ri = getImpInfo(riItem[key]);
             if (ri) mapeos.push({
-              idx_factura: idx, descripcion: `ReteICA ${ri.tarifa}%`,
+              idx_factura: newIdx, descripcion: `ReteICA ${ri.tarifa}%`,
               base: item.base, cod_impuesto: ri.codigo, porcentaje: ri.tarifa ?? 0,
               valor_impuesto: Math.round((item.base * (ri.tarifa ?? 0)) / 100),
               cuenta_gasto: "", fuente: "manual",
@@ -276,7 +285,7 @@ export function Paso2() {
       if (rfGlobal[idx]) {
         const rf = getImpInfo(rfGlobal[idx]);
         if (rf) mapeos.push({
-          idx_factura: idx, descripcion: `Retefuente ${rf.tarifa}%`,
+          idx_factura: newIdx, descripcion: `Retefuente ${rf.tarifa}%`,
           base: totalBase, cod_impuesto: rf.codigo, porcentaje: rf.tarifa ?? 0,
           valor_impuesto: Math.round((totalBase * (rf.tarifa ?? 0)) / 100),
           cuenta_gasto: "", fuente: "manual",
@@ -287,7 +296,7 @@ export function Paso2() {
       if (riGlobal[idx]) {
         const ri = getImpInfo(riGlobal[idx]);
         if (ri) mapeos.push({
-          idx_factura: idx, descripcion: `ReteICA ${ri.tarifa}%`,
+          idx_factura: newIdx, descripcion: `ReteICA ${ri.tarifa}%`,
           base: totalBase, cod_impuesto: ri.codigo, porcentaje: ri.tarifa ?? 0,
           valor_impuesto: Math.round((totalBase * (ri.tarifa ?? 0)) / 100),
           cuenta_gasto: "", fuente: "manual",
@@ -296,6 +305,9 @@ export function Paso2() {
         });
       }
     }
+
+    if (facturasVerificadas.length === 0) return;
+    setFacturas(facturasVerificadas);
     setMapeos(mapeos);
     setPaso(3);
   };
@@ -404,12 +416,110 @@ export function Paso2() {
           </div>
         )}
 
+        {/* Search + state filters */}
+        {(() => {
+          const cntPendiente = facturas.filter((_, i) => !estaCompleta(i) && !verificadas[i]).length;
+          const cntConfigurada = facturas.filter((_, i) => estaCompleta(i) && !verificadas[i]).length;
+          const cntVerificada = facturas.filter((_, i) => !!verificadas[i]).length;
+          const ESTADOS = [
+            { key: "todos",       label: "Todos",       count: facturas.length },
+            { key: "pendiente",   label: "Pendiente",   count: cntPendiente },
+            { key: "configurada", label: "Configurada", count: cntConfigurada },
+            { key: "verificada",  label: "Verificada",  count: cntVerificada },
+          ] as const;
+          return (
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="relative flex-1" style={{ minWidth: 200 }}>
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 pointer-events-none" style={{ color: "var(--text-muted)" }} />
+                  <input
+                    type="text"
+                    placeholder="Buscar por N° factura, proveedor o NIT…"
+                    value={searchFacturas}
+                    onChange={e => setSearchFacturas(e.target.value)}
+                    className="w-full rounded-lg border py-2 pl-9 pr-8 text-sm outline-none focus:ring-1"
+                    style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)", color: "var(--text-primary)" }}
+                  />
+                  {searchFacturas && (
+                    <button
+                      onClick={() => setSearchFacturas("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  {ESTADOS.map(({ key, label, count }) => (
+                    <button
+                      key={key}
+                      onClick={() => setFiltroEstado(key)}
+                      className="rounded-lg px-3 py-1.5 text-xs font-medium transition-all whitespace-nowrap"
+                      style={{
+                        backgroundColor: filtroEstado === key ? "var(--brand)" : "var(--bg-elevated)",
+                        color: filtroEstado === key ? "#fff" : "var(--text-muted)",
+                        border: `1px solid ${filtroEstado === key ? "transparent" : "var(--border-soft)"}`,
+                      }}
+                    >
+                      {label} <span style={{ opacity: 0.75 }}>({count})</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {cntConfigurada > 0 && (
+                <div
+                  className="flex items-center justify-between rounded-lg border px-3 py-2"
+                  style={{
+                    borderColor: "color-mix(in srgb, var(--success) 35%, transparent)",
+                    backgroundColor: "color-mix(in srgb, var(--success) 8%, transparent)",
+                  }}
+                >
+                  <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                    {cntConfigurada} factura{cntConfigurada !== 1 ? "s" : ""} lista{cntConfigurada !== 1 ? "s" : ""} para verificar
+                  </span>
+                  <button
+                    onClick={() => {
+                      const updates: Record<number, boolean> = {};
+                      facturas.forEach((_, i) => {
+                        if (estaCompleta(i) && !verificadas[i]) updates[i] = true;
+                      });
+                      setVerificadas(p => ({ ...p, ...updates }));
+                    }}
+                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-opacity hover:opacity-80"
+                    style={{ backgroundColor: "var(--success)", color: "#fff" }}
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    Verificar todas las configuradas
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {/* Invoice table */}
         <div
           data-tutorial="invoice-list"
           className="overflow-hidden rounded-xl border"
           style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)", boxShadow: "var(--shadow-card)" }}
         >
+          {(() => {
+            const q = searchFacturas.toLowerCase();
+            const facturasFiltradas = facturas
+              .map((f, idx) => ({ f, idx }))
+              .filter(({ f, idx }) => {
+                if (q && !f.numero_dian.toLowerCase().includes(q) && !(f.razon_social ?? "").toLowerCase().includes(q) && !(f.nit ?? "").toLowerCase().includes(q)) return false;
+                if (filtroEstado !== "todos") {
+                  const isV = !!verificadas[idx];
+                  const isC = estaCompleta(idx);
+                  if (filtroEstado === "verificada"  && !isV)          return false;
+                  if (filtroEstado === "configurada" && (!isC || isV)) return false;
+                  if (filtroEstado === "pendiente"   && (isC || isV))  return false;
+                }
+                return true;
+              });
+            return (
           <table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
@@ -425,7 +535,13 @@ export function Paso2() {
               </tr>
             </thead>
             <tbody>
-              {facturas.map((f, idx) => {
+              {facturasFiltradas.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-10 text-center text-sm" style={{ color: "var(--text-muted)" }}>
+                    Sin resultados para los filtros aplicados.
+                  </td>
+                </tr>
+              ) : facturasFiltradas.map(({ f, idx }) => {
                 const isListo = estaCompleta(idx);
                 const isVerificada = !!verificadas[idx];
                 const numSugs = f.items.filter((_, jdx) => suggestions[`${idx}_${jdx}`]?.cuenta).length;
@@ -514,6 +630,8 @@ export function Paso2() {
               })}
             </tbody>
           </table>
+            );
+          })()}
         </div>
       </div>
 
@@ -880,8 +998,8 @@ export function Paso2() {
                     style={{ borderBottom: jdx < factura.items.length - 1 ? "1px solid var(--border-soft)" : "none" }}
                   >
                     {/* Descripción */}
-                    <td className="px-4 py-3" style={{ minWidth: "220px", maxWidth: "300px" }}>
-                      <p className="truncate text-sm" style={{ color: "var(--text-secondary)" }} title={item.descripcion}>
+                    <td className="px-4 py-3" style={{ minWidth: "220px", maxWidth: "320px" }}>
+                      <p className="text-sm break-words whitespace-normal" style={{ color: "var(--text-secondary)" }}>
                         {item.descripcion}
                       </p>
                     </td>

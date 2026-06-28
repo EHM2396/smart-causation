@@ -69,17 +69,7 @@ def construir_movimientos(
     Parámetros:
         factura: dict parseado por core.parser
         consecutivo: número entero del comprobante en SIIGO (ej. 23)
-        mapeos_confirmados: lista de {
-            "descripcion": str,
-            "cuenta_gasto": str,
-            "cod_impuesto": str,     # código SIIGO del impuesto (de codigos_impuestos.xlsx)
-            "porcentaje": float,
-            "cuenta_impuesto_deb": str,   # cuenta débito del impuesto (IVA descontable)
-            "cuenta_impuesto_cre": str,   # cuenta crédito del impuesto (retención)
-            "base": float,
-            "valor_impuesto": float,
-            "es_retencion": bool,
-        }
+        mapeos_confirmados: lista de MapeoItem serializados
         tipo_comprobante: código numérico SIIGO del tipo de comprobante (ej. "12")
         centro_costo: código de centro de costo (vacío si no aplica)
 
@@ -89,11 +79,28 @@ def construir_movimientos(
     fecha = factura.get("fecha", "")
     nit   = str(factura.get("nit", "")).strip()
     num_factura = factura.get("numero_dian", "")
+    cufe = str(factura.get("cufe", "") or "").strip()
+    observaciones = f"{num_factura}-{cufe}" if cufe else num_factura
 
     total_debitos  = 0.0
     total_creditos = 0.0
 
+    # Deduplicar mapeos exactos para evitar filas dobles por formatos DIAN con filas de impuesto separadas
+    seen_mapeos: set[tuple] = set()
+    mapeos_unicos: list[dict] = []
     for m in mapeos_confirmados:
+        key = (
+            str(m.get("descripcion", "")),
+            round(float(m.get("base", 0) or 0), 2),
+            round(float(m.get("valor_impuesto", 0) or 0), 2),
+            str(m.get("cuenta_gasto", "")),
+            bool(m.get("es_retencion", False)),
+        )
+        if key not in seen_mapeos:
+            seen_mapeos.add(key)
+            mapeos_unicos.append(m)
+
+    for m in mapeos_unicos:
         base        = float(m.get("base", 0) or 0)
         val_imp     = float(m.get("valor_impuesto", 0) or 0)
         es_ret      = bool(m.get("es_retencion", False))
@@ -109,7 +116,7 @@ def construir_movimientos(
             movimientos.append(_fila(
                 tipo_comprobante, consecutivo, fecha, nit,
                 cuenta_gasto, base, None,
-                desc, centro_costo, num_factura, "",
+                desc, centro_costo, observaciones, "",
             ))
             total_debitos += base
 
@@ -118,8 +125,8 @@ def construir_movimientos(
             movimientos.append(_fila(
                 tipo_comprobante, consecutivo, fecha, nit,
                 cuenta_imp_d, val_imp, None,
-                f"Iva generado",
-                centro_costo, num_factura, cod_imp,
+                "Iva generado",
+                centro_costo, observaciones, cod_imp,
             ))
             total_debitos += val_imp
 
@@ -129,13 +136,13 @@ def construir_movimientos(
                 tipo_comprobante, consecutivo, fecha, nit,
                 cuenta_imp_c, None, val_imp,
                 desc,
-                centro_costo, num_factura, cod_imp,
+                centro_costo, observaciones, cod_imp,
             ))
             total_creditos += val_imp
 
     # Cuenta de pago seleccionada o aprendida para el proveedor (activo/pasivo)
-    cuenta_pago = str(mapeos_confirmados[0].get("cuenta_pago", "")).strip() if mapeos_confirmados else ""
-    cuenta_pago_nombre = str(mapeos_confirmados[0].get("cuenta_pago_nombre", "")).strip() if mapeos_confirmados else ""
+    cuenta_pago = str(mapeos_unicos[0].get("cuenta_pago", "")).strip() if mapeos_unicos else ""
+    cuenta_pago_nombre = str(mapeos_unicos[0].get("cuenta_pago_nombre", "")).strip() if mapeos_unicos else ""
     if not cuenta_pago:
         cuenta_pago = str(factura.get("cuenta_pago", "")).strip()
         cuenta_pago_nombre = factura.get("razon_social", "")
@@ -148,7 +155,7 @@ def construir_movimientos(
             tipo_comprobante, consecutivo, fecha, nit,
             cuenta_pago, None, neto,
             cuenta_pago_nombre or factura.get("razon_social", ""),
-            centro_costo, num_factura, "",
+            centro_costo, observaciones, "",
         ))
         total_creditos += neto
 

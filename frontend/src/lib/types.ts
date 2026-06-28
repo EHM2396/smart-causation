@@ -141,6 +141,7 @@ export interface HistorialItem {
   razon_social: string | null;
   fecha_factura: string | null;
   fecha_causacion: string | null;
+  subtotal: number | null;
   total: number;
   tipo_comprobante: string | null;
   archivo_origen: string | null;

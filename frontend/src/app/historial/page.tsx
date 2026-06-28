@@ -251,7 +251,7 @@ export default function HistorialPage() {
         <table className="w-full min-w-[900px] text-sm">
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
-              {["Consec.", "N° Factura DIAN", "Proveedor", "F. Factura", "F. Causación", "Total", "Tipo comp.", "Archivo origen", "Acciones"].map((h) => (
+              {["Consec.", "N° Factura DIAN", "Proveedor", "F. Factura", "F. Causación", "Subtotal", "Total", "Tipo comp.", "Archivo origen", "Acciones"].map((h) => (
                 <th
                   key={h}
                   className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide"
@@ -265,13 +265,13 @@ export default function HistorialPage() {
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={9} className="px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>
+                <td colSpan={10} className="px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>
                   Cargando historial...
                 </td>
               </tr>
             ) : dt.rows.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>
+                <td colSpan={10} className="px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>
                   {hasDateFilter ? "Sin resultados para el rango de fechas seleccionado." : "No hay facturas causadas aún."}
                 </td>
               </tr>
@@ -310,6 +310,11 @@ export default function HistorialPage() {
                   {/* Fecha causación */}
                   <td className="px-4 py-3 text-xs tabular-nums" style={{ color: "var(--text-secondary)" }}>
                     {row.fecha_causacion ?? "-"}
+                  </td>
+
+                  {/* Subtotal */}
+                  <td className="px-4 py-3 text-right font-mono text-sm" style={{ color: "var(--text-secondary)" }}>
+                    {row.subtotal != null ? fmt(row.subtotal) : <span style={{ color: "var(--text-muted)" }}>-</span>}
                   </td>
 
                   {/* Total */}

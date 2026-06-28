@@ -228,6 +228,16 @@ def _parsear_token_dian(archivo: BytesIO | str, nombre_archivo: str = "") -> lis
 
     result: list[dict] = []
     for fac in facturas.values():
+        # Eliminar ítems duplicados exactos (descripcion + base + valor_impuesto)
+        # que aparecen en algunos exportes DIAN que incluyen filas de impuesto separadas
+        seen: set[tuple] = set()
+        items_unicos: list[dict] = []
+        for it in fac["items"]:
+            key = (it["descripcion"], round(it["base"], 2), round(it["valor_impuesto"], 2))
+            if key not in seen:
+                seen.add(key)
+                items_unicos.append(it)
+        fac["items"] = items_unicos
         fac["total"] = round(sum(i["total_linea"] for i in fac["items"]), 2)
         if not fac["items"]:
             fac["advertencias"].append("No se detectaron items para esta factura.")
