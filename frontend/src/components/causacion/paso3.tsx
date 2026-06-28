@@ -8,6 +8,17 @@ import { CheckCircle2, XCircle, AlertTriangle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { BatchValidacionResponse } from "@/lib/types";
 
+const TUTORIAL_REPORTE: BatchValidacionResponse = {
+  comprobantes: [
+    { consecutivo: 1, numero_dian: "FERM44825", total_debito: 2750000, total_credito: 2750000, diferencia: 0, cuadra: true },
+    { consecutivo: 2, numero_dian: "SE-241001",  total_debito: 1190000, total_credito: 1190000, diferencia: 0, cuadra: true },
+    { consecutivo: 3, numero_dian: "FE-2026001", total_debito: 580000,  total_credito: 580000,  diferencia: 0, cuadra: true },
+  ],
+  global_cuadra: true,
+  gran_total_debitos: 4520000,
+  gran_total_creditos: 4520000,
+};
+
 export function Paso3() {
   const { facturas, mapeos, tipoComp, centroCosto, setPaso, setReporte, setXlsxBlob } = useWizardStore();
   const [reporte, setLocalReporte] = useState<BatchValidacionResponse | null>(null);
@@ -16,6 +27,12 @@ export function Paso3() {
   const [generando, setGenerando] = useState(false);
 
   useEffect(() => {
+    if (useWizardStore.getState().tutorialActivo) {
+      setLocalReporte(TUTORIAL_REPORTE);
+      setReporte(TUTORIAL_REPORTE);
+      setLoading(false);
+      return;
+    }
     const run = async () => {
       setLoading(true);
       try {
@@ -76,7 +93,7 @@ export function Paso3() {
       </div>
 
       {/* Tabla */}
-      <div className="rounded-xl border border-[var(--border-soft)] overflow-hidden">
+      <div data-tutorial="validar-reporte" className="rounded-xl border border-[var(--border-soft)] overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-[var(--border-soft)] bg-[var(--bg-elevated)]">
@@ -138,7 +155,7 @@ export function Paso3() {
 
       <div className="flex items-center justify-between pt-2">
         <Button variant="outline" onClick={() => setPaso(2)}>← Volver al mapeo</Button>
-        <Button size="lg" onClick={handleGenerar} disabled={!reporte.global_cuadra || generando} variant={reporte.global_cuadra ? "default" : "secondary"}>
+        <Button data-tutorial="generar-btn" size="lg" onClick={handleGenerar} disabled={!reporte.global_cuadra || generando} variant={reporte.global_cuadra ? "default" : "secondary"}>
           {generando ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generando…</> : "Generar archivo SIIGO →"}
         </Button>
       </div>

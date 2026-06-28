@@ -7,11 +7,12 @@ import { fmt } from "@/lib/utils";
 import { Download, CheckCircle2, PartyPopper } from "lucide-react";
 
 export function Paso4() {
-  const { facturas, mapeos, tipoComp, centroCosto, reporte, xlsxBlob, reset } = useWizardStore();
+  const { facturas, mapeos, tipoComp, centroCosto, reporte, xlsxBlob, reset, tutorialActivo } = useWizardStore();
   const [confirming, setConfirming] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
 
   const handleDownload = () => {
+    if (tutorialActivo) return;
     if (!xlsxBlob) return;
     const url = URL.createObjectURL(xlsxBlob);
     const a = document.createElement("a");
@@ -22,6 +23,7 @@ export function Paso4() {
   };
 
   const handleConfirmar = async () => {
+    if (tutorialActivo) { setConfirmed(true); return; }
     setConfirming(true);
     try {
       const items = facturas.map((f, idx) => ({
@@ -71,11 +73,11 @@ export function Paso4() {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3">
-            <Button size="lg" onClick={handleDownload} disabled={!xlsxBlob} className="gap-2">
+            <Button data-tutorial="descargar-btn" size="lg" onClick={handleDownload} disabled={!xlsxBlob && !tutorialActivo} className="gap-2">
               <Download className="h-4 w-4" />
               Descargar importacion_SIIGO.xlsx
             </Button>
-            <Button size="lg" variant="success" onClick={handleConfirmar} disabled={confirming} className="gap-2">
+            <Button data-tutorial="guardar-aprendizaje-btn" size="lg" variant="success" onClick={handleConfirmar} disabled={confirming} className="gap-2">
               <CheckCircle2 className="h-4 w-4" />
               {confirming ? "Guardando..." : "Confirmar y guardar aprendizaje"}
             </Button>
