@@ -254,6 +254,12 @@ def sugerir(
         return None
 
 
+# Ítems por llamada: balance entre round-trips y tokens de output generados.
+# 1 sola llamada × 86 ítems → ~7700 tokens secuenciales ≈ 30s.
+# 6 llamadas × 15 ítems en paralelo → ~1050 tokens c/u ≈ 3-5s.
+_BATCH_CHUNK_SIZE = 15
+
+
 def sugerir_batch(
     items: list[dict],
     cuentas_gasto: list[dict],
@@ -262,18 +268,18 @@ def sugerir_batch(
     modelo: str = _MODELO_DEFAULT,
 ) -> dict[str, "SugerenciaIA | None"]:
     """
-    Clasifica todos los ítems en UNA SOLA llamada a la IA.
-    Deduplica por (descripcion_sanitizada, tipo_proveedor) antes de enviar.
-    Retorna dict[key → SugerenciaIA | None]. Nunca lanza excepción.
+    Clasifica ítems dividiendo en chunks de ~15 y disparándolos en paralelo.
+    Deduplica por (descripcion, tipo_proveedor). Retorna dict[key → SugerenciaIA | None].
+    Nunca lanza excepción.
     """
     if not esta_disponible() or not items:
         return {item["key"]: None for item in items}
 
-    # --- Deduplicar por (descripcion_sanitizada, tipo_proveedor) ---
+    # --- Deduplicar ---
     combo_to_keys: dict[tuple, list[str]] = {}
     for item in items:
         desc = _sanitizar_descripcion(item.get("descripcion") or "")
-        tipo = item.get("tipo_proveedor") or None  # None = desconocido; no asumir "juridica"
+        tipo = item.get("tipo_proveedor") or None  # no asumir tipo fijo
         if not desc:
             continue
         if _detectar_inyeccion(desc):
@@ -286,12 +292,66 @@ def sugerir_batch(
         return {item["key"]: None for item in items}
 
     combo_list = list(combo_to_keys.keys())
+    api_key    = _get_api_key()
+
+    chunks = [
+        combo_list[i: i + _BATCH_CHUNK_SIZE]
+        for i in range(0, len(combo_list), _BATCH_CHUNK_SIZE)
+    ]
+
+    sug_por_combo: dict[tuple, SugerenciaIA] = {}
+
+    if len(chunks) == 1:
+        sug_por_combo.update(
+            _procesar_chunk_batch(
+                chunks[0], cuentas_gasto, codigos_impuesto, cuentas_pago, modelo, api_key
+            )
+        )
+    else:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=min(len(chunks), 6)) as executor:
+            futures = {
+                executor.submit(
+                    _procesar_chunk_batch,
+                    chunk, cuentas_gasto, codigos_impuesto, cuentas_pago, modelo, api_key,
+                ): idx
+                for idx, chunk in enumerate(chunks)
+            }
+            for future in as_completed(futures):
+                try:
+                    sug_por_combo.update(future.result())
+                except Exception as exc:
+                    logger.warning(
+                        "sugerir_batch: chunk %d falló (ignorado): %s", futures[future], exc
+                    )
+
+    # --- Mapear de vuelta a keys ---
+    result: dict[str, SugerenciaIA | None] = {item["key"]: None for item in items}
+    for combo, keys in combo_to_keys.items():
+        sug = sug_por_combo.get(combo)
+        for key in keys:
+            result[key] = sug
+
+    return result
+
+
+def _procesar_chunk_batch(
+    chunk: list[tuple],
+    cuentas_gasto: list[dict],
+    codigos_impuesto: list[dict],
+    cuentas_pago: list[dict] | None,
+    modelo: str,
+    api_key: str,
+) -> dict[tuple, SugerenciaIA]:
+    """Procesa un chunk de combos en 1 llamada a la API."""
+    codigos_gasto_validos = {c["codigo"] for c in cuentas_gasto}
+    codigos_imp_validos   = {str(i["cod"]) for i in codigos_impuesto}
+    codigos_pago_validos  = {c["codigo"] for c in (cuentas_pago or [])}
 
     try:
-        api_key = _get_api_key()
-        client = _OpenAI(api_key=api_key)
-        prompt = _construir_prompt_batch(combo_list, cuentas_gasto, codigos_impuesto, cuentas_pago)
-        max_tok = min(8000, max(512, 90 * len(combo_list)))
+        client  = _OpenAI(api_key=api_key)
+        prompt  = _construir_prompt_batch(chunk, cuentas_gasto, codigos_impuesto, cuentas_pago)
+        max_tok = min(1500, max(300, 70 * len(chunk)))
 
         response = client.chat.completions.create(
             model=modelo,
@@ -308,20 +368,15 @@ def sugerir_batch(
         resultados_raw: list[dict] = raw.get("resultados", [])
 
     except Exception as exc:
-        logger.warning("ai_service.sugerir_batch falló (ignorado): %s", exc)
-        return {item["key"]: None for item in items}
+        logger.warning("_procesar_chunk_batch falló: %s", exc)
+        return {}
 
-    # --- Validar códigos ---
-    codigos_gasto_validos = {c["codigo"] for c in cuentas_gasto}
-    codigos_imp_validos   = {str(i["cod"]) for i in codigos_impuesto}
-    codigos_pago_validos  = {c["codigo"] for c in (cuentas_pago or [])}
-
-    sug_por_combo: dict[tuple, SugerenciaIA] = {}
+    sug_parcial: dict[tuple, SugerenciaIA] = {}
     for r in resultados_raw:
         idx = int(r.get("indice", 0)) - 1  # 1-based → 0-based
-        if idx < 0 or idx >= len(combo_list):
+        if idx < 0 or idx >= len(chunk):
             continue
-        combo = combo_list[idx]
+        combo = chunk[idx]
 
         cuenta_gasto = r.get("cuenta_gasto") or None
         cod_impuesto = r.get("cod_impuesto") or None
@@ -330,7 +385,7 @@ def sugerir_batch(
         explicacion  = str(r.get("explicacion", ""))[:100]
 
         if cuenta_gasto and cuenta_gasto not in codigos_gasto_validos:
-            logger.warning("batch: cuenta_gasto inválida %s — descartada", cuenta_gasto)
+            logger.warning("chunk_batch: cuenta_gasto inválida %s — descartada", cuenta_gasto)
             cuenta_gasto = None
             confianza    = min(confianza, 0.3)
 
@@ -340,7 +395,7 @@ def sugerir_batch(
         if cuenta_pago and cuenta_pago not in codigos_pago_validos:
             cuenta_pago = None
 
-        sug_por_combo[combo] = SugerenciaIA(
+        sug_parcial[combo] = SugerenciaIA(
             cuenta_gasto=cuenta_gasto,
             cod_impuesto=cod_impuesto,
             cuenta_pago=cuenta_pago,
@@ -350,14 +405,7 @@ def sugerir_batch(
             modelo=modelo,
         )
 
-    # --- Mapear de vuelta a keys originales ---
-    result: dict[str, SugerenciaIA | None] = {item["key"]: None for item in items}
-    for combo, keys in combo_to_keys.items():
-        sug = sug_por_combo.get(combo)
-        for key in keys:
-            result[key] = sug
-
-    return result
+    return sug_parcial
 
 
 # ── Lógica interna ────────────────────────────────────────────────────────────
