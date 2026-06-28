@@ -71,6 +71,8 @@ export interface Sugerencia {
   origen: string | null;
   explicacion_ia: string | null;
   confianza_ia: number | null;
+  cuenta_pago_sugerida: string | null;
+  cuenta_pago_origen: string | null;
 }
 
 // ─── Mapeo ────────────────────────────────────────────────────────────────────

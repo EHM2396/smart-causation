@@ -24,7 +24,7 @@ from api.schemas import (
 from db.models.auth import Empresa, Usuario
 from db.models.contabilidad import FacturaCausada
 from db.session import get_db
-from services import causacion_service, consecutivos_service
+from services import causacion_service, consecutivos_service, cuentas_service
 from core import exporter, validator
 
 router = APIRouter(prefix="/causacion", tags=["Causación"])
@@ -54,9 +54,10 @@ async def parsear_facturas(
 @router.post("/sugerir-cuenta", response_model=SugerenciaResponse)
 def sugerir_cuenta(body: SugerenciaRequest, db: DB, empresa: EmpresaActiva, current_user: CurrentUser):
     """
-    Dado un NIT y una descripción de ítem, sugiere la cuenta de gasto PUC.
+    Dado un NIT y una descripción de ítem, sugiere la cuenta de gasto PUC y cuenta de pago.
     Prioridad: reglas → aprendizaje → IA (OpenAI fallback).
     """
+    cuentas_pago = cuentas_service.listar_metodos_pago(db, empresa_id=empresa.id)
     resultado = causacion_service.sugerir_cuenta_gasto(
         db,
         nit=body.nit,
@@ -64,12 +65,15 @@ def sugerir_cuenta(body: SugerenciaRequest, db: DB, empresa: EmpresaActiva, curr
         empresa_id=empresa.id,
         usuario_id=current_user.id,
         tipo_proveedor=body.tipo_proveedor,
+        cuentas_pago=cuentas_pago,
     )
     return SugerenciaResponse(
         cuenta_sugerida=resultado.cuenta,
         origen=resultado.origen,
         explicacion_ia=resultado.explicacion,
         confianza_ia=resultado.confianza,
+        cuenta_pago_sugerida=resultado.cuenta_pago,
+        cuenta_pago_origen=resultado.cuenta_pago_origen,
     )
 
 

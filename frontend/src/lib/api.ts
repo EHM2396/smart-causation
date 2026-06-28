@@ -186,6 +186,8 @@ export const api = {
       origen: string | null;
       explicacion_ia: string | null;
       confianza_ia: number | null;
+      cuenta_pago_sugerida: string | null;
+      cuenta_pago_origen: string | null;
     }>(
       "/causacion/sugerir-cuenta",
       { method: "POST", body: JSON.stringify({ nit, descripcion, tipo_proveedor }) }

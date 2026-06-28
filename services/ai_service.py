@@ -85,6 +85,7 @@ class SugerenciaIA:
     """Resultado de la sugerencia del modelo. Siempre debe revisarse antes de aplicar."""
     cuenta_gasto: str | None = None
     cod_impuesto: str | None = None
+    cuenta_pago: str | None = None  # cuenta de pago/acreedor sugerida para el proveedor
     confianza: float = 0.0          # 0.0 – 1.0
     explicacion: str = ""
     origen: str = "ia"
@@ -211,9 +212,10 @@ def esta_disponible() -> bool:
 
 def sugerir(
     descripcion: str,
-    cuentas_gasto: list[dict],    # [{"codigo": "51950501", "nombre": "..."}]
-    codigos_impuesto: list[dict], # [{"cod": "1", "porcentaje": 19.0, "naturaleza": "IVA"}]
+    cuentas_gasto: list[dict],         # [{"codigo": "51950501", "nombre": "..."}]
+    codigos_impuesto: list[dict],      # [{"cod": "1", "porcentaje": 19.0, "naturaleza": "IVA"}]
     tipo_proveedor: str = "juridica",
+    cuentas_pago: list[dict] | None = None,  # [{"codigo": "22050501", "nombre": "..."}]
     modelo: str = _MODELO_DEFAULT,
 ) -> SugerenciaIA | None:
     """
@@ -252,6 +254,7 @@ def sugerir(
             cuentas_gasto,
             codigos_impuesto,
             tipo_proveedor,
+            cuentas_pago,
             modelo,
         )
     except Exception as exc:
@@ -266,6 +269,7 @@ def _construir_prompt(
     cuentas_gasto: list[dict],
     codigos_impuesto: list[dict],
     tipo_proveedor: str,
+    cuentas_pago: list[dict] | None = None,
 ) -> str:
     cuentas_str = "\n".join(
         f"  {c['codigo']} - {c['nombre']}"
@@ -275,6 +279,19 @@ def _construir_prompt(
         f"  {i['cod']} - {i['naturaleza']} {i['porcentaje']}%"
         for i in codigos_impuesto
     )
+
+    pago_section = ""
+    cuenta_pago_json_field = ""
+    if cuentas_pago:
+        pago_str = "\n".join(
+            f"  {c['codigo']} - {c['nombre']}"
+            for c in cuentas_pago[:50]
+        )
+        pago_section = f"""
+Cuentas de pago/acreedor disponibles (código - nombre):
+{pago_str}
+"""
+        cuenta_pago_json_field = '\n  "cuenta_pago": "<código de la lista de pago o null>",'
 
     return f"""Eres un asistente de contabilidad colombiana especializado en causación \
 de facturas electrónicas DIAN para importar a SIIGO.
@@ -287,9 +304,9 @@ Cuentas PUC de gasto disponibles (código - nombre):
 
 Códigos de impuesto disponibles (código - tipo - tarifa):
 {impuestos_str}
-
+{pago_section}
 Responde ÚNICAMENTE en este formato JSON exacto, sin texto adicional:
-{{
+{{{cuenta_pago_json_field}
   "cuenta_gasto": "<código de 8 dígitos de la lista o null>",
   "cod_impuesto": "<código de impuesto de la lista o null>",
   "confianza": <número entre 0.0 y 1.0>,
@@ -300,6 +317,7 @@ Reglas estrictas:
 - Usa SOLO códigos de las listas proporcionadas. Nunca inventes códigos.
 - confianza >= 0.8 solo si estás muy seguro de la clasificación.
 - Si el ítem no coincide claramente con ninguna cuenta, usa null y baja confianza.
+- Para cuenta_pago: elige la más apropiada para el tipo de proveedor ({tipo_proveedor}).
 - Responde solo con el JSON, sin explicaciones fuera del JSON."""
 
 
@@ -308,18 +326,19 @@ def _llamar_openai(
     cuentas_gasto: list[dict],
     codigos_impuesto: list[dict],
     tipo_proveedor: str,
+    cuentas_pago: list[dict] | None,
     modelo: str,
 ) -> SugerenciaIA:
     api_key = _get_api_key()
     client = _OpenAI(api_key=api_key)
 
-    prompt = _construir_prompt(descripcion, cuentas_gasto, codigos_impuesto, tipo_proveedor)
+    prompt = _construir_prompt(descripcion, cuentas_gasto, codigos_impuesto, tipo_proveedor, cuentas_pago)
 
     response = client.chat.completions.create(
         model=modelo,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.0,            # determinismo máximo para contabilidad
-        max_tokens=150,
+        max_tokens=200,
         response_format={"type": "json_object"},
     )
 
@@ -332,9 +351,11 @@ def _llamar_openai(
     # Validar que los códigos sugeridos existen en las listas originales
     codigos_gasto_validos = {c["codigo"] for c in cuentas_gasto}
     codigos_imp_validos   = {str(i["cod"]) for i in codigos_impuesto}
+    codigos_pago_validos  = {c["codigo"] for c in (cuentas_pago or [])}
 
     cuenta_gasto  = raw.get("cuenta_gasto")
     cod_impuesto  = raw.get("cod_impuesto")
+    cuenta_pago   = raw.get("cuenta_pago") if cuentas_pago else None
     confianza     = float(raw.get("confianza", 0.0))
     explicacion   = str(raw.get("explicacion", ""))[:100]
 
@@ -348,9 +369,14 @@ def _llamar_openai(
         logger.warning("IA sugirió cod_impuesto no válido: %s — descartado", cod_impuesto)
         cod_impuesto = None
 
+    if cuenta_pago and cuenta_pago not in codigos_pago_validos:
+        logger.warning("IA sugirió cuenta_pago no válida: %s — descartada", cuenta_pago)
+        cuenta_pago = None
+
     return SugerenciaIA(
         cuenta_gasto=cuenta_gasto,
         cod_impuesto=cod_impuesto,
+        cuenta_pago=cuenta_pago,
         confianza=max(0.0, min(1.0, confianza)),
         explicacion=explicacion,
         origen="ia",

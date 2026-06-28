@@ -56,6 +56,43 @@ class ResultadoSugerencia:
     origen: str | None
     explicacion: str | None = None
     confianza: float | None = None
+    cuenta_pago: str | None = None
+    cuenta_pago_origen: str | None = None  # 'aprendizaje' | 'ia_alta' | 'ia_media' | 'ia_baja'
+
+
+def _obtener_cuenta_pago_anterior(
+    db: Session,
+    nit: str | None,
+    empresa_id: int | None,
+) -> str | None:
+    """Busca la cuenta_pago más reciente usada para este NIT en causaciones previas."""
+    if not nit:
+        return None
+    import json as _json
+    from sqlalchemy import select as _select
+    stmt = (
+        _select(FacturaCausada.datos_json)
+        .where(
+            FacturaCausada.nit_proveedor == nit,
+            FacturaCausada.datos_json.is_not(None),
+        )
+        .order_by(FacturaCausada.id.desc())
+        .limit(1)
+    )
+    if empresa_id is not None:
+        stmt = stmt.where(FacturaCausada.empresa_id == empresa_id)
+    datos_str = db.scalar(stmt)
+    if not datos_str:
+        return None
+    try:
+        data = _json.loads(datos_str)
+        for m in data.get("mapeos", []):
+            cp = m.get("cuenta_pago")
+            if cp:
+                return cp
+    except Exception:
+        pass
+    return None
 
 
 def sugerir_cuenta_gasto(
@@ -66,6 +103,7 @@ def sugerir_cuenta_gasto(
     empresa_id: int | None = None,
     usuario_id: int | None = None,
     tipo_proveedor: str = "juridica",
+    cuentas_pago: list[dict] | None = None,
 ) -> ResultadoSugerencia:
     """
     Intenta encontrar la mejor cuenta de gasto para un ítem de factura.
@@ -73,16 +111,30 @@ def sugerir_cuenta_gasto(
       1. Reglas de clasificación activas (mayor prioridad + tipo)
       2. Mapeos aprendidos previos (NIT + keyword)
       3. IA (OpenAI) — fallback cuando no hay regla ni mapeo aprendido
+
+    También sugiere cuenta_pago: primero desde historial de causaciones del NIT,
+    luego desde IA cuando cuentas_pago está disponible.
     """
+    # Lookup cuenta_pago desde historial (aprendizaje a nivel de proveedor)
+    cp_anterior = _obtener_cuenta_pago_anterior(db, nit, empresa_id)
+
     # 1. Reglas de clasificación
     cuenta = aprendizaje_service.aplicar_reglas(db, descripcion)
     if cuenta:
-        return ResultadoSugerencia(cuenta=cuenta, origen="regla")
+        return ResultadoSugerencia(
+            cuenta=cuenta, origen="regla",
+            cuenta_pago=cp_anterior,
+            cuenta_pago_origen="aprendizaje" if cp_anterior else None,
+        )
 
     # 2. Mapeo aprendido
     cuenta = aprendizaje_service.obtener_mapeo(db, nit, descripcion, empresa_id=empresa_id, usuario_id=usuario_id)
     if cuenta:
-        return ResultadoSugerencia(cuenta=cuenta, origen="aprendizaje")
+        return ResultadoSugerencia(
+            cuenta=cuenta, origen="aprendizaje",
+            cuenta_pago=cp_anterior,
+            cuenta_pago_origen="aprendizaje" if cp_anterior else None,
+        )
 
     # 3. IA — fallback cuando no hay datos aprendidos
     try:
@@ -90,12 +142,20 @@ def sugerir_cuenta_gasto(
         ia_ok = ai_service.esta_disponible()
         logger.warning("[IA-DEBUG] esta_disponible=%s desc=%r empresa=%s", ia_ok, descripcion[:40], empresa_id)
         if not ia_ok:
-            return ResultadoSugerencia(cuenta=None, origen="ia_no_disponible")
+            return ResultadoSugerencia(
+                cuenta=None, origen="ia_no_disponible",
+                cuenta_pago=cp_anterior,
+                cuenta_pago_origen="aprendizaje" if cp_anterior else None,
+            )
 
         cuentas_gasto_list = cuentas_service.listar_cuentas_gasto(db, empresa_id=empresa_id)
         logger.warning("[IA-DEBUG] cuentas_gasto=%d para empresa_id=%s", len(cuentas_gasto_list), empresa_id)
         if not cuentas_gasto_list:
-            return ResultadoSugerencia(cuenta=None, origen="sin_catalogo")
+            return ResultadoSugerencia(
+                cuenta=None, origen="sin_catalogo",
+                cuenta_pago=cp_anterior,
+                cuenta_pago_origen="aprendizaje" if cp_anterior else None,
+            )
 
         codigos_imp = impuestos_service.listar_como_dict(db, empresa_id=empresa_id)
         sug = ai_service.sugerir(
@@ -103,6 +163,7 @@ def sugerir_cuenta_gasto(
             cuentas_gasto=[{"codigo": c["codigo"], "nombre": c["nombre"]} for c in cuentas_gasto_list],
             codigos_impuesto=codigos_imp,
             tipo_proveedor=tipo_proveedor,
+            cuentas_pago=cuentas_pago,
         )
         logger.warning("[IA-DEBUG] sug=%s", sug)
         if sug and sug.cuenta_gasto:
@@ -112,16 +173,25 @@ def sugerir_cuenta_gasto(
                 origen_ia = "ia_media"
             else:
                 origen_ia = "ia_baja"
+            # cuenta_pago: historial tiene prioridad sobre IA
+            cp_final = cp_anterior or sug.cuenta_pago
+            cp_origen = ("aprendizaje" if cp_anterior else (origen_ia if sug.cuenta_pago else None))
             return ResultadoSugerencia(
                 cuenta=sug.cuenta_gasto,
                 origen=origen_ia,
                 explicacion=sug.explicacion,
                 confianza=sug.confianza,
+                cuenta_pago=cp_final,
+                cuenta_pago_origen=cp_origen,
             )
     except Exception as exc:
         logger.warning("[IA-DEBUG] excepción: %s", exc, exc_info=True)
 
-    return ResultadoSugerencia(cuenta=None, origen=None)
+    return ResultadoSugerencia(
+        cuenta=None, origen=None,
+        cuenta_pago=cp_anterior,
+        cuenta_pago_origen="aprendizaje" if cp_anterior else None,
+    )
 
 
 # ── Confirmación y aprendizaje ────────────────────────────────────────────────

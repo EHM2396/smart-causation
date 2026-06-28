@@ -52,6 +52,8 @@ class SugerenciaResponse(BaseModel):
     origen: str | None = None        # 'regla' | 'aprendizaje' | 'ia_alta' | 'ia_media' | 'ia_baja' | None
     explicacion_ia: str | None = None
     confianza_ia: float | None = None
+    cuenta_pago_sugerida: str | None = None
+    cuenta_pago_origen: str | None = None  # 'aprendizaje' | 'ia_alta' | 'ia_media' | 'ia_baja' | None
 
 
 # ── Historial de decisiones ───────────────────────────────────────────────────

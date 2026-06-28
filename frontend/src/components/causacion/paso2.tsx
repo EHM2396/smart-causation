@@ -109,16 +109,22 @@ export function Paso2() {
             origen: r.origen,
             explicacion_ia: r.explicacion_ia,
             confianza_ia: r.confianza_ia,
+            cuenta_pago_sugerida: r.cuenta_pago_sugerida,
+            cuenta_pago_origen: r.cuenta_pago_origen,
           }))
-          .catch(() => ({ key, cuenta: null, origen: null, explicacion_ia: null, confianza_ia: null }))
+          .catch(() => ({
+            key, cuenta: null, origen: null, explicacion_ia: null, confianza_ia: null,
+            cuenta_pago_sugerida: null, cuenta_pago_origen: null,
+          }))
       )
     ).then(results => {
       const nuevas: Record<string, Sugerencia> = {};
-      results.forEach(({ key, cuenta, origen, explicacion_ia, confianza_ia }) => {
-        nuevas[key] = { cuenta, origen, explicacion_ia, confianza_ia };
+      results.forEach(({ key, cuenta, origen, explicacion_ia, confianza_ia, cuenta_pago_sugerida, cuenta_pago_origen }) => {
+        nuevas[key] = { cuenta, origen, explicacion_ia, confianza_ia, cuenta_pago_sugerida, cuenta_pago_origen };
       });
-      setSuggestions({ ...suggestions, ...nuevas });
-      // Solo autocompletar con reglas y aprendizaje — la IA es sugerencia, el usuario debe aceptarla
+      const todasSugs = { ...suggestions, ...nuevas };
+      setSuggestions(todasSugs);
+      // Autocompletar cuenta_gasto con reglas y aprendizaje — la IA es sugerencia, el usuario debe aceptarla
       setCuentaGastoItem(prev => {
         const next = { ...prev };
         results.forEach(({ key, cuenta, origen }) => {
@@ -127,10 +133,45 @@ export function Paso2() {
         });
         return next;
       });
+      // Autocompletar cuenta_pago desde aprendizaje (por factura, tomar primer ítem con origen aprendizaje)
+      setCuentaPago(prev => {
+        const next = { ...prev };
+        facturas.forEach((factura, idx) => {
+          if (next[idx]) return; // ya tiene cuenta de pago
+          for (let jdx = 0; jdx < factura.items.length; jdx++) {
+            const r = results.find(x => x.key === `${idx}_${jdx}`);
+            if (r?.cuenta_pago_sugerida && r.cuenta_pago_origen === "aprendizaje") {
+              next[idx] = r.cuenta_pago_sugerida;
+              break;
+            }
+          }
+        });
+        return next;
+      });
       setSugsLoading(false);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [facturas]);
+
+  // Auto-fill cuenta_pago desde aprendizaje cuando suggestions ya estaban cacheadas (re-montaje)
+  useEffect(() => {
+    if (facturas.length === 0 || Object.keys(suggestions).length === 0) return;
+    setCuentaPago(prev => {
+      const next = { ...prev };
+      facturas.forEach((factura, idx) => {
+        if (next[idx]) return;
+        for (let jdx = 0; jdx < factura.items.length; jdx++) {
+          const sug = suggestions[`${idx}_${jdx}`];
+          if (sug?.cuenta_pago_sugerida && sug.cuenta_pago_origen === "aprendizaje") {
+            next[idx] = sug.cuenta_pago_sugerida;
+            break;
+          }
+        }
+      });
+      return next;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suggestions]);
 
   const gastoOpts = cuentaOpts(cuentasGasto);
   const pagoOpts  = cuentaOpts(cuentasPago);
@@ -383,7 +424,19 @@ export function Paso2() {
   const isLast  = selectedIdx === facturas.length - 1;
   const retGlobalActiva = !!(rfGlobal[selectedIdx] || riGlobal[selectedIdx]);
   const cuentaPagoVacia = !cuentaPago[selectedIdx];
-  const cuentaGastoGlobalVacia = !cuentaGastoGlobal[selectedIdx];
+  // No pulsar si todos los ítems ya tienen cuenta asignada por aprendizaje/regla
+  const todosItemsTienenCuenta = factura.items.every((_, jdx) => !!cuentaGastoItem[`${selectedIdx}_${jdx}`]);
+  const cuentaGastoGlobalVacia = !cuentaGastoGlobal[selectedIdx] && !todosItemsTienenCuenta;
+  // Sugerencia IA de cuenta_pago: buscar la primera sugerencia con cuenta_pago de origen IA
+  const esOrigenIA = (o: string | null | undefined) => ["ia_alta", "ia_media", "ia_baja", "ia"].includes(o ?? "");
+  const cuentaPagoIASug = (() => {
+    if (!cuentaPagoVacia || sugsLoading) return null;
+    for (let jdx = 0; jdx < factura.items.length; jdx++) {
+      const sug = suggestions[`${selectedIdx}_${jdx}`];
+      if (sug?.cuenta_pago_sugerida && esOrigenIA(sug.cuenta_pago_origen)) return sug;
+    }
+    return null;
+  })();
 
   return (
     <>
@@ -489,6 +542,30 @@ export function Paso2() {
               Cuenta de pago
               {cuentaPagoVacia && <span className="text-[10px] font-semibold uppercase tracking-wide rounded px-1 py-0.5" style={{ backgroundColor: "rgba(245,158,11,0.15)", color: "rgb(245,158,11)" }}>Requerida</span>}
             </label>
+            {cuentaPagoIASug && (() => {
+              const iaBadge = ORIGEN_BADGE[cuentaPagoIASug.cuenta_pago_origen ?? "ia"] ?? ORIGEN_BADGE.ia;
+              const nombrePago = cuentasPago.find(c => c.codigo === cuentaPagoIASug.cuenta_pago_sugerida)?.nombre ?? cuentaPagoIASug.cuenta_pago_sugerida;
+              return (
+                <div
+                  className="rounded-lg px-3 py-2 space-y-1"
+                  style={{ backgroundColor: "color-mix(in srgb, var(--brand) 6%, transparent)", border: "1px solid color-mix(in srgb, var(--brand) 20%, transparent)" }}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Badge variant={iaBadge.variant}><Sparkles className="mr-0.5 inline h-2.5 w-2.5" /> {iaBadge.label}</Badge>
+                    <span className="text-xs font-medium font-mono" style={{ color: "var(--brand)" }}>{cuentaPagoIASug.cuenta_pago_sugerida}</span>
+                  </div>
+                  <p className="text-xs" style={{ color: "var(--text-secondary)" }}>{(nombrePago ?? "").length > 45 ? (nombrePago ?? "").slice(0, 45) + "…" : (nombrePago ?? "")}</p>
+                  <button
+                    type="button"
+                    onClick={() => setCuentaPago(p => ({ ...p, [selectedIdx]: cuentaPagoIASug.cuenta_pago_sugerida! }))}
+                    className="flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-opacity hover:opacity-80"
+                    style={{ backgroundColor: "var(--brand)", color: "#fff" }}
+                  >
+                    <Sparkles className="h-3 w-3" /> Usar esta cuenta
+                  </button>
+                </div>
+              );
+            })()}
             <div className={cuentaPagoVacia ? "require-pulse rounded-lg" : ""}>
               <Combobox
                 options={pagoOpts}
@@ -631,7 +708,6 @@ export function Paso2() {
                 const impInfo = item.cod_impuesto ? getImpInfo(item.cod_impuesto) : null;
                 const sug = suggestions[key];
                 const currentVal = cuentaGastoGlobal[selectedIdx] || cuentaGastoItem[key];
-                const esOrigenIA = (o: string | null) => o === "ia_alta" || o === "ia_media" || o === "ia_baja" || o === "ia";
                 // Badge solo cuando hay cuenta seleccionada por el usuario (o por regla/aprendizaje)
                 const origenEfectivo = currentVal
                   ? (sug?.cuenta && currentVal === sug.cuenta && !esOrigenIA(sug.origen)
