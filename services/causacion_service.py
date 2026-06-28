@@ -308,55 +308,41 @@ def sugerir_cuentas_batch(
             ia_ok = False
 
         if ia_ok and cuentas_gasto_opts:
-            # Deduplicar (descripcion, tipo_proveedor) para minimizar llamadas a OpenAI
-            unique_combos: dict[tuple, str] = {}
-            for item in sin_aprendizaje:
-                combo = (item["descripcion"], item.get("tipo_proveedor") or "juridica")
-                if combo not in unique_combos:
-                    unique_combos[combo] = item["key"]
-
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-            ai_results: dict[tuple, object] = {}
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                futures = {
-                    executor.submit(
-                        ai_service.sugerir,
-                        descripcion=desc,
-                        cuentas_gasto=cuentas_gasto_opts,
-                        codigos_impuesto=codigos_imp,
-                        tipo_proveedor=tipo_prov,
-                        cuentas_pago=cuentas_pago,
-                    ): (desc, tipo_prov)
-                    for (desc, tipo_prov) in unique_combos
+            # 1 sola llamada a la IA con todos los ítems únicos
+            items_para_batch = [
+                {
+                    "key": item["key"],
+                    "descripcion": item["descripcion"],
+                    "tipo_proveedor": item.get("tipo_proveedor"),
                 }
-                for future in as_completed(futures):
-                    combo = futures[future]
-                    try:
-                        ai_results[combo] = future.result()
-                    except Exception as exc:
-                        logger.warning("[batch-sugerir] IA falló para combo: %s", exc)
-                        ai_results[combo] = None
+                for item in sin_aprendizaje
+            ]
+            ai_results_by_key = ai_service.sugerir_batch(
+                items=items_para_batch,
+                cuentas_gasto=cuentas_gasto_opts,
+                codigos_impuesto=codigos_imp,
+                cuentas_pago=cuentas_pago,
+            )
 
             for item in sin_aprendizaje:
-                combo = (item["descripcion"], item.get("tipo_proveedor") or "juridica")
-                sug = ai_results.get(combo)
+                sug = ai_results_by_key.get(item["key"])
                 nit = item.get("nit")
                 cp = cp_por_nit.get(nit) if nit else None
-                if sug and sug.cuenta_gasto:  # type: ignore[union-attr]
-                    confianza = sug.confianza or 0.0  # type: ignore[union-attr]
+                if sug and sug.cuenta_gasto:
+                    confianza = sug.confianza or 0.0
                     if confianza >= 0.80:
                         origen_ia = "ia_alta"
                     elif confianza >= 0.50:
                         origen_ia = "ia_media"
                     else:
                         origen_ia = "ia_baja"
-                    cp_final = cp or sug.cuenta_pago  # type: ignore[union-attr]
-                    cp_origen = "aprendizaje" if cp else (origen_ia if sug.cuenta_pago else None)  # type: ignore[union-attr]
+                    cp_final = cp or sug.cuenta_pago
+                    cp_origen = "aprendizaje" if cp else (origen_ia if sug.cuenta_pago else None)
                     resultados[item["key"]] = ResultadoSugerencia(
-                        cuenta=sug.cuenta_gasto,  # type: ignore[union-attr]
+                        cuenta=sug.cuenta_gasto,
                         origen=origen_ia,
-                        explicacion=sug.explicacion,  # type: ignore[union-attr]
-                        confianza=sug.confianza,  # type: ignore[union-attr]
+                        explicacion=sug.explicacion,
+                        confianza=sug.confianza,
                         cuenta_pago=cp_final,
                         cuenta_pago_origen=cp_origen,
                     )

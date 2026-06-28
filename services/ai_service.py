@@ -1,26 +1,18 @@
 """
 ai_service.py – Capa de inteligencia artificial para clasificación de ítems.
 
-Modo operación: FASE 2 (preselección por alta confianza)
-  - Con alta confianza: preselecciona cuenta/impuesto directamente en UI.
-  - Con confianza media: muestra sugerencia pero no impone selección.
-  - Si la API key no está disponible o falla, retorna None silenciosamente.
+Modos de operación:
+  - sugerir()       : 1 ítem → 1 llamada (usado por endpoint individual)
+  - sugerir_batch() : N ítems únicos → 1 sola llamada (usado por el batch endpoint)
+                      Reduce el tiempo de ~5-10s a ~1-2s para 86 facturas.
 
-Hardening de Fase 4:
+Hardening:
   1. Sanitización de PII — limpia NITs, teléfonos, emails y montos antes de enviar
   2. Detección de prompt injection — rechaza descripciones con patrones sospechosos
-  3. Rate limiter por sesión — máx. 60 llamadas por sesión de usuario
-  4. Tracking de tokens — acumula uso en session_state para auditoría y costo
-  5. Métricas de sesión — get_estadisticas_sesion() expone stats a la UI
-
-Datos enviados al modelo (minimizados, sin PII):
-  - Descripción del ítem sanitizada (sin NITs, teléfonos, emails ni montos)
-  - Lista de cuentas PUC disponibles (código + nombre)
-  - Lista de códigos de impuesto disponibles (código + tipo + tarifa)
-  - Tipo de proveedor: "juridica" | "natural"  ← sin NIT ni razón social
+  3. Tracking de tokens — acumula uso en session_state para auditoría y costo
 
 Modelo por defecto: gpt-4o-mini
-  - Costo bajo, alta calidad para clasificación contable
+  - Costo bajo, alta calidad para clasificación contable colombiana
   - Respuesta JSON estructurada, temperatura 0 para máximo determinismo
 """
 
@@ -262,6 +254,112 @@ def sugerir(
         return None
 
 
+def sugerir_batch(
+    items: list[dict],
+    cuentas_gasto: list[dict],
+    codigos_impuesto: list[dict],
+    cuentas_pago: list[dict] | None = None,
+    modelo: str = _MODELO_DEFAULT,
+) -> dict[str, "SugerenciaIA | None"]:
+    """
+    Clasifica todos los ítems en UNA SOLA llamada a la IA.
+    Deduplica por (descripcion_sanitizada, tipo_proveedor) antes de enviar.
+    Retorna dict[key → SugerenciaIA | None]. Nunca lanza excepción.
+    """
+    if not esta_disponible() or not items:
+        return {item["key"]: None for item in items}
+
+    # --- Deduplicar por (descripcion_sanitizada, tipo_proveedor) ---
+    combo_to_keys: dict[tuple, list[str]] = {}
+    for item in items:
+        desc = _sanitizar_descripcion(item.get("descripcion") or "")
+        tipo = item.get("tipo_proveedor") or None  # None = desconocido; no asumir "juridica"
+        if not desc:
+            continue
+        if _detectar_inyeccion(desc):
+            logger.warning("sugerir_batch: injection detectado en %r — omitido", desc[:80])
+            continue
+        combo = (desc, tipo)
+        combo_to_keys.setdefault(combo, []).append(item["key"])
+
+    if not combo_to_keys:
+        return {item["key"]: None for item in items}
+
+    combo_list = list(combo_to_keys.keys())
+
+    try:
+        api_key = _get_api_key()
+        client = _OpenAI(api_key=api_key)
+        prompt = _construir_prompt_batch(combo_list, cuentas_gasto, codigos_impuesto, cuentas_pago)
+        max_tok = min(8000, max(512, 90 * len(combo_list)))
+
+        response = client.chat.completions.create(
+            model=modelo,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=max_tok,
+            response_format={"type": "json_object"},
+        )
+
+        if response.usage:
+            _registrar_tokens(response.usage.total_tokens)
+
+        raw = json.loads(response.choices[0].message.content)
+        resultados_raw: list[dict] = raw.get("resultados", [])
+
+    except Exception as exc:
+        logger.warning("ai_service.sugerir_batch falló (ignorado): %s", exc)
+        return {item["key"]: None for item in items}
+
+    # --- Validar códigos ---
+    codigos_gasto_validos = {c["codigo"] for c in cuentas_gasto}
+    codigos_imp_validos   = {str(i["cod"]) for i in codigos_impuesto}
+    codigos_pago_validos  = {c["codigo"] for c in (cuentas_pago or [])}
+
+    sug_por_combo: dict[tuple, SugerenciaIA] = {}
+    for r in resultados_raw:
+        idx = int(r.get("indice", 0)) - 1  # 1-based → 0-based
+        if idx < 0 or idx >= len(combo_list):
+            continue
+        combo = combo_list[idx]
+
+        cuenta_gasto = r.get("cuenta_gasto") or None
+        cod_impuesto = r.get("cod_impuesto") or None
+        cuenta_pago  = (r.get("cuenta_pago") or None) if cuentas_pago else None
+        confianza    = float(r.get("confianza", 0.0))
+        explicacion  = str(r.get("explicacion", ""))[:100]
+
+        if cuenta_gasto and cuenta_gasto not in codigos_gasto_validos:
+            logger.warning("batch: cuenta_gasto inválida %s — descartada", cuenta_gasto)
+            cuenta_gasto = None
+            confianza    = min(confianza, 0.3)
+
+        if cod_impuesto and str(cod_impuesto) not in codigos_imp_validos:
+            cod_impuesto = None
+
+        if cuenta_pago and cuenta_pago not in codigos_pago_validos:
+            cuenta_pago = None
+
+        sug_por_combo[combo] = SugerenciaIA(
+            cuenta_gasto=cuenta_gasto,
+            cod_impuesto=cod_impuesto,
+            cuenta_pago=cuenta_pago,
+            confianza=max(0.0, min(1.0, confianza)),
+            explicacion=explicacion,
+            origen="ia",
+            modelo=modelo,
+        )
+
+    # --- Mapear de vuelta a keys originales ---
+    result: dict[str, SugerenciaIA | None] = {item["key"]: None for item in items}
+    for combo, keys in combo_to_keys.items():
+        sug = sug_por_combo.get(combo)
+        for key in keys:
+            result[key] = sug
+
+    return result
+
+
 # ── Lógica interna ────────────────────────────────────────────────────────────
 
 def _construir_prompt(
@@ -297,7 +395,7 @@ Cuentas de pago/acreedor disponibles (código - nombre):
 de facturas electrónicas DIAN para importar a SIIGO.
 
 Ítem de factura: "{descripcion}"
-Tipo de proveedor: {tipo_proveedor}
+Tipo de proveedor: {tipo_proveedor if tipo_proveedor else "desconocido (puede ser persona natural o empresa)"}
 
 Cuentas PUC de gasto disponibles (código - nombre):
 {cuentas_str}
@@ -382,3 +480,66 @@ def _llamar_openai(
         origen="ia",
         modelo=modelo,
     )
+
+
+def _construir_prompt_batch(
+    combos: list[tuple],
+    cuentas_gasto: list[dict],
+    codigos_impuesto: list[dict],
+    cuentas_pago: list[dict] | None = None,
+) -> str:
+    cuentas_str = "\n".join(
+        f"  {c['codigo']} - {c['nombre']}"
+        for c in cuentas_gasto[:_MAX_CUENTAS_PROMPT]
+    )
+    impuestos_str = "\n".join(
+        f"  {i['cod']} - {i['naturaleza']} {i['porcentaje']}%"
+        for i in codigos_impuesto
+    )
+
+    pago_section = ""
+    cuenta_pago_field = ""
+    if cuentas_pago:
+        pago_str = "\n".join(f"  {c['codigo']} - {c['nombre']}" for c in cuentas_pago[:50])
+        pago_section = f"\nCuentas de pago/acreedor disponibles:\n{pago_str}\n"
+        cuenta_pago_field = '\n      "cuenta_pago": "<código de la lista de pago o null>",'
+
+    items_str = "\n".join(
+        f'{i + 1}. descripcion="{desc}"'
+        + (f', tipo_proveedor="{tipo}"' if tipo else "")
+        for i, (desc, tipo) in enumerate(combos)
+    )
+    n = len(combos)
+
+    return f"""Eres un asistente de contabilidad colombiana especializado en causación de facturas DIAN para SIIGO.
+
+Cuentas PUC de gasto disponibles (código - nombre):
+{cuentas_str}
+
+Códigos de impuesto disponibles (código - tipo - tarifa):
+{impuestos_str}
+{pago_section}
+Clasifica CADA uno de los siguientes {n} ítems de facturas electrónicas DIAN:
+
+{items_str}
+
+Responde ÚNICAMENTE con este JSON exacto con {n} elementos en "resultados":
+{{
+  "resultados": [
+    {{
+      "indice": 1,{cuenta_pago_field}
+      "cuenta_gasto": "<código de 8 dígitos de la lista o null>",
+      "cod_impuesto": "<código de la lista o null>",
+      "confianza": <0.0 a 1.0>,
+      "explicacion": "<razón breve en español, máx 60 chars>"
+    }},
+    ...
+  ]
+}}
+
+Reglas:
+- Incluye exactamente {n} objetos en "resultados", uno por ítem en el mismo orden.
+- Usa SOLO códigos de las listas. Nunca inventes códigos.
+- confianza >= 0.8 solo si estás muy seguro de la clasificación.
+- Si no hay coincidencia clara, usa null y confianza baja.
+- tipo_proveedor "juridica" = persona jurídica/empresa; "natural" = persona natural. Afecta la cuenta_pago sugerida."""
