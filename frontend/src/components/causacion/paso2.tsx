@@ -121,9 +121,13 @@ export function Paso2() {
         map[key] = { cuenta, origen, explicacion_ia, confianza_ia };
       });
       setSuggestions(map);
+      // Solo autocompletar con reglas y aprendizaje — la IA es sugerencia, el usuario debe aceptarla
       setCuentaGastoItem(prev => {
         const next = { ...prev };
-        results.forEach(({ key, cuenta }) => { if (!next[key] && cuenta) next[key] = cuenta; });
+        results.forEach(({ key, cuenta, origen }) => {
+          const esAutoconfiable = origen === "regla" || origen === "aprendizaje";
+          if (!next[key] && cuenta && esAutoconfiable) next[key] = cuenta;
+        });
         return next;
       });
       setSugsLoading(false);
@@ -630,10 +634,17 @@ export function Paso2() {
                 const impInfo = item.cod_impuesto ? getImpInfo(item.cod_impuesto) : null;
                 const sug = suggestions[key];
                 const currentVal = cuentaGastoGlobal[selectedIdx] || cuentaGastoItem[key];
-                const origenEfectivo = sug?.cuenta && currentVal === sug.cuenta
-                  ? (sug.origen ?? "aprendizaje")
-                  : currentVal ? "manual" : null;
+                const esOrigenIA = (o: string | null) => o === "ia_alta" || o === "ia_media" || o === "ia_baja" || o === "ia";
+                // Badge solo cuando hay cuenta seleccionada por el usuario (o por regla/aprendizaje)
+                const origenEfectivo = currentVal
+                  ? (sug?.cuenta && currentVal === sug.cuenta && !esOrigenIA(sug.origen)
+                    ? (sug.origen ?? "aprendizaje")
+                    : "manual")
+                  : null;
                 const badge = origenEfectivo ? (ORIGEN_BADGE[origenEfectivo] ?? ORIGEN_BADGE.manual) : null;
+                // Sugerencia IA pendiente de aceptar (sin cuenta seleccionada aún)
+                const iaSugerencia = !sugsLoading && !currentVal && !cuentaGastoGlobal[selectedIdx]
+                  && sug?.cuenta && esOrigenIA(sug.origen) ? sug : null;
                 const sinSugerencia = !sugsLoading && sug && sug.cuenta === null && !currentVal && !cuentaGastoGlobal[selectedIdx];
                 const sinCatalogo = sug?.origen === "sin_catalogo";
                 const iaNoDisponible = sug?.origen === "ia_no_disponible";
@@ -669,61 +680,70 @@ export function Paso2() {
                       )}
                     </td>
 
-                    {/* Cuenta gasto con badge IA */}
-                    <td className="min-w-[240px] px-4 py-3">
-                      <div className="space-y-1">
-                        {/* Badge de origen */}
-                        {badge && !sugsLoading && (
-                          <div className="flex items-center gap-1.5 flex-wrap">
+                    {/* Cuenta gasto */}
+                    <td className="min-w-[260px] px-4 py-3">
+                      <div className="space-y-1.5">
+                        {/* Cuenta ya seleccionada: badge de origen (regla/aprendizaje/manual) */}
+                        {badge && (
+                          <div className="flex items-center gap-1.5">
                             <Badge variant={badge.variant}>
-                              {(badge.variant === "purple" || badge.variant === "warning" || badge.variant === "success") && (
-                                <Sparkles className="mr-0.5 inline h-2.5 w-2.5" />
-                              )}
+                              {badge.variant === "success" && <Sparkles className="mr-0.5 inline h-2.5 w-2.5" />}
                               {badge.label}
                             </Badge>
-                            {/* Explicación de IA si existe */}
-                            {sug?.explicacion_ia && (
-                              <span
-                                className="text-xs italic leading-tight"
-                                style={{ color: "var(--text-muted)" }}
-                                title={sug.explicacion_ia}
-                              >
-                                {sug.explicacion_ia.length > 50
-                                  ? sug.explicacion_ia.slice(0, 50) + "…"
-                                  : sug.explicacion_ia}
-                              </span>
-                            )}
                           </div>
                         )}
+
+                        {/* Sugerencia IA pendiente: tarjeta con botón para aceptar */}
+                        {iaSugerencia && (() => {
+                          const iaBadge = ORIGEN_BADGE[iaSugerencia.origen ?? "ia"] ?? ORIGEN_BADGE.ia;
+                          const nombreCuenta = cuentasGasto.find(c => c.codigo === iaSugerencia.cuenta)?.nombre ?? iaSugerencia.cuenta;
+                          return (
+                            <div
+                              className="rounded-lg px-3 py-2 space-y-1.5"
+                              style={{ backgroundColor: "color-mix(in srgb, var(--brand) 6%, transparent)", border: "1px solid color-mix(in srgb, var(--brand) 20%, transparent)" }}
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <Badge variant={iaBadge.variant}>
+                                  <Sparkles className="mr-0.5 inline h-2.5 w-2.5" /> {iaBadge.label}
+                                </Badge>
+                                <span className="text-xs font-medium font-mono" style={{ color: "var(--brand)" }}>{iaSugerencia.cuenta}</span>
+                              </div>
+                              <p className="text-xs" style={{ color: "var(--text-secondary)" }} title={nombreCuenta ?? ""}>{(nombreCuenta ?? "").length > 40 ? (nombreCuenta ?? "").slice(0, 40) + "…" : (nombreCuenta ?? "")}</p>
+                              {iaSugerencia.explicacion_ia && (
+                                <p className="text-xs italic" style={{ color: "var(--text-muted)" }}>{iaSugerencia.explicacion_ia.length > 60 ? iaSugerencia.explicacion_ia.slice(0, 60) + "…" : iaSugerencia.explicacion_ia}</p>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setCuentaGastoItem(p => ({ ...p, [key]: iaSugerencia.cuenta! }))}
+                                className="flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-opacity hover:opacity-80"
+                                style={{ backgroundColor: "var(--brand)", color: "#fff" }}
+                              >
+                                <Sparkles className="h-3 w-3" /> Usar esta cuenta
+                              </button>
+                            </div>
+                          );
+                        })()}
+
                         <Combobox
                           options={gastoOpts}
                           value={currentVal ?? ""}
                           onChange={(v) => setCuentaGastoItem((p) => ({ ...p, [key]: v }))}
                           disabled={!!cuentaGastoGlobal[selectedIdx]}
-                          placeholder={cuentaGastoGlobal[selectedIdx] ? "← Usando cuenta global" : "Buscar cuenta…"}
+                          placeholder={cuentaGastoGlobal[selectedIdx] ? "← Usando cuenta global" : iaSugerencia ? "Acepta sugerencia o busca otra…" : "Buscar cuenta…"}
                         />
-                        {/* Avisos según motivo */}
+
+                        {/* Avisos */}
                         {sinCatalogo && (
-                          <div
-                            className="flex items-start gap-1.5 rounded px-2 py-1.5"
-                            style={{ backgroundColor: "var(--warning-bg)", border: "1px solid var(--warning-border)" }}
-                          >
+                          <div className="flex items-start gap-1.5 rounded px-2 py-1.5" style={{ backgroundColor: "var(--warning-bg)", border: "1px solid var(--warning-border)" }}>
                             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" style={{ color: "var(--warning-text)" }} />
-                            <p className="text-xs leading-snug" style={{ color: "var(--warning-text)" }}>
-                              Carga tu catálogo PUC para activar sugerencias IA.
-                            </p>
+                            <p className="text-xs leading-snug" style={{ color: "var(--warning-text)" }}>Carga tu catálogo PUC para activar sugerencias IA.</p>
                           </div>
                         )}
                         {!sinCatalogo && sinSugerencia && (
-                          <div
-                            className="flex items-start gap-1.5 rounded px-2 py-1.5"
-                            style={{ backgroundColor: "var(--warning-bg)", border: "1px solid var(--warning-border)" }}
-                          >
+                          <div className="flex items-start gap-1.5 rounded px-2 py-1.5" style={{ backgroundColor: "var(--warning-bg)", border: "1px solid var(--warning-border)" }}>
                             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" style={{ color: "var(--warning-text)" }} />
                             <p className="text-xs leading-snug" style={{ color: "var(--warning-text)" }}>
-                              {iaNoDisponible
-                                ? "IA no configurada — selecciona manualmente."
-                                : "Sin mapeo previo — selecciona manualmente."}
+                              {iaNoDisponible ? "IA no configurada — selecciona manualmente." : "Sin mapeo previo — selecciona manualmente."}
                             </p>
                           </div>
                         )}
