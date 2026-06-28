@@ -2,7 +2,7 @@
 import { useWizardStore } from "@/stores/wizard";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { AlertTriangle, History, RotateCcw, ChevronDown, Settings2 } from "lucide-react";
+import { AlertTriangle, History, ChevronDown, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { fmt } from "@/lib/utils";
@@ -10,7 +10,7 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 export function ConfigPanel() {
-  const { tipoComp, setTipoComp, centroCosto, setCentroCosto, reset } = useWizardStore();
+  const { tipoComp, setTipoComp, centroCosto, setCentroCosto } = useWizardStore();
   const [histOpen, setHistOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [consecutivoManual, setConsecutivoManual] = useState(0);
@@ -132,12 +132,6 @@ export function ConfigPanel() {
         )}
       </div>
 
-      {/* Reset */}
-      <div style={{ borderTop: "1px solid var(--sidebar-border)", paddingTop: "1rem" }}>
-        <Button variant="ghost" size="sm" onClick={reset} className="w-full" style={{ color: "var(--sidebar-label)" }}>
-          <RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Reiniciar sesión
-        </Button>
-      </div>
     </>
   );
 
