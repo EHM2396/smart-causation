@@ -41,7 +41,6 @@ class CuentaOpcion(BaseModel):
     codigo: str
     nombre: str
     label: str
-    clase: int | None = None  # 1=Activo (Caja/Bancos), 2=Pasivo (Proveedores/CxP)
 
 
 # ── Códigos de Impuesto ───────────────────────────────────────────────────────

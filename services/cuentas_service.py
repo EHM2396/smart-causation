@@ -120,12 +120,7 @@ def listar_metodos_pago(db: Session, empresa_id: int | None = None) -> list[dict
 
     rows = db.scalars(stmt).all()
     return [
-        {
-            "codigo": r.codigo,
-            "nombre": r.nombre,
-            "label": f"{r.codigo} – {r.nombre}",
-            "clase": r.clase,  # 1=Activo (Caja/Bancos), 2=Pasivo (Proveedores/CxP)
-        }
+        {"codigo": r.codigo, "nombre": r.nombre, "label": f"{r.codigo} – {r.nombre}"}
         for r in rows
     ]
 

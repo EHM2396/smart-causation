@@ -73,7 +73,6 @@ export function Paso2() {
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
 
   const [cuentaPago, setCuentaPago] = useState<Record<number, string>>({});
-  const [pagoTipo, setPagoTipo] = useState<Record<number, "credito" | "contado">>({});
   const [tipoProveedor, setTipoProveedor] = useState<Record<number, string>>({});
   const [nitEdit, setNitEdit] = useState<Record<number, string>>({});
   const [cuentaGastoGlobal, setCuentaGastoGlobal] = useState<Record<number, string>>({});
@@ -657,35 +656,6 @@ export function Paso2() {
               Cuenta de pago
               {cuentaPagoVacia && <span className="text-[10px] font-semibold uppercase tracking-wide rounded px-1 py-0.5" style={{ backgroundColor: "rgba(245,158,11,0.15)", color: "rgb(245,158,11)" }}>Requerida</span>}
             </label>
-            {/* Selector de tipo de pago */}
-            {!isVerificada && (
-              <div className="flex gap-1.5">
-                {([
-                  { tipo: "credito" as const, label: "A crédito", sub: "Proveedores / CxP" },
-                  { tipo: "contado" as const, label: "Contado",   sub: "Caja / Bancos" },
-                ] as const).map(({ tipo, label, sub }) => {
-                  const active = (pagoTipo[selectedIdx] ?? "credito") === tipo;
-                  return (
-                    <button
-                      key={tipo}
-                      type="button"
-                      onClick={() => {
-                        setPagoTipo(p => ({ ...p, [selectedIdx]: tipo }));
-                        setCuentaPago(p => ({ ...p, [selectedIdx]: "" }));
-                      }}
-                      className="flex flex-col items-start rounded-lg px-2.5 py-1.5 transition-all text-left"
-                      style={{
-                        backgroundColor: active ? "var(--brand)" : "var(--bg-elevated)",
-                        border: `1px solid ${active ? "var(--brand)" : "var(--border-soft)"}`,
-                      }}
-                    >
-                      <span className="text-[11px] font-semibold" style={{ color: active ? "#fff" : "var(--text-primary)" }}>{label}</span>
-                      <span className="text-[10px]" style={{ color: active ? "rgba(255,255,255,0.75)" : "var(--text-muted)" }}>{sub}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
             {cuentaPagoIASug && (() => {
               const iaBadge = ORIGEN_BADGE[cuentaPagoIASug.cuenta_pago_origen ?? "ia"] ?? ORIGEN_BADGE.ia;
               const nombrePago = cuentasPago.find(c => c.codigo === cuentaPagoIASug.cuenta_pago_sugerida)?.nombre ?? cuentaPagoIASug.cuenta_pago_sugerida;
@@ -711,23 +681,15 @@ export function Paso2() {
                 </div>
               );
             })()}
-            {(() => {
-              const esContado = (pagoTipo[selectedIdx] ?? "credito") === "contado";
-              const pagoOptsFiltradas = cuentaOpts(
-                cuentasPago.filter(c => esContado ? c.clase === 1 : c.clase === 2)
-              );
-              return (
-                <div className={cuentaPagoVacia ? "require-pulse rounded-lg" : ""}>
-                  <Combobox
-                    options={pagoOptsFiltradas}
-                    value={cuentaPago[selectedIdx] ?? ""}
-                    onChange={(v) => setCuentaPago((p) => ({ ...p, [selectedIdx]: v }))}
-                    placeholder={esContado ? "Buscar caja o banco…" : "Buscar proveedor o CxP…"}
-                    disabled={isVerificada}
-                  />
-                </div>
-              );
-            })()}
+            <div className={cuentaPagoVacia ? "require-pulse rounded-lg" : ""}>
+              <Combobox
+                options={pagoOpts}
+                value={cuentaPago[selectedIdx] ?? ""}
+                onChange={(v) => setCuentaPago((p) => ({ ...p, [selectedIdx]: v }))}
+                placeholder="Buscar cuenta de pago…"
+                disabled={isVerificada}
+              />
+            </div>
           </div>
         </div>
       </div>
