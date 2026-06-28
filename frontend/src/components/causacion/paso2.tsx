@@ -110,7 +110,6 @@ export function Paso2() {
   useEffect(() => {
     if (facturas.length === 0) return;
 
-    // Solo pedir sugerencias para ítems que aún no tienen una en el store
     const allItems = facturas.flatMap((f, idx) =>
       f.items.map((item, jdx) => ({
         key: `${idx}_${jdx}`,
@@ -119,8 +118,42 @@ export function Paso2() {
         tipo_proveedor: f.tipo_proveedor ?? "juridica",
       }))
     );
+
+    // Aplica auto-fill solo sobre ítems del lote actual para evitar contaminación con claves de cargas anteriores
+    const autoFill = (sugs: Record<string, Sugerencia>) => {
+      setCuentaGastoItem(prev => {
+        const next = { ...prev };
+        allItems.forEach(({ key }) => {
+          const sug = sugs[key];
+          if (!sug) return;
+          const esAutoconfiable = sug.origen === "regla" || sug.origen === "aprendizaje";
+          if (!next[key] && sug.cuenta && esAutoconfiable) next[key] = sug.cuenta;
+        });
+        return next;
+      });
+      setCuentaPago(prev => {
+        const next = { ...prev };
+        facturas.forEach((factura, idx) => {
+          if (next[idx]) return;
+          for (let jdx = 0; jdx < factura.items.length; jdx++) {
+            const sug = sugs[`${idx}_${jdx}`];
+            if (sug?.cuenta_pago_sugerida && sug.cuenta_pago_origen === "aprendizaje") {
+              next[idx] = sug.cuenta_pago_sugerida;
+              break;
+            }
+          }
+        });
+        return next;
+      });
+    };
+
     const pendientes = allItems.filter(({ key }) => !(key in suggestions));
-    if (pendientes.length === 0) return; // Todo ya está cacheado en el store
+
+    if (pendientes.length === 0) {
+      // Todo cacheado (re-montaje): reaplicar auto-fill desde el store para restaurar estado local
+      autoFill(suggestions);
+      return;
+    }
 
     setSugsLoading(true);
     api.sugerirCuentasBatch(pendientes)
@@ -136,35 +169,13 @@ export function Paso2() {
             cuenta_pago_origen: r.cuenta_pago_origen,
           };
         });
-        setSuggestions({ ...suggestions, ...nuevas });
-        // Autocompletar cuenta_gasto para regla/aprendizaje — IA es sugerencia, usuario debe aceptarla
-        setCuentaGastoItem(prev => {
-          const next = { ...prev };
-          Object.entries(nuevas).forEach(([key, sug]) => {
-            const esAutoconfiable = sug.origen === "regla" || sug.origen === "aprendizaje";
-            if (!next[key] && sug.cuenta && esAutoconfiable) next[key] = sug.cuenta;
-          });
-          return next;
-        });
-        // Autocompletar cuenta_pago desde aprendizaje (primer ítem con origen aprendizaje por factura)
-        setCuentaPago(prev => {
-          const next = { ...prev };
-          facturas.forEach((factura, idx) => {
-            if (next[idx]) return;
-            for (let jdx = 0; jdx < factura.items.length; jdx++) {
-              const sug = nuevas[`${idx}_${jdx}`];
-              if (sug?.cuenta_pago_sugerida && sug.cuenta_pago_origen === "aprendizaje") {
-                next[idx] = sug.cuenta_pago_sugerida;
-                break;
-              }
-            }
-          });
-          return next;
-        });
+        // Actualizar store y auto-fill en el mismo lote para evitar renders intermedios inconsistentes
+        const todasSugs = { ...suggestions, ...nuevas };
+        setSuggestions(todasSugs);
+        autoFill(todasSugs); // usa el conjunto completo para que ítems cacheados también se restauren
         setSugsLoading(false);
       })
       .catch(() => {
-        // En caso de fallo del batch: marcar todos como sin sugerencia para no reintentar
         const fallback: Record<string, Sugerencia> = {};
         pendientes.forEach(({ key }) => {
           fallback[key] = { cuenta: null, origen: null, explicacion_ia: null, confianza_ia: null, cuenta_pago_sugerida: null, cuenta_pago_origen: null };
@@ -174,26 +185,6 @@ export function Paso2() {
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [facturas]);
-
-  // Auto-fill cuenta_pago desde aprendizaje cuando suggestions ya estaban cacheadas (re-montaje)
-  useEffect(() => {
-    if (facturas.length === 0 || Object.keys(suggestions).length === 0) return;
-    setCuentaPago(prev => {
-      const next = { ...prev };
-      facturas.forEach((factura, idx) => {
-        if (next[idx]) return;
-        for (let jdx = 0; jdx < factura.items.length; jdx++) {
-          const sug = suggestions[`${idx}_${jdx}`];
-          if (sug?.cuenta_pago_sugerida && sug.cuenta_pago_origen === "aprendizaje") {
-            next[idx] = sug.cuenta_pago_sugerida;
-            break;
-          }
-        }
-      });
-      return next;
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [suggestions]);
 
   const gastoOpts = cuentaOpts(cuentasGasto);
   const pagoOpts  = cuentaOpts(cuentasPago);
