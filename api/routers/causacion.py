@@ -55,17 +55,22 @@ async def parsear_facturas(
 def sugerir_cuenta(body: SugerenciaRequest, db: DB, empresa: EmpresaActiva, current_user: CurrentUser):
     """
     Dado un NIT y una descripción de ítem, sugiere la cuenta de gasto PUC.
-    Consulta reglas de clasificación y mapeos aprendidos del usuario+empresa.
+    Prioridad: reglas → aprendizaje → IA (OpenAI fallback).
     """
-    cuenta = causacion_service.sugerir_cuenta_gasto(
-        db, nit=body.nit, descripcion=body.descripcion, empresa_id=empresa.id, usuario_id=current_user.id
+    resultado = causacion_service.sugerir_cuenta_gasto(
+        db,
+        nit=body.nit,
+        descripcion=body.descripcion,
+        empresa_id=empresa.id,
+        usuario_id=current_user.id,
+        tipo_proveedor=body.tipo_proveedor,
     )
-    origen = None
-    if cuenta:
-        from services.aprendizaje_service import aplicar_reglas
-        origen = "regla" if aplicar_reglas(db, body.descripcion) else "aprendizaje"
-
-    return SugerenciaResponse(cuenta_sugerida=cuenta, origen=origen)
+    return SugerenciaResponse(
+        cuenta_sugerida=resultado.cuenta,
+        origen=resultado.origen,
+        explicacion_ia=resultado.explicacion,
+        confianza_ia=resultado.confianza,
+    )
 
 
 @router.post("/generar", response_model=CausacionResponse)

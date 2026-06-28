@@ -27,13 +27,21 @@ function impOpts(imps: ImpuestoOut[], tipos?: string[]) {
 }
 
 const ORIGEN_BADGE: Record<string, { label: string; variant: "success" | "info" | "purple" | "warning" | "default" }> = {
-  aprendizaje: { label: "Aprendido", variant: "success" },
-  regla:       { label: "Regla",     variant: "info" },
-  ia:          { label: "IA",        variant: "purple" },
-  manual:      { label: "Manual",    variant: "default" },
+  aprendizaje: { label: "Aprendido",      variant: "success" },
+  regla:       { label: "Regla",          variant: "info" },
+  ia_alta:     { label: "IA · Alta",      variant: "purple" },
+  ia_media:    { label: "IA · Media",     variant: "warning" },
+  ia_baja:     { label: "IA · Baja",      variant: "default" },
+  ia:          { label: "IA",             variant: "purple" },
+  manual:      { label: "Manual",         variant: "default" },
 };
 
-type Sugerencia = { cuenta: string | null; origen: string | null };
+type Sugerencia = {
+  cuenta: string | null;
+  origen: string | null;
+  explicacion_ia: string | null;
+  confianza_ia: number | null;
+};
 
 function origenToFuente(origen: string | null): FuenteMapeo {
   if (origen === "aprendizaje") return "aprendido";
@@ -87,17 +95,30 @@ export function Paso2() {
     if (facturas.length === 0) return;
     setSugsLoading(true);
     const items = facturas.flatMap((f, idx) =>
-      f.items.map((item, jdx) => ({ key: `${idx}_${jdx}`, nit: f.nit, descripcion: item.descripcion }))
+      f.items.map((item, jdx) => ({
+        key: `${idx}_${jdx}`,
+        nit: f.nit,
+        descripcion: item.descripcion,
+        tipo_proveedor: f.tipo_proveedor ?? "juridica",
+      }))
     );
     Promise.all(
-      items.map(({ key, nit, descripcion }) =>
-        api.sugerirCuenta(nit, descripcion)
-          .then(r => ({ key, cuenta: r.cuenta_sugerida, origen: r.origen }))
-          .catch(() => ({ key, cuenta: null, origen: null }))
+      items.map(({ key, nit, descripcion, tipo_proveedor }) =>
+        api.sugerirCuenta(nit, descripcion, tipo_proveedor)
+          .then(r => ({
+            key,
+            cuenta: r.cuenta_sugerida,
+            origen: r.origen,
+            explicacion_ia: r.explicacion_ia,
+            confianza_ia: r.confianza_ia,
+          }))
+          .catch(() => ({ key, cuenta: null, origen: null, explicacion_ia: null, confianza_ia: null }))
       )
     ).then(results => {
       const map: Record<string, Sugerencia> = {};
-      results.forEach(({ key, cuenta, origen }) => { map[key] = { cuenta, origen }; });
+      results.forEach(({ key, cuenta, origen, explicacion_ia, confianza_ia }) => {
+        map[key] = { cuenta, origen, explicacion_ia, confianza_ia };
+      });
       setSuggestions(map);
       setCuentaGastoItem(prev => {
         const next = { ...prev };
@@ -600,15 +621,30 @@ export function Paso2() {
                     </td>
 
                     {/* Cuenta gasto con badge IA */}
-                    <td className="min-w-[220px] px-4 py-3">
+                    <td className="min-w-[240px] px-4 py-3">
                       <div className="space-y-1">
+                        {/* Badge de origen */}
                         {badge && !sugsLoading && (
-                          <Badge variant={badge.variant}>
-                            {(badge.variant === "purple" || badge.variant === "success") && (
-                              <Sparkles className="mr-0.5 inline h-2.5 w-2.5" />
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <Badge variant={badge.variant}>
+                              {(badge.variant === "purple" || badge.variant === "warning" || badge.variant === "success") && (
+                                <Sparkles className="mr-0.5 inline h-2.5 w-2.5" />
+                              )}
+                              {badge.label}
+                            </Badge>
+                            {/* Explicación de IA si existe */}
+                            {sug?.explicacion_ia && (
+                              <span
+                                className="text-xs italic leading-tight"
+                                style={{ color: "var(--text-muted)" }}
+                                title={sug.explicacion_ia}
+                              >
+                                {sug.explicacion_ia.length > 50
+                                  ? sug.explicacion_ia.slice(0, 50) + "…"
+                                  : sug.explicacion_ia}
+                              </span>
                             )}
-                            {badge.label}
-                          </Badge>
+                          </div>
                         )}
                         <Combobox
                           options={gastoOpts}
@@ -617,6 +653,7 @@ export function Paso2() {
                           disabled={!!cuentaGastoGlobal[selectedIdx]}
                           placeholder={cuentaGastoGlobal[selectedIdx] ? "← Usando cuenta global" : "Buscar cuenta…"}
                         />
+                        {/* Solo muestra aviso si IA tampoco encontró nada */}
                         {sinSugerencia && (
                           <div
                             className="flex items-start gap-1.5 rounded px-2 py-1.5"
@@ -624,7 +661,7 @@ export function Paso2() {
                           >
                             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" style={{ color: "var(--warning-text)" }} />
                             <p className="text-xs leading-snug" style={{ color: "var(--warning-text)" }}>
-                              Sin mapeo previo — selecciona la cuenta manualmente.
+                              Sin mapeo previo ni sugerencia IA — selecciona manualmente.
                             </p>
                           </div>
                         )}

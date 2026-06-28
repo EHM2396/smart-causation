@@ -180,10 +180,15 @@ export const api = {
   },
 
   // Sugerencia de cuenta
-  sugerirCuenta: (nit: string | null, descripcion: string) =>
-    req<{ cuenta_sugerida: string | null; origen: string | null }>(
+  sugerirCuenta: (nit: string | null, descripcion: string, tipo_proveedor = "juridica") =>
+    req<{
+      cuenta_sugerida: string | null;
+      origen: string | null;
+      explicacion_ia: string | null;
+      confianza_ia: number | null;
+    }>(
       "/causacion/sugerir-cuenta",
-      { method: "POST", body: JSON.stringify({ nit, descripcion }) }
+      { method: "POST", body: JSON.stringify({ nit, descripcion, tipo_proveedor }) }
     ),
 
   // Validación batch

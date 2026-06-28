@@ -44,11 +44,14 @@ class CausacionResponse(BaseModel):
 class SugerenciaRequest(BaseModel):
     nit: str | None = None
     descripcion: str
+    tipo_proveedor: str = "juridica"
 
 
 class SugerenciaResponse(BaseModel):
     cuenta_sugerida: str | None
-    origen: str | None = None    # 'regla' | 'aprendizaje' | None
+    origen: str | None = None        # 'regla' | 'aprendizaje' | 'ia_alta' | 'ia_media' | 'ia_baja' | None
+    explicacion_ia: str | None = None
+    confianza_ia: float | None = None
 
 
 # ── Historial de decisiones ───────────────────────────────────────────────────

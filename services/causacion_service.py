@@ -45,6 +45,16 @@ def parsear_archivo(contenido: bytes, nombre_archivo: str = "") -> list[dict]:
 
 # ── Sugerencia de cuentas ─────────────────────────────────────────────────────
 
+from dataclasses import dataclass as _dataclass
+
+@_dataclass
+class ResultadoSugerencia:
+    cuenta: str | None
+    origen: str | None
+    explicacion: str | None = None
+    confianza: float | None = None
+
+
 def sugerir_cuenta_gasto(
     db: Session,
     *,
@@ -52,22 +62,53 @@ def sugerir_cuenta_gasto(
     descripcion: str,
     empresa_id: int | None = None,
     usuario_id: int | None = None,
-) -> str | None:
+    tipo_proveedor: str = "juridica",
+) -> ResultadoSugerencia:
     """
     Intenta encontrar la mejor cuenta de gasto para un ítem de factura.
     Orden de prioridad:
       1. Reglas de clasificación activas (mayor prioridad + tipo)
       2. Mapeos aprendidos previos (NIT + keyword)
-      3. None → el usuario debe seleccionarla manualmente
+      3. IA (OpenAI) — fallback cuando no hay regla ni mapeo aprendido
     """
     # 1. Reglas de clasificación
     cuenta = aprendizaje_service.aplicar_reglas(db, descripcion)
     if cuenta:
-        return cuenta
+        return ResultadoSugerencia(cuenta=cuenta, origen="regla")
 
     # 2. Mapeo aprendido
     cuenta = aprendizaje_service.obtener_mapeo(db, nit, descripcion, empresa_id=empresa_id, usuario_id=usuario_id)
-    return cuenta
+    if cuenta:
+        return ResultadoSugerencia(cuenta=cuenta, origen="aprendizaje")
+
+    # 3. IA — fallback cuando no hay datos aprendidos
+    try:
+        from services import ai_service
+        cuentas_gasto_list = cuentas_service.listar_cuentas_gasto(db, empresa_id=empresa_id)
+        codigos_imp        = impuestos_service.listar_como_dict(db, empresa_id=empresa_id)
+        sug = ai_service.sugerir(
+            descripcion=descripcion,
+            cuentas_gasto=[{"codigo": c["codigo"], "nombre": c["nombre"]} for c in cuentas_gasto_list],
+            codigos_impuesto=codigos_imp,
+            tipo_proveedor=tipo_proveedor,
+        )
+        if sug and sug.cuenta_gasto:
+            if sug.confianza >= 0.80:
+                origen_ia = "ia_alta"
+            elif sug.confianza >= 0.50:
+                origen_ia = "ia_media"
+            else:
+                origen_ia = "ia_baja"
+            return ResultadoSugerencia(
+                cuenta=sug.cuenta_gasto,
+                origen=origen_ia,
+                explicacion=sug.explicacion,
+                confianza=sug.confianza,
+            )
+    except Exception:
+        pass  # IA falla silenciosamente — nunca bloquea el flujo
+
+    return ResultadoSugerencia(cuenta=None, origen=None)
 
 
 # ── Confirmación y aprendizaje ────────────────────────────────────────────────
