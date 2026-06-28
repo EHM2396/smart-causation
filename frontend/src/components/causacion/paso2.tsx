@@ -7,10 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { Badge } from "@/components/ui/badge";
 import { NuevoImpuestoDialog } from "@/components/causacion/nuevo-impuesto-dialog";
+import { CausadasModal } from "@/components/causacion/causadas-modal";
 import { fmt } from "@/lib/utils";
 import {
   AlertTriangle, Plus, Sparkles, Loader2,
-  ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search,
+  ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search, History,
 } from "lucide-react";
 import type { MapeoItem, CuentaOpcion, ImpuestoOut, FuenteMapeo, Sugerencia } from "@/lib/types";
 
@@ -61,7 +62,8 @@ function DataField({ label, value, mono = false }: { label: string; value: strin
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function Paso2() {
-  const { facturas, tipoComp, setPaso, setMapeos, suggestions, setSuggestions } = useWizardStore();
+  const { facturas, facturasYaCausadas, tipoComp, setPaso, setMapeos, suggestions, setSuggestions } = useWizardStore();
+  const [modalCausadasOpen, setModalCausadasOpen] = useState(false);
 
   const { data: cuentasGasto = [] } = useQuery({ queryKey: ["cuentas-gasto"], queryFn: api.getCuentasGasto });
   const { data: cuentasPago = [] } = useQuery({ queryKey: ["cuentas-pago"], queryFn: api.getCuentasPago });
@@ -292,6 +294,7 @@ export function Paso2() {
     const listos = facturas.filter((_, i) => estaCompleta(i)).length;
 
     return (
+      <>
       <div className="space-y-5">
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
@@ -309,7 +312,17 @@ export function Paso2() {
               )}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            {facturasYaCausadas.length > 0 && (
+              <button
+                onClick={() => setModalCausadasOpen(true)}
+                className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-80"
+                style={{ borderColor: "color-mix(in srgb, var(--success) 40%, transparent)", color: "var(--success)", backgroundColor: "color-mix(in srgb, var(--success) 8%, transparent)" }}
+              >
+                <History className="h-3.5 w-3.5" />
+                Ya causadas ({facturasYaCausadas.length})
+              </button>
+            )}
             <Button variant="outline" size="sm" onClick={() => setPaso(1)}>← Volver</Button>
             <Button size="sm" onClick={handleValidar}>Validar partida doble →</Button>
           </div>
@@ -480,6 +493,15 @@ export function Paso2() {
           </table>
         </div>
       </div>
+
+      {/* Modal facturas ya causadas */}
+      {modalCausadasOpen && (
+        <CausadasModal
+          facturas={facturasYaCausadas}
+          onClose={() => setModalCausadasOpen(false)}
+        />
+      )}
+      </>
     );
   }
 

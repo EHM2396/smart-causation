@@ -3,6 +3,7 @@ import { create } from "zustand";
 import type {
   BatchValidacionResponse,
   Factura,
+  FacturaCausadaInfo,
   MapeoItem,
   PasoWizard,
   Sugerencia,
@@ -13,6 +14,7 @@ interface WizardState {
   tipoComp: string;
   centroCosto: string;
   facturas: Factura[];
+  facturasYaCausadas: FacturaCausadaInfo[];
   mapeos: MapeoItem[];
   reporte: BatchValidacionResponse | null;
   xlsxBlob: Blob | null;
@@ -22,6 +24,7 @@ interface WizardState {
   setTipoComp: (t: string) => void;
   setCentroCosto: (c: string) => void;
   setFacturas: (f: Factura[]) => void;
+  setFacturasYaCausadas: (f: FacturaCausadaInfo[]) => void;
   setMapeos: (m: MapeoItem[]) => void;
   setReporte: (r: BatchValidacionResponse) => void;
   setXlsxBlob: (b: Blob) => void;
@@ -34,6 +37,7 @@ const initial = {
   tipoComp: "",
   centroCosto: "",
   facturas: [],
+  facturasYaCausadas: [],
   mapeos: [],
   reporte: null,
   xlsxBlob: null,
@@ -46,6 +50,7 @@ export const useWizardStore = create<WizardState>((set) => ({
   setTipoComp: (tipoComp) => set({ tipoComp }),
   setCentroCosto: (centroCosto) => set({ centroCosto }),
   setFacturas: (facturas) => set({ facturas }),
+  setFacturasYaCausadas: (facturasYaCausadas) => set({ facturasYaCausadas }),
   setMapeos: (mapeos) => set({ mapeos }),
   setReporte: (reporte) => set({ reporte }),
   setXlsxBlob: (xlsxBlob) => set({ xlsxBlob }),

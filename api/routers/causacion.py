@@ -22,6 +22,9 @@ from api.schemas import (
     SugerenciaResponse,
     SugerenciaBatchRequest,
     SugerenciaBatchResponse,
+    FacturaCausadaInfo,
+    VerificarCausadasRequest,
+    VerificarCausadasResponse,
 )
 from db.models.auth import Empresa, Usuario
 from db.models.contabilidad import FacturaCausada
@@ -51,6 +54,34 @@ async def parsear_facturas(
     except Exception as exc:
         raise HTTPException(400, f"Error al parsear el archivo: {exc}") from exc
     return facturas
+
+
+@router.post("/verificar-causadas", response_model=VerificarCausadasResponse)
+def verificar_causadas(body: VerificarCausadasRequest, db: DB, empresa: EmpresaActiva):
+    """Recibe lista de numero_dian y devuelve datos completos de las ya causadas para esta empresa."""
+    stmt = (
+        select(FacturaCausada)
+        .where(
+            FacturaCausada.numero_dian.in_(body.numeros_dian),
+            FacturaCausada.empresa_id == empresa.id,
+        )
+    )
+    rows = db.scalars(stmt).all()
+    ya_causadas = [
+        FacturaCausadaInfo(
+            numero_dian=row.numero_dian,
+            nit_proveedor=row.nit_proveedor,
+            razon_social=row.razon_social,
+            fecha_factura=str(row.fecha_factura) if row.fecha_factura else None,
+            total=row.total,
+            consecutivo=row.consecutivo,
+            tipo_comprobante=row.tipo_comprobante,
+            fecha_causacion=str(row.fecha_causacion) if row.fecha_causacion else None,
+            datos_json=row.datos_json,
+        )
+        for row in rows
+    ]
+    return VerificarCausadasResponse(ya_causadas=ya_causadas)
 
 
 @router.post("/sugerir-cuenta", response_model=SugerenciaResponse)

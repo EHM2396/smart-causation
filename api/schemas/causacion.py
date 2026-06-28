@@ -71,6 +71,26 @@ class SugerenciaBatchResponse(BaseModel):
     resultados: dict[str, SugerenciaResponse]
 
 
+class FacturaCausadaInfo(BaseModel):
+    numero_dian: str
+    nit_proveedor: str | None = None
+    razon_social: str | None = None
+    fecha_factura: str | None = None
+    total: float | None = None
+    consecutivo: str | None = None
+    tipo_comprobante: str | None = None
+    fecha_causacion: str | None = None
+    datos_json: str | None = None  # JSON: {factura, mapeos, tipo_comprobante, centro_costo}
+
+
+class VerificarCausadasRequest(BaseModel):
+    numeros_dian: list[str]
+
+
+class VerificarCausadasResponse(BaseModel):
+    ya_causadas: list[FacturaCausadaInfo]
+
+
 # ── Historial de decisiones ───────────────────────────────────────────────────
 
 class DecisionOut(BaseModel):

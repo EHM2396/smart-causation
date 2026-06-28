@@ -41,6 +41,20 @@ export interface ConsecutivoOut {
   proximo: number;
 }
 
+// ─── Factura ya causada (historial) ──────────────────────────────────────────
+
+export interface FacturaCausadaInfo {
+  numero_dian: string;
+  nit_proveedor: string | null;
+  razon_social: string | null;
+  fecha_factura: string | null;
+  total: number | null;
+  consecutivo: string | null;
+  tipo_comprobante: string | null;
+  fecha_causacion: string | null;
+  datos_json: string | null;
+}
+
 // ─── Facturas / Parseo ────────────────────────────────────────────────────────
 
 export interface ItemFactura {

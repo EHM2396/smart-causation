@@ -7,5 +7,6 @@ from api.schemas.causacion import (     # noqa: F401
     MapeoItem, CausacionRequest, CausacionResponse,
     SugerenciaRequest, SugerenciaResponse,
     SugerenciaBatchItem, SugerenciaBatchRequest, SugerenciaBatchResponse,
+    FacturaCausadaInfo, VerificarCausadasRequest, VerificarCausadasResponse,
     DecisionOut, ReglaCreate, ReglaOut,
 )

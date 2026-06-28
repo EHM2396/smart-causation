@@ -9,10 +9,11 @@ import { fmt } from "@/lib/utils";
 import type { Factura } from "@/lib/types";
 
 export function Paso1() {
-  const { setFacturas, setPaso, facturas: stored } = useWizardStore();
+  const { setFacturas, setFacturasYaCausadas, setPaso, facturas: stored } = useWizardStore();
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [omitidas, setOmitidas] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
 
   const handleFiles = (incoming: FileList | null) => {
@@ -30,14 +31,15 @@ export function Paso1() {
     if (!files.length) return;
     setLoading(true);
     setErrors([]);
-    const ok: Factura[] = [];
+    setOmitidas([]);
+    const parsed: Factura[] = [];
     const errs: string[] = [];
 
     for (const file of files) {
       try {
         const result: Factura[] = await api.parsearFacturas(file);
         for (const f of result) {
-          ok.push({ ...f, _archivo: file.name });
+          parsed.push({ ...f, _archivo: file.name });
           for (const adv of f.advertencias ?? []) errs.push(`${file.name}: ${adv}`);
         }
       } catch (e) {
@@ -45,13 +47,30 @@ export function Paso1() {
       }
     }
 
-    setErrors(errs);
-    if (ok.length) {
-      setFacturas(ok);
-      setPaso(2);
-    } else {
-      setErrors((prev) => [...prev, "No se procesó ninguna factura válida."]);
+    if (!parsed.length) {
+      setErrors([...errs, "No se procesó ninguna factura válida."]);
+      setLoading(false);
+      return;
     }
+
+    // Verificar cuáles ya fueron causadas para esta empresa
+    let causadasInfo: import("@/lib/types").FacturaCausadaInfo[] = [];
+    try {
+      const numeros = parsed.map((f) => f.numero_dian).filter(Boolean);
+      const { ya_causadas } = await api.verificarCausadas(numeros);
+      causadasInfo = ya_causadas;
+    } catch {
+      // Si falla la verificación, continuar sin filtrar
+    }
+
+    const causadasNums = new Set(causadasInfo.map((c) => c.numero_dian));
+    const nuevas = parsed.filter((f) => !causadasNums.has(f.numero_dian));
+
+    setErrors(errs);
+    setOmitidas(causadasInfo.map((c) => c.numero_dian));
+    setFacturasYaCausadas(causadasInfo);
+    setFacturas(nuevas);
+    setPaso(2);
     setLoading(false);
   };
 
@@ -170,9 +189,44 @@ export function Paso1() {
             </div>
           )}
 
-          <Button onClick={handleParse} disabled={!files.length} size="lg" className="w-full sm:w-auto">
-            {`Parsear ${files.length ? `${files.length} archivo${files.length > 1 ? "s" : ""}` : "facturas"}`}
-          </Button>
+          {/* Facturas ya causadas — aviso + confirmación */}
+          {omitidas.length > 0 && (
+            <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: "var(--warning-border)", backgroundColor: "var(--warning-bg)" }}>
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" style={{ color: "var(--warning-text)" }} />
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold" style={{ color: "var(--warning-text)" }}>
+                    {omitidas.length} factura{omitidas.length > 1 ? "s" : ""} ya {omitidas.length > 1 ? "fueron causadas" : "fue causada"} anteriormente
+                  </p>
+                  <p className="text-xs" style={{ color: "var(--warning-text)", opacity: 0.8 }}>
+                    Se omitirán automáticamente. Puedes continuar con las restantes.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5 pl-8">
+                {omitidas.map((n) => (
+                  <span
+                    key={n}
+                    className="rounded-full px-2.5 py-0.5 font-mono text-xs font-medium"
+                    style={{ backgroundColor: "var(--warning-border)", color: "var(--warning-text)" }}
+                  >
+                    {n}
+                  </span>
+                ))}
+              </div>
+              <div className="pl-8">
+                <Button size="sm" onClick={() => setPaso(2)}>
+                  Continuar con las {stored.length} facturas restantes →
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {omitidas.length === 0 && (
+            <Button onClick={handleParse} disabled={!files.length} size="lg" className="w-full sm:w-auto">
+              {`Parsear ${files.length ? `${files.length} archivo${files.length > 1 ? "s" : ""}` : "facturas"}`}
+            </Button>
+          )}
         </>
       )}
     </div>

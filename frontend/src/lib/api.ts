@@ -2,6 +2,7 @@ import type {
   BatchValidacionResponse,
   ConsecutivoOut,
   CuentaOpcion,
+  FacturaCausadaInfo,
   HistorialItem,
   IADecision,
   IARegla,
@@ -197,6 +198,13 @@ export const api = {
     if (!res.ok) throw new Error(`Parseo fallido ${res.status}`);
     return res.json();
   },
+
+  // Verificar cuáles facturas ya fueron causadas (retorna datos completos)
+  verificarCausadas: (numeros_dian: string[]) =>
+    req<{ ya_causadas: FacturaCausadaInfo[] }>("/causacion/verificar-causadas", {
+      method: "POST",
+      body: JSON.stringify({ numeros_dian }),
+    }),
 
   // Sugerencia batch (reemplaza múltiples llamadas a sugerirCuenta)
   sugerirCuentasBatch: (
