@@ -21,18 +21,29 @@ function _handleUnauthorized(): never {
   throw new Error("Sesión expirada. Por favor vuelve a iniciar sesión.");
 }
 
+function _buildHeaders(
+  authHeaders: Record<string, string>,
+  extra?: HeadersInit,
+  includeJson = false,
+): Record<string, string> {
+  // Siempre: extraHeaders primero, authHeaders al final para que nunca sean pisados
+  return {
+    ...(includeJson ? { "Content-Type": "application/json" } : {}),
+    ...(extra as Record<string, string> | undefined),
+    ...authHeaders,
+  };
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const { token, empresaId } = useAuthStore.getState();
   const authHeaders: Record<string, string> = {};
-  if (token) {
-    authHeaders["Authorization"] = `Bearer ${token}`;
-  }
-  if (empresaId != null) {
-    authHeaders["X-Empresa-Id"] = String(empresaId);
-  }
+  if (token) authHeaders["Authorization"] = `Bearer ${token}`;
+  if (empresaId != null) authHeaders["X-Empresa-Id"] = String(empresaId);
+
+  const { headers: extraHeaders, ...initRest } = init ?? {};
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...authHeaders, ...init?.headers },
-    ...init,
+    ...initRest,
+    headers: _buildHeaders(authHeaders, extraHeaders, true),
   });
   if (res.status === 401) _handleUnauthorized();
   if (!res.ok) {
@@ -45,15 +56,13 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 async function reqBlob(path: string, init?: RequestInit): Promise<Blob> {
   const { token, empresaId } = useAuthStore.getState();
   const authHeaders: Record<string, string> = {};
-  if (token) {
-    authHeaders["Authorization"] = `Bearer ${token}`;
-  }
-  if (empresaId != null) {
-    authHeaders["X-Empresa-Id"] = String(empresaId);
-  }
+  if (token) authHeaders["Authorization"] = `Bearer ${token}`;
+  if (empresaId != null) authHeaders["X-Empresa-Id"] = String(empresaId);
+
+  const { headers: extraHeaders, ...initRest } = init ?? {};
   const res = await fetch(`${BASE}${path}`, {
-    headers: { ...authHeaders, ...init?.headers },
-    ...init,
+    ...initRest,
+    headers: _buildHeaders(authHeaders, extraHeaders),
   });
   if (res.status === 401) _handleUnauthorized();
   if (!res.ok) {
