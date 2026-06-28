@@ -41,14 +41,27 @@ def descargar_plantilla(empresa: EmpresaActiva):
     ws = wb.active
     ws.title = "Impuestos"
 
-    headers = ["codigo", "nombre", "tipo_impuesto", "tarifa", "cta_compras", "cta_ventas"]
+    # Columnas en el mismo orden que SIIGO para facilitar copia/pegado
+    headers = [
+        "codigo",
+        "nombre",
+        "tipo_impuesto",
+        "tarifa",
+        "cta_ventas",
+        "cta_compras",
+        "cta_dev_ventas",
+        "cta_dev_compras",
+    ]
     ejemplos = [
-        ["1",  "IVA 19%",          "IVA",         19,   "24080500", ""],
-        ["2",  "IVA 5%",           "IVA",          5,   "24080500", ""],
-        ["3",  "Retefuente 11%",   "Retefuente",  11,   "23650500", ""],
-        ["4",  "Retefuente 10%",   "Retefuente",  10,   "23650500", ""],
-        ["5",  "Retefuente 6%",    "Retefuente",   6,   "23650500", ""],
-        ["6",  "ReteICA 1%",       "ReteICA",      1,   "23680500", ""],
+        ["1",  "IVA 19%",           "IVA",         19,   "24080601", "24081001", "24082001", "24082001"],
+        ["2",  "IVA 5%",            "IVA",          5,   "24080602", "24081003", "24082002", "24081004"],
+        ["22", "IVA 0%",            "IVA",          0,   "24080601", "24081001", "24082001", "24082001"],
+        ["21", "Retefuente 1%",     "Retefuente",   1,   "",         "23652505", "",          "23652506"],
+        ["20", "Retefuente 2%",     "Retefuente",   2,   "",         "23650500", "",          "23650500"],
+        ["3",  "Retefuente 11%",    "Retefuente",  11,   "",         "23650500", "",          "23650500"],
+        ["4",  "Retefuente 10%",    "Retefuente",  10,   "",         "23650500", "",          "23650500"],
+        ["5",  "Retefuente 6%",     "Retefuente",   6,   "",         "23650500", "",          "23650500"],
+        ["6",  "ReteICA 1%",        "ReteICA",      1,   "",         "23680500", "",          "23680500"],
     ]
 
     header_fill = PatternFill("solid", fgColor="1C6B4A")
@@ -62,12 +75,9 @@ def descargar_plantilla(empresa: EmpresaActiva):
     for row_data in ejemplos:
         ws.append(row_data)
 
-    ws.column_dimensions["A"].width = 12
-    ws.column_dimensions["B"].width = 24
-    ws.column_dimensions["C"].width = 16
-    ws.column_dimensions["D"].width = 10
-    ws.column_dimensions["E"].width = 14
-    ws.column_dimensions["F"].width = 14
+    col_widths = {"A": 10, "B": 22, "C": 16, "D": 10, "E": 16, "F": 16, "G": 18, "H": 18}
+    for col, width in col_widths.items():
+        ws.column_dimensions[col].width = width
 
     # Nota de tipos válidos
     ws.append([])
@@ -134,8 +144,10 @@ async def cargar_excel(
                 nombre=_val("nombre"),
                 tipo_impuesto=_val("tipo_impuesto"),
                 tarifa=_num("tarifa"),
-                cta_compras=_val("cta_compras"),
                 cta_ventas=_val("cta_ventas"),
+                cta_compras=_val("cta_compras"),
+                cta_dev_ventas=_val("cta_dev_ventas"),
+                cta_dev_compras=_val("cta_dev_compras"),
             )
             if creado:
                 insertados += 1
