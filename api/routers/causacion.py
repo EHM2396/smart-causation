@@ -20,6 +20,8 @@ from api.schemas import (
     CausacionResponse,
     SugerenciaRequest,
     SugerenciaResponse,
+    SugerenciaBatchRequest,
+    SugerenciaBatchResponse,
 )
 from db.models.auth import Empresa, Usuario
 from db.models.contabilidad import FacturaCausada
@@ -74,6 +76,44 @@ def sugerir_cuenta(body: SugerenciaRequest, db: DB, empresa: EmpresaActiva, curr
         confianza_ia=resultado.confianza,
         cuenta_pago_sugerida=resultado.cuenta_pago,
         cuenta_pago_origen=resultado.cuenta_pago_origen,
+    )
+
+
+@router.post("/sugerir-cuentas-batch", response_model=SugerenciaBatchResponse)
+def sugerir_cuentas_batch(body: SugerenciaBatchRequest, db: DB, empresa: EmpresaActiva, current_user: CurrentUser):
+    """
+    Sugiere cuentas para múltiples ítems en una sola llamada.
+    Drasticamente más eficiente que llamar /sugerir-cuenta N veces.
+    """
+    cuentas_pago = cuentas_service.listar_metodos_pago(db, empresa_id=empresa.id)
+    items_list = [
+        {
+            "key": item.key,
+            "nit": item.nit,
+            "descripcion": item.descripcion,
+            "tipo_proveedor": item.tipo_proveedor,
+        }
+        for item in body.items
+    ]
+    resultados = causacion_service.sugerir_cuentas_batch(
+        db,
+        items=items_list,
+        empresa_id=empresa.id,
+        usuario_id=current_user.id,
+        cuentas_pago=cuentas_pago,
+    )
+    return SugerenciaBatchResponse(
+        resultados={
+            key: SugerenciaResponse(
+                cuenta_sugerida=res.cuenta,
+                origen=res.origen,
+                explicacion_ia=res.explicacion,
+                confianza_ia=res.confianza,
+                cuenta_pago_sugerida=res.cuenta_pago,
+                cuenta_pago_origen=res.cuenta_pago_origen,
+            )
+            for key, res in resultados.items()
+        }
     )
 
 

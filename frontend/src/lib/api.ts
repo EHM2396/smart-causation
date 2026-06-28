@@ -198,7 +198,25 @@ export const api = {
     return res.json();
   },
 
-  // Sugerencia de cuenta
+  // Sugerencia batch (reemplaza múltiples llamadas a sugerirCuenta)
+  sugerirCuentasBatch: (
+    items: { key: string; nit: string | null; descripcion: string; tipo_proveedor: string | null }[]
+  ) =>
+    req<{
+      resultados: Record<string, {
+        cuenta_sugerida: string | null;
+        origen: string | null;
+        explicacion_ia: string | null;
+        confianza_ia: number | null;
+        cuenta_pago_sugerida: string | null;
+        cuenta_pago_origen: string | null;
+      }>;
+    }>("/causacion/sugerir-cuentas-batch", {
+      method: "POST",
+      body: JSON.stringify({ items }),
+    }),
+
+  // Sugerencia de cuenta (individual — mantenido para compatibilidad)
   sugerirCuenta: (nit: string | null, descripcion: string, tipo_proveedor = "juridica") =>
     req<{
       cuenta_sugerida: string | null;

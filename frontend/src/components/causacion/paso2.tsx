@@ -100,56 +100,55 @@ export function Paso2() {
     if (pendientes.length === 0) return; // Todo ya está cacheado en el store
 
     setSugsLoading(true);
-    Promise.all(
-      pendientes.map(({ key, nit, descripcion, tipo_proveedor }) =>
-        api.sugerirCuenta(nit, descripcion, tipo_proveedor)
-          .then(r => ({
-            key,
+    api.sugerirCuentasBatch(pendientes)
+      .then(({ resultados }) => {
+        const nuevas: Record<string, Sugerencia> = {};
+        Object.entries(resultados).forEach(([key, r]) => {
+          nuevas[key] = {
             cuenta: r.cuenta_sugerida,
             origen: r.origen,
             explicacion_ia: r.explicacion_ia,
             confianza_ia: r.confianza_ia,
             cuenta_pago_sugerida: r.cuenta_pago_sugerida,
             cuenta_pago_origen: r.cuenta_pago_origen,
-          }))
-          .catch(() => ({
-            key, cuenta: null, origen: null, explicacion_ia: null, confianza_ia: null,
-            cuenta_pago_sugerida: null, cuenta_pago_origen: null,
-          }))
-      )
-    ).then(results => {
-      const nuevas: Record<string, Sugerencia> = {};
-      results.forEach(({ key, cuenta, origen, explicacion_ia, confianza_ia, cuenta_pago_sugerida, cuenta_pago_origen }) => {
-        nuevas[key] = { cuenta, origen, explicacion_ia, confianza_ia, cuenta_pago_sugerida, cuenta_pago_origen };
-      });
-      const todasSugs = { ...suggestions, ...nuevas };
-      setSuggestions(todasSugs);
-      // Autocompletar cuenta_gasto con reglas y aprendizaje — la IA es sugerencia, el usuario debe aceptarla
-      setCuentaGastoItem(prev => {
-        const next = { ...prev };
-        results.forEach(({ key, cuenta, origen }) => {
-          const esAutoconfiable = origen === "regla" || origen === "aprendizaje";
-          if (!next[key] && cuenta && esAutoconfiable) next[key] = cuenta;
+          };
         });
-        return next;
-      });
-      // Autocompletar cuenta_pago desde aprendizaje (por factura, tomar primer ítem con origen aprendizaje)
-      setCuentaPago(prev => {
-        const next = { ...prev };
-        facturas.forEach((factura, idx) => {
-          if (next[idx]) return; // ya tiene cuenta de pago
-          for (let jdx = 0; jdx < factura.items.length; jdx++) {
-            const r = results.find(x => x.key === `${idx}_${jdx}`);
-            if (r?.cuenta_pago_sugerida && r.cuenta_pago_origen === "aprendizaje") {
-              next[idx] = r.cuenta_pago_sugerida;
-              break;
+        setSuggestions({ ...suggestions, ...nuevas });
+        // Autocompletar cuenta_gasto para regla/aprendizaje — IA es sugerencia, usuario debe aceptarla
+        setCuentaGastoItem(prev => {
+          const next = { ...prev };
+          Object.entries(nuevas).forEach(([key, sug]) => {
+            const esAutoconfiable = sug.origen === "regla" || sug.origen === "aprendizaje";
+            if (!next[key] && sug.cuenta && esAutoconfiable) next[key] = sug.cuenta;
+          });
+          return next;
+        });
+        // Autocompletar cuenta_pago desde aprendizaje (primer ítem con origen aprendizaje por factura)
+        setCuentaPago(prev => {
+          const next = { ...prev };
+          facturas.forEach((factura, idx) => {
+            if (next[idx]) return;
+            for (let jdx = 0; jdx < factura.items.length; jdx++) {
+              const sug = nuevas[`${idx}_${jdx}`];
+              if (sug?.cuenta_pago_sugerida && sug.cuenta_pago_origen === "aprendizaje") {
+                next[idx] = sug.cuenta_pago_sugerida;
+                break;
+              }
             }
-          }
+          });
+          return next;
         });
-        return next;
+        setSugsLoading(false);
+      })
+      .catch(() => {
+        // En caso de fallo del batch: marcar todos como sin sugerencia para no reintentar
+        const fallback: Record<string, Sugerencia> = {};
+        pendientes.forEach(({ key }) => {
+          fallback[key] = { cuenta: null, origen: null, explicacion_ia: null, confianza_ia: null, cuenta_pago_sugerida: null, cuenta_pago_origen: null };
+        });
+        setSuggestions(prev => ({ ...prev, ...fallback }));
+        setSugsLoading(false);
       });
-      setSugsLoading(false);
-    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [facturas]);
 

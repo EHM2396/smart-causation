@@ -56,6 +56,21 @@ class SugerenciaResponse(BaseModel):
     cuenta_pago_origen: str | None = None  # 'aprendizaje' | 'ia_alta' | 'ia_media' | 'ia_baja' | None
 
 
+class SugerenciaBatchItem(BaseModel):
+    key: str                         # e.g. "0_0", "2_3"
+    nit: str | None = None
+    descripcion: str
+    tipo_proveedor: str | None = None
+
+
+class SugerenciaBatchRequest(BaseModel):
+    items: list[SugerenciaBatchItem]
+
+
+class SugerenciaBatchResponse(BaseModel):
+    resultados: dict[str, SugerenciaResponse]
+
+
 # ── Historial de decisiones ───────────────────────────────────────────────────
 
 class DecisionOut(BaseModel):

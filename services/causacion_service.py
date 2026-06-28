@@ -60,6 +60,43 @@ class ResultadoSugerencia:
     cuenta_pago_origen: str | None = None  # 'aprendizaje' | 'ia_alta' | 'ia_media' | 'ia_baja'
 
 
+def _obtener_cuentas_pago_batch(
+    db: Session,
+    nits: list[str],
+    empresa_id: int | None,
+) -> dict[str, str]:
+    """Lookup en lote de cuenta_pago para múltiples NITs desde el historial. Una sola query."""
+    if not nits:
+        return {}
+    import json as _json
+    from sqlalchemy import select as _select
+    stmt = (
+        _select(FacturaCausada.nit_proveedor, FacturaCausada.datos_json)
+        .where(
+            FacturaCausada.nit_proveedor.in_(nits),
+            FacturaCausada.datos_json.is_not(None),
+        )
+        .order_by(FacturaCausada.id.desc())
+    )
+    if empresa_id is not None:
+        stmt = stmt.where(FacturaCausada.empresa_id == empresa_id)
+    rows = db.execute(stmt).all()
+    resultado: dict[str, str] = {}
+    for nit_prov, datos_str in rows:
+        if nit_prov in resultado:
+            continue  # ya tenemos el más reciente para este NIT
+        try:
+            data = _json.loads(datos_str)
+            for m in data.get("mapeos", []):
+                cp = m.get("cuenta_pago")
+                if cp:
+                    resultado[nit_prov] = cp
+                    break
+        except Exception:
+            pass
+    return resultado
+
+
 def _obtener_cuenta_pago_anterior(
     db: Session,
     nit: str | None,
@@ -192,6 +229,154 @@ def sugerir_cuenta_gasto(
         cuenta_pago=cp_anterior,
         cuenta_pago_origen="aprendizaje" if cp_anterior else None,
     )
+
+
+def sugerir_cuentas_batch(
+    db: Session,
+    *,
+    items: list[dict],
+    empresa_id: int | None = None,
+    usuario_id: int | None = None,
+    cuentas_pago: list[dict] | None = None,
+) -> dict[str, ResultadoSugerencia]:
+    """
+    Sugiere cuentas para múltiples ítems en una sola operación.
+    Orden de prioridad por ítem: reglas → aprendizaje → IA.
+    Minimiza queries DB: reglas se cargan 1 vez, aprendizaje en 1 query, IA se deduplica por descripción.
+    """
+    if not items:
+        return {}
+
+    resultados: dict[str, ResultadoSugerencia] = {}
+
+    # 1. Cargar reglas una sola vez (1 query para todos los ítems)
+    reglas = aprendizaje_service.cargar_reglas(db)
+
+    # 2. Aplicar reglas (puro Python, sin DB)
+    sin_regla: list[dict] = []
+    for item in items:
+        cuenta = aprendizaje_service.aplicar_reglas_cargadas(reglas, item["descripcion"])
+        if cuenta:
+            resultados[item["key"]] = ResultadoSugerencia(cuenta=cuenta, origen="regla")
+        else:
+            sin_regla.append(item)
+
+    # 3. Aprendizaje en lote para los que no tienen regla (1 query)
+    sin_aprendizaje: list[dict] = []
+    if sin_regla:
+        mapeos = aprendizaje_service.obtener_mapeos_batch(
+            db, sin_regla, empresa_id=empresa_id, usuario_id=usuario_id
+        )
+        for item in sin_regla:
+            cuenta = mapeos.get(item["key"])
+            if cuenta:
+                resultados[item["key"]] = ResultadoSugerencia(cuenta=cuenta, origen="aprendizaje")
+            else:
+                sin_aprendizaje.append(item)
+
+    # 4. Cuenta de pago en lote para todos los NITs únicos (1 query)
+    nits_unicos = list({item["nit"] for item in items if item.get("nit")})
+    cp_por_nit = _obtener_cuentas_pago_batch(db, nits_unicos, empresa_id)
+
+    # Inyectar cuenta_pago a los ya resueltos por regla/aprendizaje
+    for key, res in resultados.items():
+        item = next((i for i in items if i["key"] == key), None)
+        if item:
+            nit = item.get("nit")
+            cp = cp_por_nit.get(nit) if nit else None
+            if cp:
+                res.cuenta_pago = cp
+                res.cuenta_pago_origen = "aprendizaje"
+
+    # 5. IA para los ítems sin regla ni aprendizaje
+    if sin_aprendizaje:
+        ia_ok = False
+        cuentas_gasto_opts: list[dict] = []
+        codigos_imp: dict = {}
+        try:
+            from services import ai_service
+            ia_ok = ai_service.esta_disponible()
+            if ia_ok:
+                cuentas_gasto_list = cuentas_service.listar_cuentas_gasto(db, empresa_id=empresa_id)
+                if cuentas_gasto_list:
+                    codigos_imp = impuestos_service.listar_como_dict(db, empresa_id=empresa_id)
+                    cuentas_gasto_opts = [{"codigo": c["codigo"], "nombre": c["nombre"]} for c in cuentas_gasto_list]
+                else:
+                    ia_ok = False
+        except Exception as exc:
+            logger.warning("[batch-sugerir] setup IA falló: %s", exc)
+            ia_ok = False
+
+        if ia_ok and cuentas_gasto_opts:
+            # Deduplicar (descripcion, tipo_proveedor) para minimizar llamadas a OpenAI
+            unique_combos: dict[tuple, str] = {}
+            for item in sin_aprendizaje:
+                combo = (item["descripcion"], item.get("tipo_proveedor") or "juridica")
+                if combo not in unique_combos:
+                    unique_combos[combo] = item["key"]
+
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            ai_results: dict[tuple, object] = {}
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = {
+                    executor.submit(
+                        ai_service.sugerir,
+                        descripcion=desc,
+                        cuentas_gasto=cuentas_gasto_opts,
+                        codigos_impuesto=codigos_imp,
+                        tipo_proveedor=tipo_prov,
+                        cuentas_pago=cuentas_pago,
+                    ): (desc, tipo_prov)
+                    for (desc, tipo_prov) in unique_combos
+                }
+                for future in as_completed(futures):
+                    combo = futures[future]
+                    try:
+                        ai_results[combo] = future.result()
+                    except Exception as exc:
+                        logger.warning("[batch-sugerir] IA falló para combo: %s", exc)
+                        ai_results[combo] = None
+
+            for item in sin_aprendizaje:
+                combo = (item["descripcion"], item.get("tipo_proveedor") or "juridica")
+                sug = ai_results.get(combo)
+                nit = item.get("nit")
+                cp = cp_por_nit.get(nit) if nit else None
+                if sug and sug.cuenta_gasto:  # type: ignore[union-attr]
+                    confianza = sug.confianza or 0.0  # type: ignore[union-attr]
+                    if confianza >= 0.80:
+                        origen_ia = "ia_alta"
+                    elif confianza >= 0.50:
+                        origen_ia = "ia_media"
+                    else:
+                        origen_ia = "ia_baja"
+                    cp_final = cp or sug.cuenta_pago  # type: ignore[union-attr]
+                    cp_origen = "aprendizaje" if cp else (origen_ia if sug.cuenta_pago else None)  # type: ignore[union-attr]
+                    resultados[item["key"]] = ResultadoSugerencia(
+                        cuenta=sug.cuenta_gasto,  # type: ignore[union-attr]
+                        origen=origen_ia,
+                        explicacion=sug.explicacion,  # type: ignore[union-attr]
+                        confianza=sug.confianza,  # type: ignore[union-attr]
+                        cuenta_pago=cp_final,
+                        cuenta_pago_origen=cp_origen,
+                    )
+                else:
+                    resultados[item["key"]] = ResultadoSugerencia(
+                        cuenta=None, origen=None,
+                        cuenta_pago=cp, cuenta_pago_origen="aprendizaje" if cp else None,
+                    )
+        else:
+            # IA no disponible o sin catálogo de cuentas
+            origen_fallback = "sin_catalogo" if ia_ok else "ia_no_disponible"
+            for item in sin_aprendizaje:
+                nit = item.get("nit")
+                cp = cp_por_nit.get(nit) if nit else None
+                resultados[item["key"]] = ResultadoSugerencia(
+                    cuenta=None, origen=origen_fallback,
+                    cuenta_pago=cp, cuenta_pago_origen="aprendizaje" if cp else None,
+                )
+
+    return resultados
 
 
 # ── Confirmación y aprendizaje ────────────────────────────────────────────────

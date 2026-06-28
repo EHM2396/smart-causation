@@ -201,6 +201,95 @@ def aplicar_reglas(db: Session, descripcion: str) -> str | None:
     return None
 
 
+def cargar_reglas(db: Session) -> list:
+    """Carga todas las reglas activas una sola vez para procesamiento en lote."""
+    return db.scalars(
+        select(ReglaClasificacion)
+        .where(ReglaClasificacion.activa == True)
+        .order_by(ReglaClasificacion.prioridad.desc())
+    ).all()
+
+
+def aplicar_reglas_cargadas(reglas: list, descripcion: str) -> str | None:
+    """Aplica reglas ya cargadas a una descripción (sin query DB)."""
+    desc_norm = _norm(descripcion)
+    for regla in reglas:
+        if regla.tipo == "keyword":
+            if _norm(regla.patron) in desc_norm:
+                return regla.cuenta_puc
+        elif regla.tipo == "regex":
+            try:
+                if re.search(regla.patron, descripcion, re.IGNORECASE):
+                    return regla.cuenta_puc
+            except re.error:
+                pass
+    return None
+
+
+def obtener_mapeos_batch(
+    db: Session,
+    items: list[dict],
+    empresa_id: int | None = None,
+    usuario_id: int | None = None,
+) -> dict[str, str]:
+    """
+    Lookup de aprendizaje para múltiples ítems en una sola query.
+    Retorna {key: cuenta_puc} para los ítems con mapeo encontrado.
+    """
+    if not items:
+        return {}
+
+    all_nits: set[str] = set()
+    item_keywords: dict[str, list[str]] = {}
+    all_keywords: set[str] = set()
+
+    for item in items:
+        palabras = [p for p in _norm(item["descripcion"]).split() if len(p) > 3]
+        item_keywords[item["key"]] = palabras
+        all_keywords.update(palabras)
+        if item.get("nit"):
+            all_nits.add(item["nit"])
+
+    if not all_keywords or not all_nits:
+        return {}
+
+    stmt = (
+        select(MapeoPUC)
+        .where(
+            MapeoPUC.nit.in_(all_nits),
+            MapeoPUC.keyword.in_(all_keywords),
+        )
+        .order_by(MapeoPUC.usos.desc(), MapeoPUC.confianza.desc())
+    )
+    if empresa_id is not None:
+        stmt = stmt.where(MapeoPUC.empresa_id == empresa_id)
+    if usuario_id is not None:
+        stmt = stmt.where(MapeoPUC.usuario_id == usuario_id)
+
+    rows = db.scalars(stmt).all()
+
+    # (nit, keyword) -> cuenta_puc; primer resultado gana (ya ordenado por usos DESC)
+    lookup: dict[tuple, str] = {}
+    for row in rows:
+        k = (row.nit, row.keyword)
+        if k not in lookup:
+            lookup[k] = row.cuenta_puc
+
+    # Aplicar al primer keyword que haga match para cada ítem
+    resultados: dict[str, str] = {}
+    for item in items:
+        nit = item.get("nit")
+        if not nit:
+            continue
+        for keyword in item_keywords.get(item["key"], []):
+            cuenta = lookup.get((nit, keyword))
+            if cuenta:
+                resultados[item["key"]] = cuenta
+                break
+
+    return resultados
+
+
 def crear_regla(
     db: Session,
     *,
