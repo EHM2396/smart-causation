@@ -357,7 +357,14 @@ export function Paso2() {
               </button>
             )}
             <Button variant="outline" size="sm" onClick={() => setPaso(1)}>← Volver</Button>
-            <Button data-tutorial="validar-partida-btn" size="sm" onClick={handleValidar}>Validar partida doble →</Button>
+            <Button
+              data-tutorial="validar-partida-btn"
+              size="sm"
+              onClick={handleValidar}
+              disabled={!Object.values(verificadas).some(Boolean)}
+            >
+              Validar partida doble →
+            </Button>
           </div>
         </div>
 
@@ -1159,7 +1166,7 @@ export function Paso2() {
         </span>
 
         <div className="flex gap-2">
-          {!isLast ? (
+          {!isLast && (
             <button
               onClick={() => setSelectedIdx(selectedIdx + 1)}
               className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold transition-opacity hover:opacity-90"
@@ -1167,10 +1174,6 @@ export function Paso2() {
             >
               Siguiente <ChevronRight className="h-3.5 w-3.5" />
             </button>
-          ) : (
-            <Button size="lg" onClick={handleValidar}>
-              Validar partida doble →
-            </Button>
           )}
         </div>
       </div>
