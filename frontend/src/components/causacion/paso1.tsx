@@ -18,10 +18,12 @@ export function Paso1() {
 
   const handleFiles = (incoming: FileList | null) => {
     if (!incoming) return;
-    const xlsx = Array.from(incoming).filter((f) => f.name.endsWith(".xlsx"));
+    const validos = Array.from(incoming).filter(
+      (f) => f.name.endsWith(".xlsx") || f.name.endsWith(".zip")
+    );
     setFiles((prev) => {
       const names = new Set(prev.map((f) => f.name));
-      return [...prev, ...xlsx.filter((f) => !names.has(f.name))];
+      return [...prev, ...validos.filter((f) => !names.has(f.name))];
     });
   };
 
@@ -79,7 +81,7 @@ export function Paso1() {
       <div>
         <h2 className="text-xl font-semibold text-[var(--text-primary)]">Cargar facturas DIAN</h2>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
-          Sube los archivos <code className="text-[var(--brand)] font-medium">.xlsx</code> exportados del portal DIAN. Puedes subir varios a la vez.
+          Sube archivos <code className="text-[var(--brand)] font-medium">.xlsx</code> del portal DIAN o archivos <code className="text-[var(--brand)] font-medium">.zip</code> de factura electrónica DIAN. Puedes subir varios a la vez.
         </p>
       </div>
 
@@ -98,7 +100,7 @@ export function Paso1() {
           padding: "3rem 1.5rem",
         }}
       >
-        <input type="file" multiple accept=".xlsx" className="sr-only" onChange={(e) => handleFiles(e.target.files)} />
+        <input type="file" multiple accept=".xlsx,.zip" className="sr-only" onChange={(e) => handleFiles(e.target.files)} />
         <div className="flex flex-col items-center gap-4 text-center">
           {/* Icon with gradient background */}
           <div
@@ -122,7 +124,7 @@ export function Paso1() {
               {dragging ? "Suelta los archivos aquí" : "Arrastra aquí o haz clic para seleccionar"}
             </p>
             <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-              Archivos <span className="font-medium" style={{ color: "var(--brand)" }}>.xlsx</span> exportados del portal DIAN · múltiples permitidos
+              Archivos <span className="font-medium" style={{ color: "var(--brand)" }}>.xlsx</span> del portal DIAN o <span className="font-medium" style={{ color: "var(--brand)" }}>.zip</span> de factura electrónica · múltiples permitidos
             </p>
           </div>
 
@@ -133,7 +135,7 @@ export function Paso1() {
               style={{ backgroundColor: "var(--bg-elevated)", color: "var(--text-muted)", border: "1px solid var(--border-soft)" }}
             >
               <FileSpreadsheet className="h-3.5 w-3.5" />
-              Solo archivos Excel (.xlsx)
+              Excel (.xlsx) · ZIP DIAN (.zip)
             </span>
           )}
         </div>

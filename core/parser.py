@@ -1,13 +1,10 @@
 """
-Parser de archivos xlsx de facturas electronicas.
+Parser de archivos de facturas electronicas.
 
-Soporta dos formatos:
-  1. Token DIAN (tabular): un archivo con MULTIPLES facturas, una fila por item.
-     Formato exportado desde el portal DIAN con el token de facturacion electronica.
-     Columnas tipicas: Tipo ID, NIT, Nombre, Numero Factura, Fecha, Concepto,
-     Descripcion, Precio Unitario, Cantidad, Total Impuesto, Porcentaje, Total, CUFE.
-
-  2. Individual: un xlsx por factura (formato clave-valor + tabla de detalle).
+Soporta tres formatos:
+  1. Token DIAN (tabular xlsx): un archivo con MULTIPLES facturas, una fila por item.
+  2. Individual (xlsx): un xlsx por factura (formato clave-valor + tabla de detalle).
+  3. ZIP DIAN: un ZIP con un XML UBL 2.1 y un PDF, formato de factura electronica DIAN.
 
 La funcion principal `parsear_archivo()` detecta automaticamente el formato
 y retorna una lista de facturas (incluso si es solo una).
@@ -17,6 +14,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
+import xml.etree.ElementTree as ET
+import zipfile
 from io import BytesIO
 from typing import Any
 
@@ -208,6 +207,11 @@ def _parsear_token_dian(archivo: BytesIO | str, nombre_archivo: str = "") -> lis
         else:
             base = 0.0
 
+        # Saltar filas de detalle de IVA que algunos exports DIAN incluyen como fila separada:
+        # tienen base=0 pero impuesto>0 o total_linea>0 → su IVA ya está en la fila del producto.
+        if base == 0.0 and (total_imp > 0.0 or total_linea > 0.0):
+            continue
+
         if porcentaje == 0.0 and total_imp > 0 and base > 0:
             porcentaje = round(total_imp / base * 100, 2)
 
@@ -273,6 +277,9 @@ def _inferir_cod_impuesto(porcentaje: float) -> str:
 
 
 def parsear_archivo(archivo: BytesIO | str, nombre_archivo: str = "") -> list[dict]:
+    if nombre_archivo.lower().endswith(".zip"):
+        return _parsear_zip_dian(archivo, nombre_archivo)
+
     try:
         df_check = pd.read_excel(archivo, dtype=str, nrows=5)
     except Exception as e:
@@ -285,6 +292,205 @@ def parsear_archivo(archivo: BytesIO | str, nombre_archivo: str = "") -> list[di
         return _parsear_token_dian(archivo, nombre_archivo)
     else:
         return [_parsear_factura_individual(archivo, nombre_archivo)]
+
+
+# ─── Parser ZIP / XML DIAN (UBL 2.1) ─────────────────────────────────────────
+
+# Namespaces del estándar UBL 2.1 usado por DIAN
+_NS = {
+    "invoice": "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2",
+    "cbc":     "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
+    "cac":     "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
+    "ext":     "urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2",
+    "sts":     "dian:gov:co:facturaelectronica:Structures-2-1",
+    "ds":      "http://www.w3.org/2000/09/xmldsig#",
+    "xades":   "http://uri.etsi.org/01903/v1.3.2#",
+    "ad":      "urn:oasis:names:specification:ubl:schema:xsd:AttachedDocument-2",
+}
+
+
+def _parsear_zip_dian(archivo: BytesIO | str, nombre_archivo: str = "") -> list[dict]:
+    """Abre el ZIP DIAN, extrae el XML y lo parsea. Retorna lista con una factura."""
+    if isinstance(archivo, str):
+        with open(archivo, "rb") as f:
+            archivo = BytesIO(f.read())
+
+    try:
+        with zipfile.ZipFile(archivo) as zf:
+            xml_names = [n for n in zf.namelist() if n.lower().endswith(".xml")]
+            if not xml_names:
+                raise ValueError(f"'{nombre_archivo}': El ZIP no contiene ningún archivo XML.")
+            xml_bytes = zf.read(xml_names[0])
+    except zipfile.BadZipFile as e:
+        raise ValueError(f"'{nombre_archivo}': No es un archivo ZIP válido.") from e
+
+    return [_parsear_xml_dian(xml_bytes, nombre_archivo)]
+
+
+def _xml_text(el: ET.Element | None) -> str:
+    return el.text.strip() if el is not None and el.text else ""
+
+
+def _xml_float(el: ET.Element | None) -> float:
+    txt = _xml_text(el)
+    try:
+        return float(txt.replace(",", ".")) if txt else 0.0
+    except ValueError:
+        return 0.0
+
+
+def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
+    """
+    Parsea el XML UBL 2.1 de la DIAN y devuelve el mismo dict que los parsers Excel:
+    numero_dian, cufe, fecha, nit, razon_social, tipo_proveedor, regimen,
+    ciudad, total, items, advertencias.
+    """
+    advertencias: list[str] = []
+
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError as e:
+        raise ValueError(f"'{nombre_archivo}': XML inválido: {e}") from e
+
+    # El DIAN puede envolver la factura en un AttachedDocument — extraer Invoice interno
+    tag = root.tag
+    if "AttachedDocument" in tag or "ApplicationResponse" in tag:
+        ns_inv = f"{{{_NS['invoice']}}}Invoice"
+        invoice = root.find(f".//{ns_inv}")
+        if invoice is None:
+            invoice = root.find(".//Invoice")
+        if invoice is None:
+            raise ValueError(f"'{nombre_archivo}': No se encontró Invoice dentro del AttachedDocument.")
+        root = invoice
+
+    cbc = _NS["cbc"]
+    cac = _NS["cac"]
+
+    def find(path: str) -> ET.Element | None:
+        return root.find(path, _NS)
+
+    def findall(path: str) -> list[ET.Element]:
+        return root.findall(path, _NS)
+
+    # ── Encabezado ──
+    numero_dian = _xml_text(find("cbc:ID"))
+    if not numero_dian:
+        numero_dian = re.sub(r"\.(zip|xml)$", "", nombre_archivo, flags=re.I)
+
+    cufe = _xml_text(find("cbc:UUID"))
+    fecha = _to_fecha(_xml_text(find("cbc:IssueDate")))
+
+    # ── Proveedor ──
+    nit = ""
+    razon_social = ""
+    tipo_proveedor = "juridica"
+    ciudad = ""
+
+    supplier = find("cac:AccountingSupplierParty/cac:Party")
+    if supplier is not None:
+        # NIT
+        tax_scheme = supplier.find("cac:PartyTaxScheme", _NS)
+        if tax_scheme is not None:
+            nit_el = tax_scheme.find("cbc:CompanyID", _NS)
+            if nit_el is not None and nit_el.text:
+                nit = re.sub(r"[^\d\-]", "", nit_el.text.strip())
+                scheme_id = (nit_el.get("schemeID") or "").strip()
+                if scheme_id in ("13", "22", "31"):
+                    tipo_proveedor = "natural" if scheme_id in ("13", "22") else "juridica"
+
+        # Razón social
+        legal = supplier.find("cac:PartyLegalEntity", _NS)
+        if legal is not None:
+            razon_social = _xml_text(legal.find("cbc:RegistrationName", _NS))
+        if not razon_social:
+            pname = supplier.find("cac:PartyName", _NS)
+            if pname is not None:
+                razon_social = _xml_text(pname.find("cbc:Name", _NS))
+
+        # Ciudad
+        addr = supplier.find("cac:PhysicalLocation/cac:Address", _NS)
+        if addr is None:
+            addr = supplier.find("cac:PostalAddress", _NS)
+        if addr is not None:
+            ciudad = _xml_text(addr.find("cbc:CityName", _NS))
+
+    # ── Total ──
+    monetary = find("cac:LegalMonetaryTotal")
+    total = 0.0
+    if monetary is not None:
+        total = _xml_float(monetary.find("cbc:PayableAmount", _NS))
+        if total == 0.0:
+            total = _xml_float(monetary.find("cbc:TaxInclusiveAmount", _NS))
+
+    # ── Ítems ──
+    items: list[dict] = []
+
+    for line in findall("cac:InvoiceLine"):
+        # Descripción
+        desc = ""
+        item_el = line.find("cac:Item", _NS)
+        if item_el is not None:
+            desc = _xml_text(item_el.find("cbc:Description", _NS))
+            if not desc:
+                desc = _xml_text(item_el.find("cac:SellersItemIdentification/cbc:ID", _NS))
+        if not desc:
+            desc = _xml_text(line.find("cbc:Note", _NS))
+        if not desc:
+            desc = f"Item {len(items) + 1}"
+
+        # Base (LineExtensionAmount = base sin impuestos)
+        base = _xml_float(line.find("cbc:LineExtensionAmount", _NS))
+
+        # IVA: buscar en TaxTotal los subtotales con TaxScheme 01 (IVA)
+        valor_impuesto = 0.0
+        porcentaje = 0.0
+
+        for tax_total in line.findall("cac:TaxTotal", _NS):
+            for sub in tax_total.findall("cac:TaxSubtotal", _NS):
+                cat = sub.find("cac:TaxCategory", _NS)
+                if cat is None:
+                    continue
+                scheme = cat.find("cac:TaxScheme", _NS)
+                scheme_id = ""
+                if scheme is not None:
+                    scheme_id = _xml_text(scheme.find("cbc:ID", _NS))
+
+                # Incluir solo IVA (01); excluir retenciones (04=ICA, 05=RetICA, 06=Retefuente)
+                if scheme_id in ("01", ""):
+                    valor_impuesto += _xml_float(sub.find("cbc:TaxAmount", _NS))
+                    if porcentaje == 0.0:
+                        porcentaje = _xml_float(cat.find("cbc:Percent", _NS))
+
+        # Saltar líneas vacías (base=0 y sin impuesto — no hay valores a causar)
+        if base == 0.0 and valor_impuesto == 0.0:
+            continue
+
+        cod_impuesto = _inferir_cod_impuesto(porcentaje)
+        items.append({
+            "descripcion":    desc,
+            "base":           round(base, 2),
+            "cod_impuesto":   cod_impuesto,
+            "porcentaje":     porcentaje,
+            "valor_impuesto": round(valor_impuesto, 2),
+            "total_linea":    round(base + valor_impuesto, 2),
+        })
+
+    if not items:
+        advertencias.append("No se detectaron ítems en el XML DIAN.")
+
+    return {
+        "numero_dian":    numero_dian,
+        "cufe":           cufe,
+        "fecha":          fecha,
+        "nit":            nit,
+        "razon_social":   razon_social,
+        "tipo_proveedor": tipo_proveedor,
+        "regimen":        "",
+        "ciudad":         ciudad,
+        "total":          total,
+        "items":          items,
+        "advertencias":   advertencias,
+    }
 
 
 # Helpers para formato individual
