@@ -6,7 +6,7 @@ import { AlertTriangle, History, ChevronDown, Settings2, CheckCircle2 } from "lu
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { fmt } from "@/lib/utils";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 
 export function ConfigPanel() {
@@ -16,6 +16,11 @@ export function ConfigPanel() {
   const [consecutivoManual, setConsecutivoManual] = useState(0);
   const [hovered, setHovered] = useState(false);
   const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    clearTimeout(leaveTimerRef.current);
+    setHovered(false);
+  }, [tipoComp]);
 
   const { data: tipos = [] } = useQuery({ queryKey: ["tipos-comp"], queryFn: api.getTiposComprobante });
   const { data: consec, refetch: refetchConsec } = useQuery({
