@@ -15,7 +15,7 @@ export function ConfigPanel() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [consecutivoManual, setConsecutivoManual] = useState(0);
   const [hovered, setHovered] = useState(false);
-  const leaveTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const { data: tipos = [] } = useQuery({ queryKey: ["tipos-comp"], queryFn: api.getTiposComprobante });
   const { data: consec, refetch: refetchConsec } = useQuery({
