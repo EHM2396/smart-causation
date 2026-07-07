@@ -55,7 +55,7 @@ export function Paso3() {
     setGenerando(true);
     setError("");
     try {
-      const items = facturas.map((f, idx) => ({
+      const items = facturasParaCausar.map((f, idx) => ({
         factura: f,
         mapeos_confirmados: mapeos.filter((m) => m.idx_factura === idx),
       }));
