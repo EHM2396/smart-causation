@@ -62,7 +62,7 @@ function DataField({ label, value, mono = false }: { label: string; value: strin
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function Paso2() {
-  const { facturas, facturasYaCausadas, tipoComp, setPaso, setFacturas, setMapeos, suggestions, setSuggestions, tutorialActivo, tutorialMockMapeo } = useWizardStore();
+  const { facturas, facturasYaCausadas, tipoComp, setPaso, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, tutorialActivo, tutorialMockMapeo } = useWizardStore();
   const [modalCausadasOpen, setModalCausadasOpen] = useState(false);
 
   const { data: cuentasGasto = [] } = useQuery({ queryKey: ["cuentas-gasto"], queryFn: api.getCuentasGasto });
@@ -307,7 +307,7 @@ export function Paso2() {
     }
 
     if (facturasVerificadas.length === 0) return;
-    setFacturas(facturasVerificadas);
+    setFacturasParaCausar(facturasVerificadas);
     setMapeos(mapeos);
     setPaso(3);
   };

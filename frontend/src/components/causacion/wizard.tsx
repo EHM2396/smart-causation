@@ -146,7 +146,9 @@ export function CausacionWizard() {
         {/* Step content */}
         <div>
           {paso === 1 && <Paso1 />}
-          {paso === 2 && <Paso2 />}
+          <div style={{ display: paso === 2 ? "block" : "none" }}>
+            {(paso === 2 || paso === 3) && <Paso2 />}
+          </div>
           {paso === 3 && <Paso3 />}
           {paso === 4 && <Paso4 />}
         </div>

@@ -20,7 +20,7 @@ const TUTORIAL_REPORTE: BatchValidacionResponse = {
 };
 
 export function Paso3() {
-  const { facturas, mapeos, tipoComp, centroCosto, setPaso, setReporte, setXlsxBlob } = useWizardStore();
+  const { facturasParaCausar, mapeos, tipoComp, centroCosto, setPaso, setReporte, setXlsxBlob } = useWizardStore();
   const [reporte, setLocalReporte] = useState<BatchValidacionResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -36,7 +36,7 @@ export function Paso3() {
     const run = async () => {
       setLoading(true);
       try {
-        const items = facturas.map((f, idx) => ({
+        const items = facturasParaCausar.map((f, idx) => ({
           factura: f,
           mapeos_confirmados: mapeos.filter((m) => m.idx_factura === idx),
         }));

@@ -6,7 +6,7 @@ import { AlertTriangle, History, ChevronDown, Settings2, CheckCircle2 } from "lu
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { fmt } from "@/lib/utils";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 export function ConfigPanel() {
@@ -15,6 +15,7 @@ export function ConfigPanel() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [consecutivoManual, setConsecutivoManual] = useState(0);
   const [hovered, setHovered] = useState(false);
+  const leaveTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   const { data: tipos = [] } = useQuery({ queryKey: ["tipos-comp"], queryFn: api.getTiposComprobante });
   const { data: consec, refetch: refetchConsec } = useQuery({
@@ -188,8 +189,13 @@ export function ConfigPanel() {
           borderLeft: "1px solid var(--sidebar-border)",
           cursor: isCollapsed ? "pointer" : "default",
         }}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
+        onMouseEnter={() => {
+          clearTimeout(leaveTimerRef.current);
+          setHovered(true);
+        }}
+        onMouseLeave={() => {
+          leaveTimerRef.current = setTimeout(() => setHovered(false), 300);
+        }}
       >
         {/* ── Collapsed strip ── */}
         <div
