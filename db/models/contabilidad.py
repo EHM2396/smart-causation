@@ -64,7 +64,7 @@ class FacturaCausada(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     empresa_id: Mapped[int | None] = mapped_column(ForeignKey("empresas.id"), nullable=True, index=True)
-    numero_dian: Mapped[str] = mapped_column(String(80), unique=True, nullable=False, index=True)
+    numero_dian: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
     nit_proveedor: Mapped[str | None] = mapped_column(String(20), index=True)
     razon_social: Mapped[str | None] = mapped_column(String(255))
     fecha_factura: Mapped[date | None] = mapped_column(Date)
@@ -72,10 +72,14 @@ class FacturaCausada(Base):
     consecutivo: Mapped[str | None] = mapped_column(String(20))
     tipo_comprobante: Mapped[str | None] = mapped_column(String(10))
     fecha_causacion: Mapped[date | None] = mapped_column(Date)
-    archivo_origen: Mapped[str | None] = mapped_column(String(500))  # nombre del xlsx cargado
-    datos_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # factura + mapeos para regenerar
+    archivo_origen: Mapped[str | None] = mapped_column(String(500))
+    datos_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("empresa_id", "numero_dian", name="uq_facturas_causadas_empresa_numero"),
     )
 
     def __repr__(self) -> str:

@@ -456,8 +456,17 @@ def registrar_factura_causada(
     datos_json: str | None = None,
     empresa_id: int | None = None,
 ) -> FacturaCausada:
+    from sqlalchemy import select
     numero = factura.get("numero_dian") or factura.get("numero_factura", "")
     hoy = date.today()
+
+    # Si ya existe para esta empresa, devolver el registro existente sin error
+    stmt = select(FacturaCausada).where(FacturaCausada.numero_dian == numero)
+    if empresa_id is not None:
+        stmt = stmt.where(FacturaCausada.empresa_id == empresa_id)
+    existente = db.scalar(stmt)
+    if existente is not None:
+        return existente
 
     fc = FacturaCausada(
         numero_dian=numero,
