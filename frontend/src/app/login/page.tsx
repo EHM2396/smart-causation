@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { Loader2, MailWarning, CheckCircle2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
@@ -61,18 +62,23 @@ export default function LoginPage() {
       >
         {/* Logo/brand */}
         <div className="mb-8 text-center">
-          <div
-            className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl"
-            style={{ background: "linear-gradient(135deg, #059669 0%, #0891b2 100%)" }}
-          >
-            <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6 text-white" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 11h.01M12 11h.01M15 11h.01M4 19h16a2 2 0 002-2V7a2 2 0 00-2-2H4a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
+          <div className="mx-auto mb-4 flex items-center justify-center">
+            <Image
+              src="/brand/Logo-Solo.webp"
+              alt="Ciolix"
+              width={72}
+              height={72}
+              style={{ objectFit: "contain" }}
+              priority
+            />
           </div>
-          <h1 className="text-xl font-bold" style={{ color: "var(--text-primary)" }}>
-            Smart Causación
+          <h1 className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>
+            Ciolix
           </h1>
-          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
+          <p className="mt-1 text-xs font-medium tracking-wide" style={{ color: "var(--text-muted)" }}>
+            Conecta. Automatiza. Transforma.
+          </p>
+          <p className="mt-3 text-sm" style={{ color: "var(--text-muted)" }}>
             Inicia sesión para continuar
           </p>
         </div>

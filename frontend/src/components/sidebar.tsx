@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { FileSpreadsheet, BookOpen, History, Zap, UserCircle } from "lucide-react";
+import { FileSpreadsheet, BookOpen, History, UserCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -32,23 +33,17 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
     >
       {/* Brand */}
       <div
-        className="flex items-center gap-3 px-5 py-5"
+        className="flex items-center px-5 py-4"
         style={{ borderBottom: "1px solid var(--sidebar-border)" }}
       >
-        <div
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl shadow-sm"
-          style={{ background: "linear-gradient(135deg, #059669 0%, #047857 100%)" }}
-        >
-          <Zap className="h-4 w-4 text-white" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold leading-tight" style={{ color: "var(--sidebar-text-active)" }}>
-            Smart Causación
-          </p>
-          <p className="text-[11px] leading-tight font-medium" style={{ color: "var(--sidebar-label)" }}>
-            Smart Causación
-          </p>
-        </div>
+        <Image
+          src="/brand/Logo-completo-negro.webp"
+          alt="Ciolix"
+          width={120}
+          height={36}
+          style={{ filter: "var(--brand-logo-filter)", objectFit: "contain" }}
+          priority
+        />
       </div>
 
       {/* Nav */}

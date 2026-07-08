@@ -8,8 +8,12 @@ import { AppShell } from "@/components/app-shell";
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "Causacion SIIGO",
+  title: "Ciolix",
   description: "Automatizacion de causacion contable para SIIGO",
+  icons: {
+    icon: "/brand/Logo-Solo.webp",
+    apple: "/brand/Logo-Solo.webp",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
