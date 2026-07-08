@@ -46,7 +46,7 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
             Smart Causación
           </p>
           <p className="text-[11px] leading-tight font-medium" style={{ color: "var(--sidebar-label)" }}>
-            by Corxium
+            Smart Causación
           </p>
         </div>
       </div>

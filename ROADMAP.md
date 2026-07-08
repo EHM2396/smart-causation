@@ -107,9 +107,9 @@ Los clientes de Profesional, Firma y Enterprise reciben una **cuenta admin** par
 
 ---
 
-## Fase 4 — Dashboard de Corxium (super admin de la plataforma)
+## Fase 4 — Dashboard super admin de la plataforma
 
-El admin interno de Corxium necesita visibilidad sobre todos los clientes.
+El admin interno necesita visibilidad sobre todos los clientes.
 
 - [ ] **Panel super admin** — listado de todas las empresas registradas, plan activo, última actividad, estado
 - [ ] **Gestión de clientes** — activar/desactivar cuentas, cambiar plan manualmente, ver historial de pagos
@@ -130,7 +130,7 @@ El admin interno de Corxium necesita visibilidad sobre todos los clientes.
 
 ## Pendiente técnico
 
-- [ ] Subir imágenes de marca Corxium a `frontend/public/brand/` (logo + "desarrollado por")
+- [ ] Subir imágenes de marca a `frontend/public/brand/` (logo + "desarrollado por")
 - [ ] Tests automatizados básicos (endpoints críticos: login, causación, catálogos)
 - [ ] Rate limiting en endpoints de auth (evitar fuerza bruta)
 - [ ] Logs estructurados en producción (correlación por `empresa_id` + `usuario_id`)

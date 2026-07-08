@@ -2,9 +2,9 @@
 EmailService – envío de correos transaccionales vía SMTP (Hostinger).
 
 Configuración por variables de entorno:
-    MAIL_USERNAME   noreply@corxium.com
+    MAIL_USERNAME   noreply@smartcausacion.com
     MAIL_PASSWORD   contraseña de la cuenta en Hostinger
-    MAIL_FROM       noreply@corxium.com
+    MAIL_FROM       noreply@smartcausacion.com
     MAIL_FROM_NAME  Smart Causación
     MAIL_SERVER     smtp.hostinger.com
     MAIL_PORT       587
@@ -102,7 +102,7 @@ def _base_template(titulo: str, cuerpo: str) -> str:
         <tr>
           <td style="background:linear-gradient(135deg,#059669 0%,#047857 100%);padding:32px 40px;">
             <p style="margin:0;font-size:20px;font-weight:700;color:#ffffff;">⚡ Smart Causación</p>
-            <p style="margin:4px 0 0;font-size:12px;color:#a7f3d0;">by Corxium</p>
+            <p style="margin:4px 0 0;font-size:12px;color:#a7f3d0;">Gestión contable inteligente</p>
           </td>
         </tr>
 
@@ -118,7 +118,7 @@ def _base_template(titulo: str, cuerpo: str) -> str:
         <tr>
           <td style="padding:24px 40px;border-top:1px solid #e5e7eb;">
             <p style="margin:0;font-size:12px;color:#9ca3af;">
-              Este correo fue enviado por Smart Causación · Corxium.<br>
+              Este correo fue enviado por Smart Causación.<br>
               Si no solicitaste este correo puedes ignorarlo.
             </p>
           </td>
