@@ -85,7 +85,7 @@ export function Paso1() {
         </p>
       </div>
 
-      {/* Drop zone */}
+      {/* Drop zone — compacto si ya hay archivos */}
       <label
         data-tutorial="dropzone"
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
@@ -97,48 +97,59 @@ export function Paso1() {
           border: `2px dashed ${dragging ? "var(--brand)" : "var(--border-strong)"}`,
           backgroundColor: dragging ? "var(--brand-muted)" : "var(--bg-surface)",
           boxShadow: dragging ? "var(--shadow-ring)" : "none",
-          padding: "3rem 1.5rem",
+          padding: files.length > 0 ? "0.75rem 1.25rem" : "3rem 1.5rem",
         }}
       >
         <input type="file" multiple accept=".xlsx,.zip" className="sr-only" onChange={(e) => handleFiles(e.target.files)} />
-        <div className="flex flex-col items-center gap-4 text-center">
-          {/* Icon with gradient background */}
-          <div
-            className="flex h-16 w-16 items-center justify-center rounded-2xl"
-            style={{
-              background: dragging
-                ? "linear-gradient(135deg, #2563eb, #1d4ed8)"
-                : "linear-gradient(135deg, #eff6ff, #dbeafe)",
-              boxShadow: dragging ? "0 8px 20px rgb(37 99 235 / 0.3)" : "var(--shadow-sm)",
-            }}
-          >
-            <Upload
-              className="h-7 w-7 transition-colors"
-              style={{ color: dragging ? "#ffffff" : "var(--brand)" }}
-            />
-          </div>
 
-          {/* Text */}
-          <div>
-            <p className="text-base font-semibold" style={{ color: "var(--text-primary)" }}>
-              {dragging ? "Suelta los archivos aquí" : "Arrastra aquí o haz clic para seleccionar"}
-            </p>
-            <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-              Archivos <span className="font-medium" style={{ color: "var(--brand)" }}>.xlsx</span> del portal DIAN o <span className="font-medium" style={{ color: "var(--brand)" }}>.zip</span> de factura electrónica · múltiples permitidos
-            </p>
-          </div>
-
-          {/* Pill badge */}
-          {!dragging && (
-            <span
-              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium"
-              style={{ backgroundColor: "var(--bg-elevated)", color: "var(--text-muted)", border: "1px solid var(--border-soft)" }}
+        {/* Modo compacto: ya hay archivos cargados */}
+        {files.length > 0 ? (
+          <div className="flex items-center gap-3">
+            <div
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+              style={{
+                background: dragging ? "linear-gradient(135deg, #2563eb, #1d4ed8)" : "linear-gradient(135deg, #eff6ff, #dbeafe)",
+              }}
             >
-              <FileSpreadsheet className="h-3.5 w-3.5" />
-              Excel (.xlsx) · ZIP DIAN (.zip)
-            </span>
-          )}
-        </div>
+              <Upload className="h-4 w-4" style={{ color: dragging ? "#ffffff" : "var(--brand)" }} />
+            </div>
+            <p className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>
+              {dragging ? "Suelta para agregar más" : "Agregar más archivos"}
+            </p>
+          </div>
+        ) : (
+          /* Modo completo: sin archivos */
+          <div className="flex flex-col items-center gap-4 text-center">
+            <div
+              className="flex h-16 w-16 items-center justify-center rounded-2xl"
+              style={{
+                background: dragging
+                  ? "linear-gradient(135deg, #2563eb, #1d4ed8)"
+                  : "linear-gradient(135deg, #eff6ff, #dbeafe)",
+                boxShadow: dragging ? "0 8px 20px rgb(37 99 235 / 0.3)" : "var(--shadow-sm)",
+              }}
+            >
+              <Upload className="h-7 w-7 transition-colors" style={{ color: dragging ? "#ffffff" : "var(--brand)" }} />
+            </div>
+            <div>
+              <p className="text-base font-semibold" style={{ color: "var(--text-primary)" }}>
+                {dragging ? "Suelta los archivos aquí" : "Arrastra aquí o haz clic para seleccionar"}
+              </p>
+              <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
+                Archivos <span className="font-medium" style={{ color: "var(--brand)" }}>.xlsx</span> del portal DIAN o <span className="font-medium" style={{ color: "var(--brand)" }}>.zip</span> de factura electrónica · múltiples permitidos
+              </p>
+            </div>
+            {!dragging && (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium"
+                style={{ backgroundColor: "var(--bg-elevated)", color: "var(--text-muted)", border: "1px solid var(--border-soft)" }}
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5" />
+                Excel (.xlsx) · ZIP DIAN (.zip)
+              </span>
+            )}
+          </div>
+        )}
       </label>
 
       {/* Loading overlay */}
