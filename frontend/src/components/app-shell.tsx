@@ -100,7 +100,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Brand accent stripe — top of every page */}
       <div
         className="h-[3px] w-full shrink-0"
-        style={{ background: "linear-gradient(90deg, #059669 0%, #0891b2 55%, #047857 100%)" }}
+        style={{ background: "linear-gradient(90deg, #4F46E5 0%, #8FB5FF 55%, #4338CA 100%)" }}
       />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">

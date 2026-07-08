@@ -261,7 +261,7 @@ export default function PerfilPage() {
           type="submit"
           disabled={loadingPerfil}
           className="flex items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-60"
-          style={{ background: "linear-gradient(135deg, #059669 0%, #0891b2 100%)" }}
+          style={{ background: "linear-gradient(135deg, #4F46E5 0%, #8FB5FF 100%)" }}
         >
           {loadingPerfil && <Loader2 className="h-4 w-4 animate-spin" />}
           {loadingPerfil ? "Guardando..." : "Guardar cambios"}
@@ -353,7 +353,7 @@ export default function PerfilPage() {
           type="submit"
           disabled={loadingPw || !pwActual || !pwNueva || !pwConfirm}
           className="flex items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-60"
-          style={{ background: "linear-gradient(135deg, #059669 0%, #0891b2 100%)" }}
+          style={{ background: "linear-gradient(135deg, #4F46E5 0%, #8FB5FF 100%)" }}
         >
           {loadingPw && <Loader2 className="h-4 w-4 animate-spin" />}
           {loadingPw ? "Actualizando..." : "Cambiar contraseña"}

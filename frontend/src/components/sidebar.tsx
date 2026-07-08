@@ -171,7 +171,7 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
       >
         <div
           className="h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
-          style={{ background: "linear-gradient(135deg, #059669 0%, #0891b2 100%)" }}
+          style={{ background: "linear-gradient(135deg, #4F46E5 0%, #8FB5FF 100%)" }}
         >
           C
         </div>

@@ -129,9 +129,9 @@ export function CausacionWizard() {
       <div className="flex-1 overflow-y-auto px-4 py-6 lg:px-8 lg:py-8">
         {/* KPI bar */}
         <div className="grid grid-cols-2 gap-3 mb-6 sm:grid-cols-4 lg:mb-8">
-          <KpiCard icon={FileText}    label="Facturas"       value={facturas.length} accent="#059669" sublabel={facturas.length ? "archivos cargados" : "Sin cargar aún"} />
+          <KpiCard icon={FileText}    label="Facturas"       value={facturas.length} accent="#4F46E5" sublabel={facturas.length ? "archivos cargados" : "Sin cargar aún"} />
           <KpiCard icon={Layers}      label="Ítems"          value={totalItems}      accent="#7c3aed" sublabel={totalItems ? "líneas de factura" : "Carga archivos primero"} />
-          <KpiCard icon={CheckCircle2} label="Mapeadas"      value={mapeados}        accent="#0891b2" sublabel={mapeados ? `de ${totalItems} ítems` : "Pendiente mapeo"} />
+          <KpiCard icon={CheckCircle2} label="Mapeadas"      value={mapeados}        accent="#8FB5FF" sublabel={mapeados ? `de ${totalItems} ítems` : "Pendiente mapeo"} />
           <KpiCard icon={Tag}         label="Comprobante"    value={tipoComp || "—"} accent="#d97706" sublabel={tipoComp ? "tipo seleccionado" : "Selecciona en config"} />
         </div>
 

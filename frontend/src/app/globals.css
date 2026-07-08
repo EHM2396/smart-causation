@@ -22,26 +22,26 @@
   --border-soft:   #e2e8f0;
   --border-strong: #cbd5e1;
 
-  /* ─── Brand — Esmeralda (finanzas, crecimiento) ─────────────── */
-  --brand:         #059669;
-  --brand-hover:   #047857;
-  --brand-light:   #d1fae5;
-  --brand-muted:   #ecfdf5;
-  --brand-btn:     #059669;   /* CTA button background — always dark enough for white text */
-  --brand-btn-hover: #047857;
-  --ring:          #6ee7b7;
+  /* ─── Brand — Índigo Ciolix ──────────────────────────────────── */
+  --brand:         #4F46E5;
+  --brand-hover:   #4338CA;
+  --brand-light:   #e0e7ff;
+  --brand-muted:   #eef2ff;
+  --brand-btn:     #4F46E5;   /* CTA button background — always dark enough for white text */
+  --brand-btn-hover: #4338CA;
+  --ring:          #a5b4fc;
 
-  /* ─── Sidebar — gris perla + esmeralda (≠ N1 dark navy) ─────── */
+  /* ─── Sidebar — gris perla + índigo ─────────────────────────── */
   --sidebar-bg:              #f5f6f8;
   --sidebar-text:            #4b5563;
-  --sidebar-text-active:     #065f46;
-  --sidebar-active-bg:       #d1fae5;
+  --sidebar-text-active:     #3730a3;
+  --sidebar-active-bg:       #e0e7ff;
   --sidebar-hover-bg:        #ecedf1;
   --sidebar-border:          #dde0e6;
   --sidebar-label:           #9ca3af;
   --sidebar-icon-bg:         #e9ecf0;
-  --sidebar-icon-active-bg:  #a7f3d0;
-  --sidebar-icon-active-color: #059669;
+  --sidebar-icon-active-bg:  #c7d2fe;
+  --sidebar-icon-active-color: #4F46E5;
 
   /* ─── Elevation / Shadows ───────────────────────────────────── */
   --shadow-xs:   0 1px 2px 0 rgb(0 0 0 / 0.04);
@@ -49,7 +49,7 @@
   --shadow-md:   0 4px 8px -2px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.05);
   --shadow-lg:   0 10px 24px -4px rgb(0 0 0 / 0.10), 0 4px 8px -4px rgb(0 0 0 / 0.06);
   --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.03);
-  --shadow-ring: 0 0 0 3px rgb(5 150 105 / 0.18);
+  --shadow-ring: 0 0 0 3px rgb(79 70 229 / 0.18);
 
   /* ─── Radius ─────────────────────────────────────────────────── */
   --radius-sm:  6px;
@@ -86,10 +86,10 @@
 }
 
 html[data-theme="dark"] {
-  --bg-app:      #07101e;
-  --bg-surface:  #0f1929;
-  --bg-elevated: #162033;
-  --bg-hover:    #1a2840;
+  --bg-app:      #0D1B2A;
+  --bg-surface:  #0f2030;
+  --bg-elevated: #152840;
+  --bg-hover:    #1a3050;
 
   --text-primary:   #f1f5f9;
   --text-secondary: #cbd5e1;
@@ -99,32 +99,32 @@ html[data-theme="dark"] {
   --border-soft:   #1e2d40;
   --border-strong: #2a3f58;
 
-  --brand:       #34d399;
-  --brand-hover: #6ee7b7;
-  --brand-light: rgba(52,211,153,0.15);
-  --brand-muted: rgba(52,211,153,0.08);
-  --brand-btn:     #059669;   /* button stays dark even in dark mode */
-  --brand-btn-hover: #047857;
-  --ring:        rgba(110,231,183,0.4);
+  --brand:       #8FB5FF;
+  --brand-hover: #a5c8ff;
+  --brand-light: rgba(143,181,255,0.15);
+  --brand-muted: rgba(143,181,255,0.08);
+  --brand-btn:     #4F46E5;   /* button stays brand indigo in dark mode */
+  --brand-btn-hover: #4338CA;
+  --ring:        rgba(143,181,255,0.4);
 
-  /* Sidebar dark — deep indigo */
-  --sidebar-bg:              #0c0b1e;
-  --sidebar-text:            #9490ba;
-  --sidebar-text-active:     #e2e8f0;
-  --sidebar-active-bg:       rgba(99,102,241,0.2);
+  /* Sidebar dark — navy Ciolix */
+  --sidebar-bg:              #0D1B2A;
+  --sidebar-text:            #8fb5cc;
+  --sidebar-text-active:     #e0e7ff;
+  --sidebar-active-bg:       rgba(79,70,229,0.2);
   --sidebar-hover-bg:        rgba(255,255,255,0.04);
   --sidebar-border:          rgba(255,255,255,0.06);
-  --sidebar-label:           #4e4870;
+  --sidebar-label:           #4a6070;
   --sidebar-icon-bg:         rgba(255,255,255,0.07);
-  --sidebar-icon-active-bg:  rgba(99,102,241,0.25);
-  --sidebar-icon-active-color: #818cf8;
+  --sidebar-icon-active-bg:  rgba(79,70,229,0.25);
+  --sidebar-icon-active-color: #8FB5FF;
 
   --shadow-xs:   0 1px 2px 0 rgb(0 0 0 / 0.2);
   --shadow-sm:   0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.2);
   --shadow-md:   0 4px 8px -2px rgb(0 0 0 / 0.35), 0 2px 4px -2px rgb(0 0 0 / 0.2);
   --shadow-lg:   0 10px 24px -4px rgb(0 0 0 / 0.4), 0 4px 8px -4px rgb(0 0 0 / 0.25);
   --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.25), 0 1px 2px -1px rgb(0 0 0 / 0.15);
-  --shadow-ring: 0 0 0 3px rgb(59 130 246 / 0.25);
+  --shadow-ring: 0 0 0 3px rgb(79 70 229 / 0.25);
 
   --success-bg:     #052e16;
   --success-border: #166534;

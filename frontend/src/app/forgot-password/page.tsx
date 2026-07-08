@@ -27,7 +27,7 @@ export default function ForgotPasswordPage() {
         <div className="mb-8 text-center">
           <div
             className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl"
-            style={{ background: "linear-gradient(135deg, #059669 0%, #0891b2 100%)" }}
+            style={{ background: "linear-gradient(135deg, #4F46E5 0%, #8FB5FF 100%)" }}
           >
             <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6 text-white" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -76,7 +76,7 @@ export default function ForgotPasswordPage() {
               type="submit"
               disabled={loading}
               className="flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-60"
-              style={{ background: "linear-gradient(135deg, #059669 0%, #0891b2 100%)" }}
+              style={{ background: "linear-gradient(135deg, #4F46E5 0%, #8FB5FF 100%)" }}
             >
               {loading && <Loader2 className="h-4 w-4 animate-spin" />}
               {loading ? "Enviando..." : "Enviar enlace"}
