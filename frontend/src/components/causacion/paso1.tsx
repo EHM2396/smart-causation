@@ -166,17 +166,46 @@ export function Paso1() {
         <>
           {/* File list */}
           {files.length > 0 && (
-            <div className="space-y-2">
-              {files.map((f) => (
-                <div key={f.name} className="flex items-center gap-3 rounded-lg border border-[var(--border-soft)] bg-[var(--bg-surface)] px-4 py-3">
-                  <FileSpreadsheet className="h-5 w-5 shrink-0 text-emerald-400" />
-                  <span className="flex-1 truncate text-sm text-[var(--text-secondary)]">{f.name}</span>
-                  <span className="text-xs text-[var(--text-muted)]">{(f.size / 1024).toFixed(0)} KB</span>
-                  <button onClick={() => removeFile(f.name)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
+            <div className="overflow-hidden rounded-xl border" style={{ borderColor: "var(--border-soft)" }}>
+              {/* Header */}
+              <div
+                className="flex items-center justify-between px-4 py-2.5"
+                style={{ backgroundColor: "var(--bg-elevated)", borderBottom: "1px solid var(--border-soft)" }}
+              >
+                <span className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>
+                  {files.length} archivo{files.length !== 1 ? "s" : ""} seleccionado{files.length !== 1 ? "s" : ""}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setFiles([])}
+                  className="flex items-center gap-1 text-xs font-medium transition-opacity hover:opacity-70"
+                  style={{ color: "var(--error)" }}
+                >
+                  <X className="h-3 w-3" /> Quitar todos
+                </button>
+              </div>
+              {/* Scrollable rows — max 5 visible */}
+              <div className="overflow-y-auto" style={{ maxHeight: "220px" }}>
+                {files.map((f) => (
+                  <div
+                    key={f.name}
+                    className="flex items-center gap-3 border-b px-4 py-2.5 last:border-b-0"
+                    style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}
+                  >
+                    <FileSpreadsheet className="h-4 w-4 shrink-0" style={{ color: "#34d399" }} />
+                    <span className="flex-1 truncate text-sm" style={{ color: "var(--text-secondary)" }}>{f.name}</span>
+                    <span className="shrink-0 text-xs" style={{ color: "var(--text-muted)" }}>{(f.size / 1024).toFixed(0)} KB</span>
+                    <button
+                      type="button"
+                      onClick={() => removeFile(f.name)}
+                      className="shrink-0 transition-colors"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -227,7 +256,9 @@ export function Paso1() {
 
           {omitidas.length === 0 && (
             <Button data-tutorial="parse-btn" onClick={handleParse} disabled={!files.length} size="lg" className="w-full sm:w-auto">
-              {`Parsear ${files.length ? `${files.length} archivo${files.length > 1 ? "s" : ""}` : "facturas"}`}
+              {files.length
+                ? `Procesar ${files.length} archivo${files.length > 1 ? "s" : ""}`
+                : "Procesar archivos"}
             </Button>
           )}
         </>
