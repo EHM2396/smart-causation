@@ -66,8 +66,8 @@ export default function LoginPage() {
             <Image
               src="/brand/Logo inicio sesion.png"
               alt="Ciolix"
-              width={200}
-              height={80}
+              width={160}
+              height={64}
               className="block dark:hidden"
               style={{ objectFit: "contain" }}
               priority
@@ -75,8 +75,8 @@ export default function LoginPage() {
             <Image
               src="/brand/Logo inicio sesion blanco.png"
               alt="Ciolix"
-              width={200}
-              height={80}
+              width={160}
+              height={64}
               className="hidden dark:block"
               style={{ objectFit: "contain" }}
               priority
