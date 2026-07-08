@@ -31,8 +31,6 @@
   --brand-btn-hover: #047857;
   --ring:          #6ee7b7;
 
-  --brand-logo-filter:       none;
-
   /* ─── Sidebar — gris perla + esmeralda (≠ N1 dark navy) ─────── */
   --sidebar-bg:              #f5f6f8;
   --sidebar-text:            #4b5563;
@@ -108,8 +106,6 @@ html[data-theme="dark"] {
   --brand-btn:     #059669;   /* button stays dark even in dark mode */
   --brand-btn-hover: #047857;
   --ring:        rgba(110,231,183,0.4);
-
-  --brand-logo-filter:       brightness(0) invert(1);
 
   /* Sidebar dark — deep indigo */
   --sidebar-bg:              #0c0b1e;

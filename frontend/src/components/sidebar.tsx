@@ -41,7 +41,17 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
           alt="Ciolix"
           width={120}
           height={36}
-          style={{ filter: "var(--brand-logo-filter)", objectFit: "contain" }}
+          className="block dark:hidden"
+          style={{ objectFit: "contain" }}
+          priority
+        />
+        <Image
+          src="/brand/Logo-blanco.webp"
+          alt="Ciolix"
+          width={120}
+          height={36}
+          className="hidden dark:block"
+          style={{ objectFit: "contain" }}
           priority
         />
       </div>
