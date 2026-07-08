@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Menu, X, LogOut, UserCircle } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -100,7 +100,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Brand accent stripe — top of every page */}
       <div
         className="h-[3px] w-full shrink-0"
-        style={{ background: "linear-gradient(90deg, #4F46E5 0%, #8FB5FF 55%, #4338CA 100%)" }}
+        style={{ background: "linear-gradient(90deg, var(--brand-btn) 0%, var(--brand-accent) 55%, var(--brand-btn-hover) 100%)" }}
       />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">

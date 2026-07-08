@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWizardStore } from "@/stores/wizard";
@@ -393,11 +393,11 @@ export function Paso2() {
             <div className="relative flex h-24 w-24 items-center justify-center">
               <span
                 className="absolute h-24 w-24 rounded-full border-4 border-transparent animate-spin"
-                style={{ borderTopColor: "#4F46E5", borderRightColor: "#8FB5FF", animationDuration: "1s" }}
+                style={{ borderTopColor: "var(--brand-btn)", borderRightColor: "var(--brand-accent)", animationDuration: "1s" }}
               />
               <span
                 className="absolute h-16 w-16 rounded-full border-4 border-transparent animate-spin"
-                style={{ borderTopColor: "#8FB5FF", animationDuration: "0.7s", animationDirection: "reverse" }}
+                style={{ borderTopColor: "var(--brand-accent)", animationDuration: "0.7s", animationDirection: "reverse" }}
               />
               <Sparkles className="h-8 w-8" style={{ color: "#fff" }} />
             </div>
@@ -415,7 +415,7 @@ export function Paso2() {
                 <span
                   key={i}
                   className="h-1.5 w-1.5 rounded-full"
-                  style={{ backgroundColor: "#4F46E5", animation: `sug-bounce 1.2s ease-in-out ${i * 0.15}s infinite` }}
+                  style={{ backgroundColor: "var(--brand-btn)", animation: `sug-bounce 1.2s ease-in-out ${i * 0.15}s infinite` }}
                 />
               ))}
             </div>

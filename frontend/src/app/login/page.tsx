@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -172,7 +172,7 @@ export default function LoginPage() {
             type="submit"
             disabled={loading}
             className="flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-60"
-            style={{ background: "linear-gradient(135deg, #4F46E5 0%, #8FB5FF 100%)" }}
+            style={{ background: "linear-gradient(135deg, var(--brand-btn) 0%, var(--brand-accent) 100%)" }}
           >
             {loading && <Loader2 className="h-4 w-4 animate-spin" />}
             {loading ? "Ingresando..." : "Ingresar"}

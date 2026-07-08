@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -84,7 +84,7 @@ export default function VerifyEmailPage() {
         <div className="mb-8 text-center">
           <div
             className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl"
-            style={{ background: "linear-gradient(135deg, #4F46E5 0%, #8FB5FF 100%)" }}
+            style={{ background: "linear-gradient(135deg, var(--brand-btn) 0%, var(--brand-accent) 100%)" }}
           >
             <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6 text-white" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />

@@ -29,6 +29,7 @@
   --brand-muted:   #eef2ff;
   --brand-btn:     #4F46E5;   /* CTA button background — always dark enough for white text */
   --brand-btn-hover: #4338CA;
+  --brand-accent:  #8FB5FF;   /* gradient end / light accent */
   --ring:          #a5b4fc;
 
   /* ─── Sidebar — gris perla + índigo ─────────────────────────── */
