@@ -125,6 +125,9 @@ export function CausacionWizard() {
       {/* Config panel — top strip on mobile, right sidebar on desktop */}
       <ConfigPanel />
 
+      {/* Separator */}
+      <div className="hidden lg:block w-px shrink-0" style={{ backgroundColor: "var(--border-soft)" }} />
+
       {/* Main */}
       <div className="flex-1 overflow-y-auto px-4 py-6 lg:px-8 lg:py-8">
         {/* KPI bar */}
