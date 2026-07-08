@@ -100,7 +100,7 @@ export default function RegistroPage() {
                 Crear cuenta
               </h1>
               <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-                Smart Causación
+                Ciolix
               </p>
             </div>
 

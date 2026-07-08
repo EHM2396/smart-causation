@@ -90,7 +90,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   const match = Object.entries(PAGE_META).find(([key]) => pathname.startsWith(key));
-  const pageMeta = match ? match[1] : { title: "Smart Causación", description: "" };
+  const pageMeta = match ? match[1] : { title: "Ciolix", description: "" };
 
   return (
     <div
@@ -151,7 +151,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {sidebarOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
             </button>
             <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-              Smart Causación
+              Ciolix
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -180,7 +180,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-3">
             {/* Page breadcrumb pill */}
             <div className="flex items-center gap-1.5">
-              <span className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>Smart Causación</span>
+              <span className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>Ciolix</span>
               <span style={{ color: "var(--border-strong)" }}>/</span>
               <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{pageMeta.title}</span>
             </div>

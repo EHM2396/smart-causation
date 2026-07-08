@@ -95,7 +95,7 @@ const STEPS: Step[] = [
   // ── Bienvenida ──────────────────────────────────────────────────────────────
   {
     id: "welcome",
-    title: "¡Bienvenido a Smart Causación!",
+    title: "¡Bienvenido a Ciolix!",
     body: "Esta plataforma automatiza la causación de facturas DIAN con inteligencia artificial y genera el archivo listo para importar en SIIGO. Te haré un recorrido por los dos módulos principales.",
     position: "center",
   },
@@ -270,7 +270,7 @@ const STEPS: Step[] = [
   // ── Fin ─────────────────────────────────────────────────────────────────────
   {
     id: "done",
-    title: "¡Ya conoces Smart Causación!",
+    title: "¡Ya conoces Ciolix!",
     body: "Tienes todo lo necesario para causar facturas DIAN. Recuerda el flujo: Catálogos → Cargar facturas → Mapear cuentas → Verificar → Validar partida → Generar SIIGO → Confirmar aprendizaje.",
     position: "center",
     isInfoStep: true,
@@ -597,7 +597,7 @@ export function Tutorial() {
                 </div>
               </div>
               <h2 style={{ fontSize: "1.2rem", fontWeight: 700, color: "var(--text-primary)", margin: 0 }}>
-                ¡Bienvenido a Smart Causación!
+                ¡Bienvenido a Ciolix!
               </h2>
               <p style={{ marginTop: 8, fontSize: "0.875rem", color: "var(--text-secondary)" }}>
                 ¿Deseas hacer un recorrido rápido para conocer cómo funciona la plataforma?

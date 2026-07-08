@@ -64,21 +64,25 @@ export default function LoginPage() {
         <div className="mb-8 text-center">
           <div className="mx-auto mb-4 flex items-center justify-center">
             <Image
-              src="/brand/Logo-Solo.webp"
+              src="/brand/Logo inicio sesion.png"
               alt="Ciolix"
-              width={72}
-              height={72}
+              width={200}
+              height={80}
+              className="block dark:hidden"
+              style={{ objectFit: "contain" }}
+              priority
+            />
+            <Image
+              src="/brand/Logo inicio sesion blanco.png"
+              alt="Ciolix"
+              width={200}
+              height={80}
+              className="hidden dark:block"
               style={{ objectFit: "contain" }}
               priority
             />
           </div>
-          <h1 className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>
-            Ciolix
-          </h1>
-          <p className="mt-1 text-xs font-medium tracking-wide" style={{ color: "var(--text-muted)" }}>
-            Conecta. Automatiza. Transforma.
-          </p>
-          <p className="mt-3 text-sm" style={{ color: "var(--text-muted)" }}>
+          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
             Inicia sesión para continuar
           </p>
         </div>
