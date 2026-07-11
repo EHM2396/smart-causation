@@ -5,6 +5,7 @@ Router: /causacion – flujo principal de causación contable.
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from typing import Annotated
 
@@ -53,6 +54,25 @@ async def parsear_facturas(
         facturas = causacion_service.parsear_archivo(contenido, archivo.filename or "")
     except Exception as exc:
         raise HTTPException(400, f"Error al parsear el archivo: {exc}") from exc
+
+    # Detectar facturas de venta: si el NIT de la empresa coincide con el emisor (proveedor),
+    # significa que la empresa es quien expide la factura → es una factura de VENTA, no de compra.
+    if empresa.nit:
+        nit_empresa = re.sub(r"[^\d]", "", empresa.nit)
+        if nit_empresa:
+            for fac in facturas:
+                nit_emisor = re.sub(r"[^\d]", "", fac.get("nit", "") or "")
+                if nit_emisor and nit_empresa == nit_emisor:
+                    num = fac.get("numero_dian") or archivo.filename or "desconocida"
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"[VENTA] {num}: Esta factura electrónica es una VENTA de tu empresa, "
+                            "no una compra. El módulo actual solo procesa facturas de compra. "
+                            "La causación de ventas estará disponible próximamente."
+                        ),
+                    )
+
     return facturas
 
 

@@ -3,7 +3,7 @@ import { useState, useCallback } from "react";
 import { useWizardStore } from "@/stores/wizard";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
+import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle2, Loader2, TrendingDown, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fmt } from "@/lib/utils";
 import type { Factura } from "@/lib/types";
@@ -13,13 +13,14 @@ export function Paso1() {
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [ventasDetectadas, setVentasDetectadas] = useState<{ filename: string; numero: string }[]>([]);
   const [omitidas, setOmitidas] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
 
   const handleFiles = (incoming: FileList | null) => {
     if (!incoming) return;
     const validos = Array.from(incoming).filter(
-      (f) => f.name.endsWith(".xlsx") || f.name.endsWith(".zip")
+      (f) => f.name.endsWith(".xlsx") || f.name.endsWith(".zip") || f.name.endsWith(".pdf")
     );
     setFiles((prev) => {
       const names = new Set(prev.map((f) => f.name));
@@ -27,15 +28,25 @@ export function Paso1() {
     });
   };
 
-  const removeFile = (name: string) => setFiles((prev) => prev.filter((f) => f.name !== name));
+  const clearMessages = () => { setErrors([]); setOmitidas([]); setVentasDetectadas([]); };
+
+  const removeFile = (name: string) => {
+    setFiles((prev) => {
+      const next = prev.filter((f) => f.name !== name);
+      if (next.length === 0) clearMessages();
+      return next;
+    });
+  };
 
   const handleParse = async () => {
     if (!files.length) return;
     setLoading(true);
     setErrors([]);
+    setVentasDetectadas([]);
     setOmitidas([]);
     const parsed: Factura[] = [];
     const errs: string[] = [];
+    const ventas: { filename: string; numero: string }[] = [];
 
     for (const file of files) {
       try {
@@ -45,12 +56,21 @@ export function Paso1() {
           for (const adv of f.advertencias ?? []) errs.push(`${file.name}: ${adv}`);
         }
       } catch (e) {
-        errs.push(`${file.name}: ${(e as Error).message}`);
+        const msg = (e as Error).message;
+        if (msg.includes("[VENTA]")) {
+          const match = msg.match(/\[VENTA\]\s*([^:]+):/);
+          ventas.push({ filename: file.name, numero: match?.[1]?.trim() ?? file.name });
+        } else {
+          errs.push(`${file.name}: ${msg}`);
+        }
       }
     }
 
+    setVentasDetectadas(ventas);
+
     if (!parsed.length) {
-      setErrors([...errs, "No se procesó ninguna factura válida."]);
+      if (!ventas.length) errs.push("No se procesó ninguna factura válida.");
+      setErrors(errs);
       setLoading(false);
       return;
     }
@@ -72,7 +92,10 @@ export function Paso1() {
     setOmitidas(causadasInfo.map((c) => c.numero_dian));
     setFacturasYaCausadas(causadasInfo);
     setFacturas(nuevas);
-    setPaso(2);
+    // Auto-avanzar solo si no hay nada que mostrarle al usuario antes de continuar
+    if (!ventas.length && !causadasInfo.length) {
+      setPaso(2);
+    }
     setLoading(false);
   };
 
@@ -81,7 +104,7 @@ export function Paso1() {
       <div>
         <h2 className="text-xl font-semibold text-[var(--text-primary)]">Cargar facturas DIAN</h2>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
-          Sube archivos <code className="text-[var(--brand)] font-medium">.xlsx</code> del portal DIAN o archivos <code className="text-[var(--brand)] font-medium">.zip</code> de factura electrónica DIAN. Puedes subir varios a la vez.
+          Sube archivos <code className="text-[var(--brand)] font-medium">.xlsx</code> del portal DIAN, archivos <code className="text-[var(--brand)] font-medium">.zip</code> o <code className="text-[var(--brand)] font-medium">.pdf</code> de factura electrónica DIAN. Puedes subir varios a la vez.
         </p>
       </div>
 
@@ -100,7 +123,7 @@ export function Paso1() {
           padding: files.length > 0 ? "0.75rem 1.25rem" : "3rem 1.5rem",
         }}
       >
-        <input type="file" multiple accept=".xlsx,.zip" className="sr-only" onChange={(e) => handleFiles(e.target.files)} />
+        <input type="file" multiple accept=".xlsx,.zip,.pdf" className="sr-only" onChange={(e) => handleFiles(e.target.files)} />
 
         {/* Modo compacto: ya hay archivos cargados */}
         {files.length > 0 ? (
@@ -136,7 +159,7 @@ export function Paso1() {
                 {dragging ? "Suelta los archivos aquí" : "Arrastra aquí o haz clic para seleccionar"}
               </p>
               <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-                Archivos <span className="font-medium" style={{ color: "var(--brand)" }}>.xlsx</span> del portal DIAN o <span className="font-medium" style={{ color: "var(--brand)" }}>.zip</span> de factura electrónica · múltiples permitidos
+                Archivos <span className="font-medium" style={{ color: "var(--brand)" }}>.xlsx</span> del portal DIAN, <span className="font-medium" style={{ color: "var(--brand)" }}>.zip</span> o <span className="font-medium" style={{ color: "var(--brand)" }}>.pdf</span> de factura electrónica · múltiples permitidos
               </p>
             </div>
             {!dragging && (
@@ -145,7 +168,7 @@ export function Paso1() {
                 style={{ backgroundColor: "var(--bg-elevated)", color: "var(--text-muted)", border: "1px solid var(--border-soft)" }}
               >
                 <FileSpreadsheet className="h-3.5 w-3.5" />
-                Excel (.xlsx) · ZIP DIAN (.zip)
+                Excel (.xlsx) · ZIP DIAN (.zip) · PDF DIAN (.pdf)
               </span>
             )}
           </div>
@@ -188,7 +211,7 @@ export function Paso1() {
                 </span>
                 <button
                   type="button"
-                  onClick={() => setFiles([])}
+                  onClick={() => { setFiles([]); clearMessages(); }}
                   className="flex items-center gap-1 text-xs font-medium transition-opacity hover:opacity-70"
                   style={{ color: "var(--error)" }}
                 >
@@ -217,6 +240,65 @@ export function Paso1() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Facturas de VENTA detectadas — Próximamente */}
+          {ventasDetectadas.length > 0 && (
+            <div
+              className="rounded-xl border p-4 space-y-3"
+              style={{ borderColor: "color-mix(in srgb, var(--brand-btn) 40%, transparent)", backgroundColor: "color-mix(in srgb, var(--brand-btn) 7%, transparent)" }}
+            >
+              <div className="flex items-start gap-3">
+                <div
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+                  style={{ background: "linear-gradient(135deg, var(--brand-btn) 0%, var(--brand-accent) 100%)" }}
+                >
+                  <TrendingDown className="h-4 w-4 text-white" />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-semibold" style={{ color: "var(--brand-btn)" }}>
+                      {ventasDetectadas.length === 1
+                        ? "1 factura de venta excluida"
+                        : `${ventasDetectadas.length} facturas de venta excluidas`}
+                    </p>
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold"
+                      style={{ backgroundColor: "color-mix(in srgb, var(--brand-btn) 15%, transparent)", color: "var(--brand-btn)", border: "1px solid color-mix(in srgb, var(--brand-btn) 35%, transparent)" }}
+                    >
+                      <Clock className="h-3 w-3" /> Próximamente
+                    </span>
+                  </div>
+                  <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                    {ventasDetectadas.length === 1
+                      ? "Esta factura corresponde a una venta de tu empresa y no puede causarse en este módulo."
+                      : "Estas facturas corresponden a ventas de tu empresa y no pueden causarse en este módulo."}
+                    {" "}El módulo de causación de ventas estará disponible próximamente.
+                  </p>
+                </div>
+              </div>
+              {/* Chips con los números excluidos */}
+              <div className="flex flex-wrap gap-1.5 pl-12">
+                {ventasDetectadas.map((v, i) => (
+                  <span
+                    key={i}
+                    className="rounded-full px-2.5 py-0.5 font-mono text-xs font-medium"
+                    style={{ backgroundColor: "color-mix(in srgb, var(--brand-btn) 12%, transparent)", color: "var(--brand-btn)", border: "1px solid color-mix(in srgb, var(--brand-btn) 25%, transparent)" }}
+                    title={v.filename}
+                  >
+                    {v.numero}
+                  </span>
+                ))}
+              </div>
+              {/* Botón continuar si hay facturas de compra válidas */}
+              {stored.length > 0 && (
+                <div className="pl-12">
+                  <Button size="sm" onClick={() => setPaso(2)}>
+                    Continuar con {stored.length} factura{stored.length !== 1 ? "s" : ""} de compra →
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 
@@ -257,15 +339,17 @@ export function Paso1() {
                   </span>
                 ))}
               </div>
-              <div className="pl-8">
-                <Button size="sm" onClick={() => setPaso(2)}>
-                  Continuar con las {stored.length} facturas restantes →
-                </Button>
-              </div>
+              {stored.length > 0 && (
+                <div className="pl-8">
+                  <Button size="sm" onClick={() => setPaso(2)}>
+                    Continuar con las {stored.length} facturas restantes →
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 
-          {omitidas.length === 0 && (
+          {omitidas.length === 0 && !(ventasDetectadas.length > 0 && stored.length > 0) && (
             <Button data-tutorial="parse-btn" onClick={handleParse} disabled={!files.length} size="lg" className="w-full sm:w-auto">
               {files.length
                 ? `Procesar ${files.length} archivo${files.length > 1 ? "s" : ""}`

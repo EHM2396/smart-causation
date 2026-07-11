@@ -1,10 +1,12 @@
 """
 Parser de archivos de facturas electronicas.
 
-Soporta tres formatos:
+Soporta cuatro formatos:
   1. Token DIAN (tabular xlsx): un archivo con MULTIPLES facturas, una fila por item.
   2. Individual (xlsx): un xlsx por factura (formato clave-valor + tabla de detalle).
   3. ZIP DIAN: un ZIP con un XML UBL 2.1 y un PDF, formato de factura electronica DIAN.
+  4. PDF DIAN: la representacion grafica de la factura electronica; contiene el XML
+     UBL 2.1 embebido como adjunto (formato PDF/A-3 exigido por el estandar DIAN).
 
 La funcion principal `parsear_archivo()` detecta automaticamente el formato
 y retorna una lista de facturas (incluso si es solo una).
@@ -33,9 +35,16 @@ def _norm(texto: str) -> str:
 def _to_float(valor: Any) -> float:
     if pd.isna(valor):
         return 0.0
-    limpio = re.sub(r"[^\d.,\-]", "", str(valor)).replace(",", ".")
+    s = re.sub(r"[^\d.,\-]", "", str(valor))
+    if not s:
+        return 0.0
+    # Formato colombiano: puntos como miles y coma como decimal (ej. "4.621,85")
+    if "," in s and re.search(r"\d\.\d{3}", s):
+        s = s.replace(".", "").replace(",", ".")
+    elif "," in s:
+        s = s.replace(",", ".")
     try:
-        return float(limpio)
+        return float(s)
     except ValueError:
         return 0.0
 
@@ -277,8 +286,11 @@ def _inferir_cod_impuesto(porcentaje: float) -> str:
 
 
 def parsear_archivo(archivo: BytesIO | str, nombre_archivo: str = "") -> list[dict]:
-    if nombre_archivo.lower().endswith(".zip"):
+    nombre_lower = nombre_archivo.lower()
+    if nombre_lower.endswith(".zip"):
         return _parsear_zip_dian(archivo, nombre_archivo)
+    if nombre_lower.endswith(".pdf"):
+        return _parsear_pdf_dian(archivo, nombre_archivo)
 
     try:
         df_check = pd.read_excel(archivo, dtype=str, nrows=5)
@@ -325,6 +337,307 @@ def _parsear_zip_dian(archivo: BytesIO | str, nombre_archivo: str = "") -> list[
         raise ValueError(f"'{nombre_archivo}': No es un archivo ZIP válido.") from e
 
     return [_parsear_xml_dian(xml_bytes, nombre_archivo)]
+
+
+def _parsear_pdf_dian(archivo: BytesIO, nombre_archivo: str) -> list[dict]:
+    """
+    Extrae el XML UBL 2.1 embebido en el PDF de factura electronica DIAN
+    (formato PDF/A-3) y lo parsea con el parser XML existente.
+
+    Soporta tres formas de adjunto que usa la DIAN:
+      1. /Root → /Names → /EmbeddedFiles (name tree plano o con /Kids)
+      2. /Root → /AF (Associated Files, PDF/A-3b)
+      3. Anotaciones FileAttachment en páginas
+    """
+    try:
+        import pypdf
+        from pypdf.generic import IndirectObject
+    except ImportError:
+        raise ValueError(
+            f"'{nombre_archivo}': pypdf no esta instalado. "
+            "Ejecute: pip install pypdf"
+        )
+
+    try:
+        reader = pypdf.PdfReader(archivo)
+    except Exception as e:
+        raise ValueError(f"'{nombre_archivo}': No se pudo abrir el PDF: {e}") from e
+
+    def resolve(obj):
+        return obj.get_object() if isinstance(obj, IndirectObject) else obj
+
+    def collect_name_tree(node) -> list:
+        """Recorre un PDF name tree (plano o con /Kids) y retorna lista [nombre, ref, ...]."""
+        items = []
+        node = resolve(node)
+        names = node.get("/Names")
+        if names is not None:
+            items.extend(names)
+        kids = node.get("/Kids")
+        if kids is not None:
+            for kid in kids:
+                items.extend(collect_name_tree(kid))
+        return items
+
+    def xml_de_filespec(filespec) -> bytes | None:
+        """Extrae bytes XML de un FileSpec si contiene un XML."""
+        try:
+            filespec = resolve(filespec)
+            ef = filespec.get("/EF")
+            if ef is None:
+                return None
+            ef = resolve(ef)
+            f_stream = ef.get("/F") or ef.get("/UF")
+            if f_stream is None:
+                return None
+            data: bytes = resolve(f_stream).get_data()
+            # Nombre del adjunto (puede ser clave /F en el filespec, no en /EF)
+            fname = str(filespec.get("/F", "") or filespec.get("/UF", "")).lower()
+            if fname.endswith(".xml") or data.lstrip()[:5] == b"<?xml":
+                return data
+        except Exception:
+            pass
+        return None
+
+    catalog = resolve(reader.trailer["/Root"])
+
+    # Método 1: /Root → /Names → /EmbeddedFiles (name tree — la más común en DIAN)
+    try:
+        names_dict_obj = catalog.get("/Names")
+        if names_dict_obj is not None:
+            names_dict = resolve(names_dict_obj)
+            ef_obj = names_dict.get("/EmbeddedFiles")
+            if ef_obj is not None:
+                name_list = collect_name_tree(ef_obj)
+                for i in range(0, len(name_list) - 1, 2):
+                    fname = str(name_list[i])
+                    filespec = resolve(name_list[i + 1])
+                    ef = filespec.get("/EF")
+                    if ef is None:
+                        continue
+                    ef = resolve(ef)
+                    f_stream = ef.get("/F") or ef.get("/UF")
+                    if f_stream is None:
+                        continue
+                    data: bytes = resolve(f_stream).get_data()
+                    if fname.lower().endswith(".xml") or data.lstrip()[:5] == b"<?xml":
+                        return [_parsear_xml_dian(data, fname or nombre_archivo)]
+    except Exception:
+        pass
+
+    # Método 2: /Root → /AF (Associated Files, PDF/A-3b)
+    try:
+        af_obj = catalog.get("/AF")
+        if af_obj is not None:
+            af_list = resolve(af_obj)
+            if not isinstance(af_list, list):
+                af_list = [af_list]
+            for item in af_list:
+                data = xml_de_filespec(item)
+                if data is not None:
+                    return [_parsear_xml_dian(data, nombre_archivo)]
+    except Exception:
+        pass
+
+    # Método 3: anotaciones FileAttachment en páginas
+    try:
+        for page in reader.pages:
+            annots = page.get("/Annots")
+            if annots is None:
+                continue
+            for annot_ref in annots:
+                annot = resolve(annot_ref)
+                if annot.get("/Subtype") != "/FileAttachment":
+                    continue
+                fs = annot.get("/FS")
+                if fs is None:
+                    continue
+                data = xml_de_filespec(fs)
+                if data is not None:
+                    return [_parsear_xml_dian(data, nombre_archivo)]
+    except Exception:
+        pass
+
+    # Método 4: PDF visual (Representación Gráfica) — extraer tabla con pdfplumber
+    if hasattr(archivo, "seek"):
+        archivo.seek(0)
+    return _parsear_pdf_plumber(archivo, nombre_archivo)
+
+
+def _dedup_desc_plumber(desc: str) -> str:
+    """Elimina la duplicación de descripción causada por el doble-columna del PDF DIAN."""
+    if not desc:
+        return desc
+    lines = [l.strip() for l in desc.split("\n") if l.strip()]
+    if not lines:
+        return desc
+    # Caso simple: dos líneas idénticas
+    if len(lines) == 2 and lines[0].upper() == lines[1].upper():
+        return lines[0]
+    # Caso general: unir y buscar la repetición por normalización sin espacios
+    full = " ".join(lines)
+    words = full.split()
+    n = len(words)
+    if n < 4:
+        return full
+    for split in range(max(1, n // 4), min(n, 3 * n // 4) + 1):
+        first_norm = "".join(words[:split]).upper()
+        rest_norm = "".join(words[split:]).upper()
+        min_match = max(4, len(first_norm) * 3 // 4)
+        if rest_norm.startswith(first_norm[:min_match]):
+            return " ".join(words[:split])
+    return full
+
+
+def _parsear_pdf_plumber(archivo: BytesIO, nombre_archivo: str) -> list[dict]:
+    """
+    Fallback para PDFs de Representación Gráfica DIAN (sin XML embebido).
+    Usa pdfplumber para extraer la tabla de ítems y el texto del encabezado.
+    Funciona con PDFs generados por la Solución Gratuita DIAN y formatos similares.
+    """
+    try:
+        import pdfplumber
+    except ImportError:
+        raise ValueError(
+            f"'{nombre_archivo}': El PDF no contiene XML embebido y pdfplumber no está instalado. "
+            "Ejecute: pip install pdfplumber"
+        )
+
+    try:
+        with pdfplumber.open(archivo) as pdf:
+            page1_text = pdf.pages[0].extract_text() or ""
+            page1_tables = pdf.pages[0].extract_tables() or []
+            page2_tables = pdf.pages[1].extract_tables() if len(pdf.pages) > 1 else []
+    except Exception as e:
+        raise ValueError(f"'{nombre_archivo}': No se pudo leer el PDF: {e}") from e
+
+    # Verificar que sea un PDF de factura electrónica DIAN
+    if "factura electr" not in page1_text.lower() and "cufe" not in page1_text.lower():
+        raise ValueError(
+            f"'{nombre_archivo}': Este PDF no parece ser una factura electrónica DIAN. "
+            "Sube el archivo ZIP de la DIAN que contiene el XML."
+        )
+
+    # ── Encabezado ──
+    def rval(pattern: str, text: str) -> str:
+        m = re.search(pattern, text, re.I | re.MULTILINE)
+        return m.group(1).strip() if m else ""
+
+    cufe = rval(r"\b([0-9a-fA-F]{64,})\b", page1_text).lower()
+    numero_dian = rval(r"N[uú]mero de Factura:\s*(\S+)", page1_text)
+    fecha = _to_fecha(rval(r"Fecha de Emisi[oó]n:\s*(\S+)", page1_text))
+
+    # Separar sección del emisor (antes de "Adquiriente")
+    emisor_text = re.split(r"Datos del Adquiriente", page1_text, maxsplit=1, flags=re.I)[0]
+    razon_social = rval(r"Raz[oó]n Social:\s*(.+?)(?:\n|$)", emisor_text)
+    nit = re.sub(r"[^\d\-]", "", rval(r"Nit del Emisor:\s*(\S+)", emisor_text))
+    ciudad = rval(r"Municipio / Ciudad:\s*(\S+)", emisor_text)
+
+    tipo_proveedor = "juridica"
+    if "natural" in rval(r"Tipo de Contribuyente:\s*(.+?)(?:\s{2,}|\n|$)", emisor_text).lower():
+        tipo_proveedor = "natural"
+
+    # ── Forma y medio de pago (solo XML/PDF, no Excel) ──
+    forma_pago_raw = rval(r"Forma\s+de\s+Pago[:\s]+(.+?)(?:\s{2,}|\n|$)", page1_text)
+    if not forma_pago_raw:
+        forma_pago_raw = rval(r"Condici[oó]n\s+de\s+Pago[:\s]+(.+?)(?:\s{2,}|\n|$)", page1_text)
+    forma_pago = forma_pago_raw.upper() if forma_pago_raw else ""
+
+    medio_pago_raw = rval(r"Medio\s+de\s+Pago[:\s]+(.+?)(?:\s{2,}|\n|$)", page1_text)
+    _PDF_MEDIO: dict[str, str] = {
+        "efectivo":    "efectivo",
+        "transfe":     "transferencia",
+        "debito ban":  "debito_bancario",
+        "debito":      "debito_bancario",
+        "tarjeta deb": "tarjeta_debito",
+        "tarjeta cre": "tarjeta_credito",
+        "credito":     "tarjeta_credito",
+        "cheque cert": "cheque_certificado",
+        "cheque":      "cheque",
+    }
+    medio_pago = ""
+    if medio_pago_raw:
+        norm_mp = medio_pago_raw.lower().strip()
+        for k, v in _PDF_MEDIO.items():
+            if k in norm_mp:
+                medio_pago = v
+                break
+        if not medio_pago:
+            medio_pago = norm_mp
+
+    # ── Tabla de ítems ──
+    items: list[dict] = []
+    items_table = next(
+        (t for t in page1_tables
+         if any(any(c and "Nro" in str(c) for c in row) for row in t[:3])),
+        None,
+    )
+
+    if items_table:
+        for row in items_table:
+            if not row or not row[0] or not re.match(r"^\d+$", str(row[0]).strip()):
+                continue
+
+            desc = _dedup_desc_plumber(str(row[2] or "").strip())
+            if not desc:
+                desc = f"Ítem {row[0]}"
+
+            # col[12] = Precio unitario de venta = base total de la línea (sin IVA)
+            base = _to_float(str(row[12] or "0").replace("$", ""))
+            if base == 0.0:
+                precio = _to_float(str(row[5] or "0").replace("$", ""))
+                cantidad = _to_float(str(row[4] or "1"))
+                base = round(precio * cantidad, 2)
+
+            iva_amount = _to_float(str(row[8] or "0").replace("$", ""))
+            iva_pct = _to_float(str(row[9] or "0"))
+
+            items.append({
+                "descripcion": desc,
+                "base": base,
+                "cod_impuesto": _inferir_cod_impuesto(iva_pct),
+                "porcentaje": iva_pct,
+                "valor_impuesto": round(iva_amount, 2),
+                "total_linea": round(base + iva_amount, 2),
+            })
+
+    if not items:
+        raise ValueError(
+            f"'{nombre_archivo}': No se encontró la tabla de ítems en el PDF. "
+            "Este formato de PDF no es compatible — sube el archivo ZIP de la DIAN."
+        )
+
+    # ── Total ──
+    total = 0.0
+    for table in page2_tables:
+        for row in table:
+            if not row:
+                continue
+            label = str(row[0] or "")
+            val_str = str(row[1] or "") if len(row) > 1 else ""
+            if "total factura" in label.lower() and val_str:
+                cand = _to_float(re.sub(r"[^\d.,]", "", val_str))
+                if cand > total:
+                    total = cand
+
+    return [{
+        "numero_dian":    numero_dian,
+        "cufe":           cufe,
+        "fecha":          fecha,
+        "nit":            nit,
+        "razon_social":   razon_social,
+        "tipo_proveedor": tipo_proveedor,
+        "regimen":        "",
+        "ciudad":         ciudad,
+        "medio_pago":     medio_pago,
+        "forma_pago":     forma_pago,
+        "total":          total,
+        "items":          items,
+        "advertencias":   [
+            "Extraído del PDF (representación gráfica). "
+            "Verifique los montos contra la factura original antes de causar."
+        ],
+    }]
 
 
 def _xml_text(el: ET.Element | None) -> str:
@@ -414,6 +727,49 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
         if addr is not None:
             ciudad = _xml_text(addr.find("cbc:CityName", _NS))
 
+    # ── Medios y forma de pago (para sugerencias de cuenta de pago) ──
+    _PM_CODE: dict[str, str] = {
+        "10": "efectivo",
+        "20": "cheque",
+        "21": "cheque_certificado",
+        "31": "transferencia",
+        "42": "debito_bancario",
+        "47": "tarjeta_debito",
+        "48": "tarjeta_credito",
+        "49": "tarjeta_credito",
+    }
+    medio_pago = ""
+    forma_pago = ""
+
+    payment_means = find("cac:PaymentMeans")
+    if payment_means is not None:
+        code_el = payment_means.find("cbc:PaymentMeansCode", _NS)
+        if code_el is not None and code_el.text:
+            medio_pago = _PM_CODE.get(code_el.text.strip(), code_el.text.strip())
+
+    payment_terms = find("cac:PaymentTerms")
+    if payment_terms is not None:
+        note_el = payment_terms.find("cbc:Note", _NS)
+        if note_el is not None and note_el.text:
+            forma_pago = note_el.text.strip()
+
+    # Inferir forma de pago por fecha de vencimiento si no está explícita
+    if not forma_pago:
+        issue_date = _xml_text(find("cbc:IssueDate"))
+        due_date = _xml_text(find("cbc:DueDate"))
+        if issue_date and due_date:
+            forma_pago = "CONTADO" if issue_date == due_date else "CRÉDITO"
+
+    # ── Comprador (buyer) — solo para validación compra vs venta ──
+    nit_comprador = ""
+    customer = find("cac:AccountingCustomerParty/cac:Party")
+    if customer is not None:
+        tax_scheme_c = customer.find("cac:PartyTaxScheme", _NS)
+        if tax_scheme_c is not None:
+            nit_c_el = tax_scheme_c.find("cbc:CompanyID", _NS)
+            if nit_c_el is not None and nit_c_el.text:
+                nit_comprador = re.sub(r"[^\d\-]", "", nit_c_el.text.strip())
+
     # ── Total ──
     monetary = find("cac:LegalMonetaryTotal")
     total = 0.0
@@ -483,10 +839,13 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
         "cufe":           cufe,
         "fecha":          fecha,
         "nit":            nit,
+        "nit_comprador":  nit_comprador,
         "razon_social":   razon_social,
         "tipo_proveedor": tipo_proveedor,
         "regimen":        "",
         "ciudad":         ciudad,
+        "medio_pago":     medio_pago,
+        "forma_pago":     forma_pago,
         "total":          total,
         "items":          items,
         "advertencias":   advertencias,

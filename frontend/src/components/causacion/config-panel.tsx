@@ -61,35 +61,69 @@ export function ConfigPanel() {
 
       {/* Consecutivo */}
       {tipoComp && consec && (
-        <div
-          className="mt-3 rounded-lg p-3 space-y-2"
-          style={{ backgroundColor: "var(--sidebar-icon-bg)", border: "1px solid var(--sidebar-border)" }}
-        >
-          <div className="flex justify-between text-xs">
-            <span className="text-[var(--text-muted)]">Último consecutivo</span>
-            <span className="font-mono text-[var(--text-secondary)]">{consec.ultimo}</span>
+        <div className="mt-3 rounded-xl overflow-hidden" style={{ border: "1px solid var(--border-soft)" }}>
+          {/* Header con gradiente */}
+          <div
+            className="flex items-center justify-between px-3 py-2.5"
+            style={{ background: "linear-gradient(135deg, var(--brand-btn) 0%, var(--brand-accent) 100%)" }}
+          >
+            <span className="text-xs font-semibold text-white/90 uppercase tracking-wide">Consecutivo</span>
+            <span className="font-mono text-base font-bold text-white leading-none">{consec.proximo}</span>
           </div>
-          <div className="flex justify-between text-xs">
-            <span className="text-[var(--text-muted)]">Próximo</span>
-            <span className="font-mono font-semibold text-[var(--brand)]">{consec.proximo}</span>
-          </div>
-          <div className="flex gap-2 pt-1">
-            <input
-              type="number"
-              min={1}
-              value={consecutivoManual || ""}
-              onChange={(e) => setConsecutivoManual(Number(e.target.value))}
-              placeholder="Ajustar..."
-              className="min-w-0 flex-1 h-7 rounded-md px-2 text-xs focus:outline-none focus:ring-1 focus:ring-[var(--brand)]"
-              style={{
-                border: "1px solid var(--sidebar-border)",
-                backgroundColor: "var(--sidebar-icon-bg)",
-                color: "var(--sidebar-text-active)",
-              }}
-            />
-            <Button size="sm" variant="outline" onClick={handleSetConsec} disabled={consecutivoManual <= 0} className="h-7 shrink-0 text-xs px-2">
-              Aplicar
-            </Button>
+
+          {/* Cuerpo */}
+          <div className="p-3 space-y-2.5" style={{ backgroundColor: "var(--bg-surface)" }}>
+            <div className="flex items-center justify-between">
+              <span className="text-xs" style={{ color: "var(--text-muted)" }}>Último usado</span>
+              <span className="font-mono text-xs" style={{ color: "var(--text-secondary)" }}>{consec.ultimo}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>Próximo</span>
+              <span
+                className="font-mono text-sm font-bold px-2 py-0.5 rounded-md"
+                style={{
+                  backgroundColor: "color-mix(in srgb, var(--brand-btn) 12%, transparent)",
+                  color: "var(--brand-btn)",
+                }}
+              >
+                {consec.proximo}
+              </span>
+            </div>
+
+            {/* Ajuste manual */}
+            <div className="pt-1" style={{ borderTop: "1px solid var(--border-soft)" }}>
+              <p className="text-xs mb-1.5" style={{ color: "var(--text-muted)" }}>Ajustar inicio a:</p>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  value={consecutivoManual || ""}
+                  onChange={(e) => setConsecutivoManual(Number(e.target.value))}
+                  placeholder="Número..."
+                  className="min-w-0 flex-1 h-8 rounded-lg px-3 text-xs focus:outline-none focus:ring-2 focus:ring-[var(--brand)]"
+                  style={{
+                    border: "1px solid var(--border-strong)",
+                    backgroundColor: "var(--bg-elevated)",
+                    color: "var(--text-primary)",
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={handleSetConsec}
+                  disabled={consecutivoManual <= 0}
+                  className="h-8 shrink-0 px-3 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  style={{
+                    background: consecutivoManual > 0
+                      ? "linear-gradient(135deg, var(--brand-btn) 0%, var(--brand-accent) 100%)"
+                      : "var(--bg-elevated)",
+                    color: consecutivoManual > 0 ? "#fff" : "var(--text-muted)",
+                    border: consecutivoManual > 0 ? "none" : "1px solid var(--border-soft)",
+                  }}
+                >
+                  Aplicar
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

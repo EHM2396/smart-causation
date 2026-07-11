@@ -69,10 +69,13 @@ export interface Factura {
   numero_dian: string;
   razon_social: string;
   nit: string;
+  nit_comprador?: string;
   fecha: string;
   total: number;
   tipo_proveedor?: string;
   regimen?: string;
+  medio_pago?: string;
+  forma_pago?: string;
   items: ItemFactura[];
   advertencias?: string[];
   _archivo?: string;

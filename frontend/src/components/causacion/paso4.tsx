@@ -4,12 +4,23 @@ import { useWizardStore } from "@/stores/wizard";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { fmt } from "@/lib/utils";
-import { Download, CheckCircle2, PartyPopper } from "lucide-react";
+import { Download, CheckCircle2, PartyPopper, AlertTriangle, Plus } from "lucide-react";
+
+function _parseApiError(raw: string): string {
+  // El mensaje puede ser "API 400: {"detail":"..."}" o directamente '{"detail":"..."}'
+  const body = raw.replace(/^API \d+:\s*/, "");
+  try {
+    const parsed = JSON.parse(body);
+    if (parsed?.detail) return String(parsed.detail);
+  } catch {}
+  return body || raw;
+}
 
 export function Paso4() {
   const { facturas, mapeos, tipoComp, centroCosto, reporte, xlsxBlob, reset, tutorialActivo } = useWizardStore();
   const [confirming, setConfirming] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
 
   const handleDownload = () => {
     if (tutorialActivo) return;
@@ -25,6 +36,7 @@ export function Paso4() {
   const handleConfirmar = async () => {
     if (tutorialActivo) { setConfirmed(true); return; }
     setConfirming(true);
+    setConfirmError(null);
     try {
       const items = facturas.map((f, idx) => ({
         factura: f,
@@ -33,7 +45,7 @@ export function Paso4() {
       await api.batchGenerar({ items, tipo_comprobante: tipoComp, centro_costo: centroCosto, confirmar: true });
       setConfirmed(true);
     } catch (e) {
-      alert((e as Error).message);
+      setConfirmError(_parseApiError((e as Error).message));
     }
     setConfirming(false);
   };
@@ -53,7 +65,9 @@ export function Paso4() {
           <PartyPopper className="h-12 w-12 text-emerald-400" />
           <p className="text-lg font-semibold text-[var(--text-primary)]">¡Importación confirmada!</p>
           <p className="text-sm text-[var(--text-secondary)]">El aprendizaje fue guardado. Próximo consecutivo: <strong className="text-[var(--text-primary)]">{Number(ultimoConsec) + 1}</strong></p>
-          <Button variant="outline" onClick={reset}>Procesar nuevas facturas</Button>
+          <Button variant="outline" onClick={reset} className="gap-2">
+            <Plus className="h-4 w-4" /> Procesar nuevas facturas
+          </Button>
         </div>
       ) : (
         <>
@@ -83,9 +97,38 @@ export function Paso4() {
             </Button>
           </div>
 
+          {/* Error inline al confirmar */}
+          {confirmError && (
+            <div className="flex items-start gap-3 rounded-xl border p-4" style={{ borderColor: "var(--error-border, #f87171)", backgroundColor: "var(--error-bg, rgba(239,68,68,0.07))" }}>
+              <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5 text-red-400" />
+              <div className="flex-1 space-y-2">
+                <p className="text-sm font-semibold text-red-400">No se pudo guardar el aprendizaje</p>
+                <p className="text-xs" style={{ color: "var(--text-secondary)" }}>{confirmError}</p>
+                <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  El archivo XLSX ya fue descargado e importado. Puedes procesar nuevas facturas o revisar el historial.
+                </p>
+                <Button size="sm" variant="outline" onClick={reset} className="gap-2 mt-1">
+                  <Plus className="h-3.5 w-3.5" /> Procesar nuevas facturas
+                </Button>
+              </div>
+            </div>
+          )}
+
           <p className="text-xs text-[var(--text-muted)]">
             "Confirmar" guarda el historial de decisiones para mejorar las sugerencias automáticas en futuras causaciones.
           </p>
+
+          {/* Acceso rápido para reiniciar sin confirmar */}
+          <div style={{ borderTop: "1px solid var(--border-soft)", paddingTop: "1rem" }}>
+            <button
+              type="button"
+              onClick={reset}
+              className="text-xs transition-opacity hover:opacity-70"
+              style={{ color: "var(--text-muted)" }}
+            >
+              + Procesar nuevas facturas sin confirmar aprendizaje
+            </button>
+          </div>
         </>
       )}
     </div>

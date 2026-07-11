@@ -198,7 +198,11 @@ export const api = {
       headers,
       body: form,
     });
-    if (!res.ok) throw new Error(`Parseo fallido ${res.status}`);
+    if (!res.ok) {
+      let detail = `Parseo fallido ${res.status}`;
+      try { const body = await res.json(); if (body?.detail) detail = body.detail; } catch {}
+      throw new Error(detail);
+    }
     return res.json();
   },
 

@@ -11,7 +11,7 @@ import { CausadasModal } from "@/components/causacion/causadas-modal";
 import { fmt } from "@/lib/utils";
 import {
   AlertTriangle, Plus, Sparkles, Loader2,
-  ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search, History, X,
+  ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search, History, X, Trash2,
 } from "lucide-react";
 import type { MapeoItem, CuentaOpcion, ImpuestoOut, FuenteMapeo, Sugerencia } from "@/lib/types";
 
@@ -62,7 +62,7 @@ function DataField({ label, value, mono = false }: { label: string; value: strin
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function Paso2() {
-  const { facturas, facturasYaCausadas, tipoComp, setPaso, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, tutorialActivo, tutorialMockMapeo } = useWizardStore();
+  const { facturas, facturasYaCausadas, tipoComp, setPaso, setFacturas, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, tutorialActivo, tutorialMockMapeo } = useWizardStore();
   const [modalCausadasOpen, setModalCausadasOpen] = useState(false);
 
   const { data: cuentasGasto = [] } = useQuery({ queryKey: ["cuentas-gasto"], queryFn: api.getCuentasGasto });
@@ -111,6 +111,74 @@ export function Paso2() {
   const goBackToList = () => {
     lastIdxRef.current = selectedIdx;
     setSelectedIdx(null);
+  };
+
+  // Eliminar una factura del proceso: re-indexa todo el estado local y el store
+  const handleDeleteFactura = (delIdx: number) => {
+    // Re-indexa Record<number, string>: elimina la clave delIdx, baja las mayores en 1
+    const reStr = (prev: Record<number, string>): Record<number, string> => {
+      const out: Record<number, string> = {};
+      for (const [k, v] of Object.entries(prev)) {
+        const i = Number(k);
+        if (i < delIdx) out[i] = v;
+        else if (i > delIdx) out[i - 1] = v;
+      }
+      return out;
+    };
+
+    // Re-indexa Record<number, boolean>
+    const reBool = (prev: Record<number, boolean>): Record<number, boolean> => {
+      const out: Record<number, boolean> = {};
+      for (const [k, v] of Object.entries(prev)) {
+        const i = Number(k);
+        if (i < delIdx) out[i] = v;
+        else if (i > delIdx) out[i - 1] = v;
+      }
+      return out;
+    };
+
+    // Re-indexa estados de ítems (clave = "idx_jdx")
+    const reItems = (prev: Record<string, string>): Record<string, string> => {
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(prev)) {
+        const sep = k.indexOf("_");
+        const i = Number(k.slice(0, sep));
+        const jStr = k.slice(sep);
+        if (i < delIdx) out[k] = v;
+        else if (i > delIdx) out[`${i - 1}${jStr}`] = v;
+      }
+      return out;
+    };
+
+    setCuentaPago(prev => reStr(prev));
+    setTipoProveedor(prev => reStr(prev));
+    setNitEdit(prev => reStr(prev));
+    setCuentaGastoGlobal(prev => reStr(prev));
+    setRfGlobal(prev => reStr(prev));
+    setRiGlobal(prev => reStr(prev));
+    setVerificadas(prev => reBool(prev));
+    setCuentaGastoItem(prev => reItems(prev));
+    setRfItem(prev => reItems(prev));
+    setRiItem(prev => reItems(prev));
+
+    // Re-indexar sugerencias en el store
+    const newSugs: Record<string, Sugerencia> = {};
+    for (const [k, v] of Object.entries(suggestions)) {
+      const sep = k.indexOf("_");
+      const i = Number(k.slice(0, sep));
+      const jStr = k.slice(sep);
+      if (i < delIdx) newSugs[k] = v;
+      else if (i > delIdx) newSugs[`${i - 1}${jStr}`] = v;
+    }
+    setSuggestions(newSugs);
+
+    // Ajustar índice seleccionado
+    if (selectedIdx !== null) {
+      if (selectedIdx === delIdx) setSelectedIdx(null);
+      else if (selectedIdx > delIdx) setSelectedIdx(selectedIdx - 1);
+    }
+
+    setFacturas(facturas.filter((_, i) => i !== delIdx));
   };
 
   // Hacer scroll al último ítem seleccionado al volver a la lista
@@ -620,17 +688,27 @@ export function Paso2() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <button
-                        className="flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-opacity hover:opacity-80"
-                        style={{
-                          borderColor: isListo ? "var(--border-soft)" : "var(--brand)",
-                          color: isListo ? "var(--text-muted)" : "var(--brand)",
-                          backgroundColor: isListo ? "var(--bg-elevated)" : "color-mix(in srgb, var(--brand) 8%, transparent)",
-                        }}
-                        onClick={(e) => { e.stopPropagation(); setSelectedIdx(idx); }}
-                      >
-                        {isListo ? "Editar" : "Configurar"} <ChevronRight className="h-3 w-3" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-opacity hover:opacity-80"
+                          style={{
+                            borderColor: isListo ? "var(--border-soft)" : "var(--brand)",
+                            color: isListo ? "var(--text-muted)" : "var(--brand)",
+                            backgroundColor: isListo ? "var(--bg-elevated)" : "color-mix(in srgb, var(--brand) 8%, transparent)",
+                          }}
+                          onClick={(e) => { e.stopPropagation(); setSelectedIdx(idx); }}
+                        >
+                          {isListo ? "Editar" : "Configurar"} <ChevronRight className="h-3 w-3" />
+                        </button>
+                        <button
+                          title="Eliminar factura"
+                          className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-red-500/10"
+                          style={{ color: "var(--text-muted)" }}
+                          onClick={(e) => { e.stopPropagation(); handleDeleteFactura(idx); }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -672,6 +750,19 @@ export function Paso2() {
       if (sug?.cuenta_pago_sugerida && esOrigenIA(sug.cuenta_pago_origen)) return sug;
     }
     return null;
+  })();
+
+  // Sugerencia basada en medio_pago extraído del XML/PDF (solo cuando no hay sugerencia IA)
+  const _MEDIOS_BANCO = ["transferencia", "debito_bancario", "cheque", "cheque_certificado", "tarjeta_debito", "tarjeta_credito"];
+  const cuentaPagoReglaSug = (() => {
+    if (!cuentaPagoVacia || sugsLoading || cuentaPagoIASug) return null;
+    const medio = factura.medio_pago ?? "";
+    if (!medio) return null;
+    let prefijo = "";
+    if (_MEDIOS_BANCO.includes(medio)) prefijo = "1110";
+    else if (medio === "efectivo") prefijo = "1105";
+    if (!prefijo) return null;
+    return cuentasPago.find(c => c.codigo.startsWith(prefijo)) ?? null;
   })();
 
   return (
@@ -829,6 +920,32 @@ export function Paso2() {
                     style={{ backgroundColor: "var(--brand)", color: "#fff" }}
                   >
                     <Sparkles className="h-3 w-3" /> Usar esta cuenta
+                  </button>
+                </div>
+              );
+            })()}
+            {!cuentaPagoIASug && cuentaPagoReglaSug && (() => {
+              const esBanco = _MEDIOS_BANCO.includes(factura.medio_pago ?? "");
+              const etiqueta = esBanco ? "Pago bancario → Bancos (1110)" : "Pago en efectivo → Caja (1105)";
+              const nombreCuenta = cuentaPagoReglaSug.nombre.length > 45 ? cuentaPagoReglaSug.nombre.slice(0, 45) + "…" : cuentaPagoReglaSug.nombre;
+              return (
+                <div
+                  className="rounded-lg px-3 py-2 space-y-1"
+                  style={{ backgroundColor: "color-mix(in srgb, #3b82f6 6%, transparent)", border: "1px solid color-mix(in srgb, #3b82f6 20%, transparent)" }}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Badge variant="info">Medio de pago</Badge>
+                    <span className="text-xs font-medium font-mono" style={{ color: "#3b82f6" }}>{cuentaPagoReglaSug.codigo}</span>
+                  </div>
+                  <p className="text-xs" style={{ color: "var(--text-secondary)" }}>{etiqueta} · {nombreCuenta}</p>
+                  <button
+                    type="button"
+                    disabled={isVerificada}
+                    onClick={() => setCuentaPago(p => ({ ...p, [selectedIdx]: cuentaPagoReglaSug!.codigo }))}
+                    className="flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
+                    style={{ backgroundColor: "#3b82f6", color: "#fff" }}
+                  >
+                    Usar esta cuenta
                   </button>
                 </div>
               );

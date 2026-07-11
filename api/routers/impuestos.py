@@ -125,7 +125,15 @@ async def cargar_excel(
 
         def _val(col: str) -> str | None:
             v = row.get(col)
-            return str(v).strip() if pd.notna(v) and str(v).strip() not in ("", "nan") else None
+            if not pd.notna(v):
+                return None
+            s = str(v).strip()
+            if s in ("", "nan"):
+                return None
+            # Soporta celdas con formato "123456 - Descripción" → extrae solo el código
+            if " - " in s:
+                s = s.split(" - ", 1)[0].strip()
+            return s or None
 
         def _num(col: str) -> float | None:
             v = row.get(col)
