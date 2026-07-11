@@ -62,8 +62,9 @@ function DataField({ label, value, mono = false }: { label: string; value: strin
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function Paso2() {
-  const { facturas, facturasYaCausadas, tipoComp, setPaso, setFacturas, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, tutorialActivo, tutorialMockMapeo } = useWizardStore();
+  const { facturas, facturasYaCausadas, tipoComp, setPaso, setFacturas, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, pdfUrls, tutorialActivo, tutorialMockMapeo } = useWizardStore();
   const [modalCausadasOpen, setModalCausadasOpen] = useState(false);
+  const [pdfModalOpen, setPdfModalOpen] = useState(false);
 
   const { data: cuentasGasto = [] } = useQuery({ queryKey: ["cuentas-gasto"], queryFn: api.getCuentasGasto });
   const { data: cuentasPago = [] } = useQuery({ queryKey: ["cuentas-pago"], queryFn: api.getCuentasPago });
@@ -856,9 +857,19 @@ export function Paso2() {
             style={{ backgroundColor: "var(--warning-bg)", border: "1px solid var(--warning-border)", color: "var(--warning-text)" }}
           >
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <ul className="space-y-0.5">
+            <ul className="flex-1 space-y-0.5">
               {factura.advertencias.map((w, i) => <li key={i}>{w}</li>)}
             </ul>
+            {factura._archivo && pdfUrls[factura._archivo] && (
+              <button
+                type="button"
+                onClick={() => setPdfModalOpen(true)}
+                className="ml-2 shrink-0 rounded px-2 py-0.5 text-[10px] font-semibold transition-opacity hover:opacity-80"
+                style={{ backgroundColor: "var(--warning-border)", color: "var(--warning-text)" }}
+              >
+                Ver PDF
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1303,6 +1314,46 @@ export function Paso2() {
         cuentasPago={cuentasPago}
         cuentasGasto={cuentasGasto}
       />
+
+      {/* Modal preview PDF */}
+      {pdfModalOpen && selectedIdx !== null && factura._archivo && pdfUrls[factura._archivo] && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(0,0,0,0.75)" }}
+          onClick={() => setPdfModalOpen(false)}
+        >
+          <div
+            className="relative flex flex-col rounded-xl overflow-hidden shadow-2xl"
+            style={{ width: "min(90vw, 960px)", height: "85vh", backgroundColor: "var(--bg-surface)", border: "1px solid var(--border-soft)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 shrink-0" style={{ borderBottom: "1px solid var(--border-soft)" }}>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                  {factura.numero_dian}
+                </span>
+                <span className="text-xs" style={{ color: "var(--text-muted)" }}>— {factura.razon_social}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPdfModalOpen(false)}
+                className="flex h-7 w-7 items-center justify-center rounded-lg transition-opacity hover:opacity-70"
+                style={{ backgroundColor: "var(--bg-app)", color: "var(--text-secondary)" }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {/* PDF iframe */}
+            <iframe
+              src={pdfUrls[factura._archivo]}
+              className="flex-1 w-full"
+              title="Vista previa PDF"
+              style={{ border: "none" }}
+            />
+          </div>
+        </div>
+      )}
     </div>
     </>
   );

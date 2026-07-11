@@ -9,7 +9,7 @@ import { fmt } from "@/lib/utils";
 import type { Factura } from "@/lib/types";
 
 export function Paso1() {
-  const { setFacturas, setFacturasYaCausadas, setPaso, facturas: stored } = useWizardStore();
+  const { setFacturas, setFacturasYaCausadas, setPaso, facturas: stored, setPdfUrls, pdfUrls } = useWizardStore();
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -48,7 +48,11 @@ export function Paso1() {
     const errs: string[] = [];
     const ventas: { filename: string; numero: string }[] = [];
 
+    const newPdfUrls: Record<string, string> = { ...pdfUrls };
     for (const file of files) {
+      if (file.name.endsWith(".pdf") && !newPdfUrls[file.name]) {
+        newPdfUrls[file.name] = URL.createObjectURL(file);
+      }
       try {
         const result: Factura[] = await api.parsearFacturas(file);
         for (const f of result) {
@@ -66,6 +70,7 @@ export function Paso1() {
       }
     }
 
+    setPdfUrls(newPdfUrls);
     setVentasDetectadas(ventas);
 
     if (!parsed.length) {

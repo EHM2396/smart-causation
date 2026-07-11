@@ -26,6 +26,7 @@ interface WizardState {
   reporte: BatchValidacionResponse | null;
   xlsxBlob: Blob | null;
   suggestions: Record<string, Sugerencia>;
+  pdfUrls: Record<string, string>;
   tutorialActivo: boolean;
   tutorialMockMapeo: TutorialMockMapeo | null;
 
@@ -39,6 +40,7 @@ interface WizardState {
   setReporte: (r: BatchValidacionResponse) => void;
   setXlsxBlob: (b: Blob) => void;
   setSuggestions: (s: Record<string, Sugerencia>) => void;
+  setPdfUrls: (urls: Record<string, string>) => void;
   setTutorialActivo: (v: boolean) => void;
   setTutorialMockMapeo: (m: TutorialMockMapeo | null) => void;
   reset: () => void;
@@ -55,6 +57,7 @@ const initial = {
   reporte: null,
   xlsxBlob: null,
   suggestions: {},
+  pdfUrls: {} as Record<string, string>,
   tutorialActivo: false,
   tutorialMockMapeo: null,
 };
@@ -71,7 +74,11 @@ export const useWizardStore = create<WizardState>((set) => ({
   setReporte: (reporte) => set({ reporte }),
   setXlsxBlob: (xlsxBlob) => set({ xlsxBlob }),
   setSuggestions: (suggestions) => set({ suggestions }),
+  setPdfUrls: (pdfUrls) => set({ pdfUrls }),
   setTutorialActivo: (tutorialActivo) => set({ tutorialActivo }),
   setTutorialMockMapeo: (tutorialMockMapeo) => set({ tutorialMockMapeo }),
-  reset: () => set(initial),
+  reset: () => set((state) => {
+    Object.values(state.pdfUrls).forEach((url) => { try { URL.revokeObjectURL(url); } catch {} });
+    return initial;
+  }),
 }));
