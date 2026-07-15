@@ -240,11 +240,10 @@ def limpiar_catalogo(db: DB, empresa: EmpresaActiva):
 
 @router.delete("/{codigo}", status_code=200)
 def eliminar_cuenta(codigo: str, db: DB, empresa: EmpresaActiva):
-    """Desactiva una cuenta por código (soft-delete)."""
     cuenta = cuentas_service.buscar_por_codigo(db, codigo, empresa_id=empresa.id)
     if not cuenta:
         raise HTTPException(404, f"Cuenta {codigo!r} no encontrada")
-    cuenta.activo = False
+    db.delete(cuenta)
     db.commit()
     return {"ok": True}
 

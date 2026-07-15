@@ -194,11 +194,10 @@ def limpiar_catalogo(db: DB, empresa: EmpresaActiva):
 
 @router.delete("/{codigo}", status_code=200)
 def eliminar_tipo(codigo: str, db: DB, empresa: EmpresaActiva):
-    """Desactiva un tipo de comprobante por código (soft-delete)."""
     tipo = tipos_service.buscar_por_codigo(db, codigo, empresa_id=empresa.id)
     if not tipo:
         raise HTTPException(404, f"Tipo {codigo!r} no encontrado")
-    tipo.activo = False
+    db.delete(tipo)
     db.commit()
     return {"ok": True}
 

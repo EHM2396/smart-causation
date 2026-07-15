@@ -27,10 +27,26 @@ from db.session import engine
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Crea las tablas si no existen (útil en desarrollo).
-    # En producción usar Alembic: `alembic upgrade head`
     Base.metadata.create_all(bind=engine)
+    _apply_migrations()
     yield
+
+
+def _apply_migrations() -> None:
+    """Migraciones incrementales idempotentes (ALTER TABLE IF NOT EXISTS)."""
+    from sqlalchemy import text
+    migrations = [
+        # empresa_id en consecutivos (multi-empresa)
+        "ALTER TABLE consecutivos ADD COLUMN IF NOT EXISTS empresa_id INTEGER REFERENCES empresas(id);",
+        # empresa_id en facturas_causadas (multi-empresa)
+        "ALTER TABLE facturas_causadas ADD COLUMN IF NOT EXISTS empresa_id INTEGER REFERENCES empresas(id);",
+    ]
+    with engine.begin() as conn:
+        for sql in migrations:
+            try:
+                conn.execute(text(sql))
+            except Exception:
+                pass
 
 
 app = FastAPI(

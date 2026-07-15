@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -16,8 +16,84 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { AlertCircle, Database, Receipt, BookOpen, Brain, Upload, Download, CheckCircle2, Trash2, Loader2, FileSpreadsheet } from "lucide-react";
+import { AlertCircle, AlertTriangle, Database, Receipt, BookOpen, Brain, Upload, Download, CheckCircle2, Trash2, Loader2, FileSpreadsheet } from "lucide-react";
 import type { CuentaOpcion, ImpuestoOut, TipoComprobanteOpcion, IARegla, IADecision } from "@/lib/types";
+
+// ─── Confirmación de eliminación ──────────────────────────────────────────────
+
+function ConfirmDeleteDialog({
+  item,
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  item: { codigo: string; nombre: string } | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  return (
+    <Dialog open={!!item} onOpenChange={(open) => { if (!open) onCancel(); }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-red-400" />
+            Confirmar eliminación
+          </DialogTitle>
+          <DialogDescription>
+            Esta acción no se puede deshacer.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="rounded-lg px-4 py-3 text-sm" style={{ backgroundColor: "rgba(239,68,68,0.07)", border: "1px solid rgba(239,68,68,0.2)", color: "var(--text-secondary)" }}>
+          ¿Eliminar <strong style={{ color: "var(--text-primary)" }}>{item?.codigo}</strong>
+          {item?.nombre ? <> — {item.nombre}</> : null}?
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={loading}
+            className="rounded-lg border px-4 py-1.5 text-sm font-medium transition-opacity hover:opacity-80 disabled:opacity-40"
+            style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)" }}
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={loading}
+            className="flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-semibold transition-opacity hover:opacity-80 disabled:opacity-40"
+            style={{ backgroundColor: "rgb(239,68,68)", color: "#fff" }}
+          >
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            Eliminar
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Toast de éxito ───────────────────────────────────────────────────────────
+
+function ToastOk({ msg, onDone }: { msg: string | null; onDone: () => void }) {
+  useEffect(() => {
+    if (!msg) return;
+    const t = setTimeout(onDone, 2500);
+    return () => clearTimeout(t);
+  }, [msg, onDone]);
+
+  if (!msg) return null;
+  return (
+    <div
+      className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium shadow-lg"
+      style={{ backgroundColor: "rgb(16,185,129)", color: "#fff", minWidth: 220 }}
+    >
+      <CheckCircle2 className="h-4 w-4 shrink-0" />
+      {msg}
+    </div>
+  );
+}
 
 // - Module-level stable search functions -
 const searchImpuesto = (i: ImpuestoOut, q: string) =>
@@ -500,6 +576,7 @@ function ImpuestosTab({
 }) {
   const qc = useQueryClient();
   const [deletingCodigo, setDeletingCodigo] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ codigo: string; nombre: string } | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [codigo, setCodigo] = useState("");
   const [nombre, setNombre] = useState("");
@@ -508,6 +585,8 @@ function ImpuestosTab({
   const [cuentaCre, setCuentaCre] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+  const [toast, setToast] = useState<string | null>(null);
+  const clearToast = useCallback(() => setToast(null), []);
   const [filterTipo, setFilterTipo] = useState("all");
 
   const impsFiltered = useMemo(() => {
@@ -565,6 +644,7 @@ function ImpuestosTab({
       qc.invalidateQueries({ queryKey: ["impuestos"] });
       setCodigo(""); setNombre(""); setTipo(""); setTarifa("0"); setCuentaCre("");
       setModalOpen(false);
+      setToast("Impuesto guardado correctamente");
     } catch (e) {
       setErr((e as Error).message);
     }
@@ -644,12 +724,7 @@ function ImpuestosTab({
                   <button
                     type="button"
                     disabled={deletingCodigo === i.codigo}
-                    onClick={async () => {
-                      setDeletingCodigo(i.codigo);
-                      try { await api.eliminarImpuesto(i.codigo); qc.invalidateQueries({ queryKey: ["impuestos"] }); }
-                      catch { /* ignore */ }
-                      setDeletingCodigo(null);
-                    }}
+                    onClick={() => setConfirmDelete({ codigo: i.codigo, nombre: i.nombre ?? "" })}
                     className="flex h-7 w-7 items-center justify-center rounded-lg transition-opacity hover:opacity-80 disabled:opacity-40"
                     style={{ color: "var(--error)" }}
                     title="Eliminar"
@@ -714,6 +789,24 @@ function ImpuestosTab({
           </div>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDeleteDialog
+        item={confirmDelete}
+        loading={deletingCodigo === confirmDelete?.codigo}
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={async () => {
+          if (!confirmDelete) return;
+          setDeletingCodigo(confirmDelete.codigo);
+          try {
+            await api.eliminarImpuesto(confirmDelete.codigo);
+            qc.invalidateQueries({ queryKey: ["impuestos"] });
+            setToast("Impuesto eliminado");
+          } catch { /* ignore */ }
+          setDeletingCodigo(null);
+          setConfirmDelete(null);
+        }}
+      />
+      <ToastOk msg={toast} onDone={clearToast} />
     </>
   );
 }
@@ -735,6 +828,9 @@ function PlanCuentasTab({
   const [fiscal, setFiscal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<{ codigo: string; nombre: string } | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const clearToast = useCallback(() => setToast(null), []);
 
   const cuentas = useMemo(() => {
     const uniq = new Map<string, CuentaOpcion>();
@@ -776,6 +872,7 @@ function PlanCuentasTab({
       qc.invalidateQueries({ queryKey: ["cuentas-gasto"] });
       setCodigo(""); setNombre(""); setFiscal(false);
       setModalOpen(false);
+      setToast("Cuenta guardada correctamente");
     } catch (e) {
       setErr((e as Error).message);
     }
@@ -855,15 +952,7 @@ function PlanCuentasTab({
                     <button
                       type="button"
                       disabled={deletingCodigo === c.codigo}
-                      onClick={async () => {
-                        setDeletingCodigo(c.codigo);
-                        try {
-                          await api.eliminarCuenta(c.codigo);
-                          qc.invalidateQueries({ queryKey: ["cuentas-pago"] });
-                          qc.invalidateQueries({ queryKey: ["cuentas-gasto"] });
-                        } catch { /* ignore */ }
-                        setDeletingCodigo(null);
-                      }}
+                      onClick={() => setConfirmDelete({ codigo: c.codigo, nombre: c.nombre })}
                       className="flex h-7 w-7 items-center justify-center rounded-lg transition-opacity hover:opacity-80 disabled:opacity-40"
                       style={{ color: "var(--error)" }}
                       title="Eliminar"
@@ -935,6 +1024,25 @@ function PlanCuentasTab({
           </div>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDeleteDialog
+        item={confirmDelete}
+        loading={deletingCodigo === confirmDelete?.codigo}
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={async () => {
+          if (!confirmDelete) return;
+          setDeletingCodigo(confirmDelete.codigo);
+          try {
+            await api.eliminarCuenta(confirmDelete.codigo);
+            qc.invalidateQueries({ queryKey: ["cuentas-pago"] });
+            qc.invalidateQueries({ queryKey: ["cuentas-gasto"] });
+            setToast("Cuenta eliminada");
+          } catch { /* ignore */ }
+          setDeletingCodigo(null);
+          setConfirmDelete(null);
+        }}
+      />
+      <ToastOk msg={toast} onDone={clearToast} />
     </>
   );
 }
@@ -945,11 +1053,14 @@ function PlanCuentasTab({
 function TiposTab({ tipos }: { tipos: TipoComprobanteOpcion[] }) {
   const qc = useQueryClient();
   const [deletingCodigo, setDeletingCodigo] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ codigo: string; nombre: string } | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [codigo, setCodigo] = useState("");
   const [titulo, setTitulo] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+  const [toast, setToast] = useState<string | null>(null);
+  const clearToast = useCallback(() => setToast(null), []);
 
   const dt = useDataTable(tipos, searchTipo, {
     sortFns: {
@@ -971,6 +1082,7 @@ function TiposTab({ tipos }: { tipos: TipoComprobanteOpcion[] }) {
       qc.invalidateQueries({ queryKey: ["tipos-comp"] });
       setCodigo(""); setTitulo("");
       setModalOpen(false);
+      setToast("Tipo de comprobante guardado correctamente");
     } catch (e) {
       setErr((e as Error).message);
     }
@@ -1022,12 +1134,7 @@ function TiposTab({ tipos }: { tipos: TipoComprobanteOpcion[] }) {
                   <button
                     type="button"
                     disabled={deletingCodigo === t.codigo}
-                    onClick={async () => {
-                      setDeletingCodigo(t.codigo);
-                      try { await api.eliminarTipo(t.codigo); qc.invalidateQueries({ queryKey: ["tipos-comp"] }); }
-                      catch { /* ignore */ }
-                      setDeletingCodigo(null);
-                    }}
+                    onClick={() => setConfirmDelete({ codigo: t.codigo, nombre: t.titulo })}
                     className="flex h-7 w-7 items-center justify-center rounded-lg transition-opacity hover:opacity-80 disabled:opacity-40"
                     style={{ color: "var(--error)" }}
                     title="Eliminar"
@@ -1073,6 +1180,24 @@ function TiposTab({ tipos }: { tipos: TipoComprobanteOpcion[] }) {
           </div>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDeleteDialog
+        item={confirmDelete}
+        loading={deletingCodigo === confirmDelete?.codigo}
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={async () => {
+          if (!confirmDelete) return;
+          setDeletingCodigo(confirmDelete.codigo);
+          try {
+            await api.eliminarTipo(confirmDelete.codigo);
+            qc.invalidateQueries({ queryKey: ["tipos-comp"] });
+            setToast("Tipo de comprobante eliminado");
+          } catch { /* ignore */ }
+          setDeletingCodigo(null);
+          setConfirmDelete(null);
+        }}
+      />
+      <ToastOk msg={toast} onDone={clearToast} />
     </>
   );
 }

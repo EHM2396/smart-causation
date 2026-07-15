@@ -125,7 +125,7 @@ def construir_movimientos(
             movimientos.append(_fila(
                 tipo_comprobante, consecutivo, fecha, nit,
                 cuenta_imp_d, val_imp, None,
-                "Iva generado",
+                "Iva descontable",
                 centro_costo, observaciones, cod_imp,
             ))
             total_debitos += val_imp

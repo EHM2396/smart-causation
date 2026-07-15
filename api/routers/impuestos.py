@@ -192,11 +192,10 @@ def limpiar_catalogo(db: DB, empresa: EmpresaActiva):
 
 @router.delete("/{codigo}", status_code=200)
 def eliminar_impuesto(codigo: str, db: DB, empresa: EmpresaActiva):
-    """Desactiva un impuesto por código (soft-delete)."""
     imp = impuestos_service.buscar_por_codigo(db, codigo, empresa_id=empresa.id)
     if not imp:
         raise HTTPException(404, f"Impuesto {codigo!r} no encontrado")
-    imp.activo = False
+    db.delete(imp)
     db.commit()
     return {"ok": True}
 
