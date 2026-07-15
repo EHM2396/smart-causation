@@ -62,12 +62,13 @@ function DataField({ label, value, mono = false }: { label: string; value: strin
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function Paso2() {
-  const { facturas, facturasYaCausadas, tipoComp, setPaso, setFacturas, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, pdfUrls, tutorialActivo, tutorialMockMapeo } = useWizardStore();
+  const { facturas, facturasYaCausadas, tipoComp, setPaso, setFacturas, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, pdfUrls, paso2Cache, setPaso2Cache, tutorialActivo, tutorialMockMapeo } = useWizardStore();
   const [modalCausadasOpen, setModalCausadasOpen] = useState(false);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
 
   const { data: cuentasGasto = [] } = useQuery({ queryKey: ["cuentas-gasto"], queryFn: api.getCuentasGasto });
   const { data: cuentasPago = [] } = useQuery({ queryKey: ["cuentas-pago"], queryFn: api.getCuentasPago });
+  const { data: todasCuentas = [] } = useQuery({ queryKey: ["cuentas-todas"], queryFn: api.getCuentasTodas });
   const { data: impuestosRaw = [], refetch: refetchImps } = useQuery({ queryKey: ["impuestos"], queryFn: api.getImpuestos });
 
   // null = lista de facturas, number = detalle de factura idx
@@ -82,6 +83,10 @@ export function Paso2() {
   const [cuentaGastoItem, setCuentaGastoItem] = useState<Record<string, string>>({});
   const [rfItem, setRfItem] = useState<Record<string, string>>({});
   const [riItem, setRiItem] = useState<Record<string, string>>({});
+  const [codImpuestoGlobal, setCodImpuestoGlobal] = useState<Record<number, string>>({});
+  const [codImpuestoItem, setCodImpuestoItem] = useState<Record<string, string>>({});
+  const [cuentaIvaGlobal, setCuentaIvaGlobal] = useState<Record<number, string>>({});
+  const [cuentaIvaItem, setCuentaIvaItem] = useState<Record<string, string>>({});
   const [dlgOpen, setDlgOpen] = useState<"retefuente" | "reteica" | null>(null);
 
   const [sugsLoading, setSugsLoading] = useState(false);
@@ -157,10 +162,14 @@ export function Paso2() {
     setCuentaGastoGlobal(prev => reStr(prev));
     setRfGlobal(prev => reStr(prev));
     setRiGlobal(prev => reStr(prev));
+    setCodImpuestoGlobal(prev => reStr(prev));
+    setCuentaIvaGlobal(prev => reStr(prev));
     setVerificadas(prev => reBool(prev));
     setCuentaGastoItem(prev => reItems(prev));
     setRfItem(prev => reItems(prev));
     setRiItem(prev => reItems(prev));
+    setCodImpuestoItem(prev => reItems(prev));
+    setCuentaIvaItem(prev => reItems(prev));
 
     // Re-indexar sugerencias en el store
     const newSugs: Record<string, Sugerencia> = {};
@@ -231,8 +240,28 @@ export function Paso2() {
 
     const pendientes = allItems.filter(({ key }) => !(key in suggestions));
 
+    // Restaurar estado completo si el usuario volvió desde paso3/4
+    const cache = useWizardStore.getState().paso2Cache;
+    if (cache && cache.facturaCount === facturas.length) {
+      setCuentaPago(cache.cuentaPago);
+      setTipoProveedor(cache.tipoProveedor);
+      setNitEdit(cache.nitEdit);
+      setCuentaGastoGlobal(cache.cuentaGastoGlobal);
+      setRfGlobal(cache.rfGlobal);
+      setRiGlobal(cache.riGlobal);
+      setCodImpuestoGlobal(cache.codImpuestoGlobal ?? {});
+      setCuentaIvaGlobal(cache.cuentaIvaGlobal ?? {});
+      setCuentaGastoItem(cache.cuentaGastoItem);
+      setRfItem(cache.rfItem);
+      setRiItem(cache.riItem);
+      setCodImpuestoItem(cache.codImpuestoItem ?? {});
+      setCuentaIvaItem(cache.cuentaIvaItem ?? {});
+      setVerificadas(cache.verificadas);
+      return;
+    }
+
     if (pendientes.length === 0) {
-      // Todo cacheado (re-montaje): reaplicar auto-fill desde el store para restaurar estado local
+      // Todo cacheado (re-montaje sin cache de paso2): reaplicar auto-fill desde el store para restaurar estado local
       autoFill(suggestions);
       return;
     }
@@ -284,6 +313,11 @@ export function Paso2() {
   const pagoOpts  = cuentaOpts(cuentasPago);
   const rfOpts    = impOpts(impuestosRaw, ["retefuente"]);
   const riOpts    = impOpts(impuestosRaw, ["reteica"]);
+  // Solo IVA (excluye ReteIVA e Impoconsumo)
+  const ivaOpts = impuestosRaw
+    .filter(i => (i.tipo_impuesto ?? "").toLowerCase() === "iva")
+    .map(i => ({ value: i.codigo, label: `${i.codigo} — ${i.tipo_impuesto ?? ""} ${i.tarifa ?? 0}%` }));
+  const todasCuentasOpts = cuentaOpts(todasCuentas);
   const getImpInfo = (cod: string) => impuestosRaw.find((i) => i.codigo === cod);
 
   const handleValidar = () => {
@@ -306,20 +340,32 @@ export function Paso2() {
         const item = factura.items[jdx];
         const key = `${idx}_${jdx}`;
         const cgFinal = cgGlobal || cuentaGastoItem[key] || "";
-        const cod = item.cod_impuesto ?? "";
-        const impInfo = cod ? getImpInfo(cod) : null;
+        // IVA override: global > item > original de la factura
+        const ivaGlobal = codImpuestoGlobal[idx];
+        const ivaItem = codImpuestoItem[key];
+        const codIva = (ivaGlobal !== undefined && ivaGlobal !== "") ? ivaGlobal
+                     : (ivaItem !== undefined && ivaItem !== "") ? ivaItem
+                     : item.cod_impuesto ?? "";
+        const impInfo = codIva ? getImpInfo(codIva) : null;
         const sug = suggestions[key];
         const fuente: FuenteMapeo = sug?.cuenta && cgFinal === sug.cuenta
           ? origenToFuente(sug.origen)
           : "manual";
 
+        // Cuenta contable IVA: override manual > cuenta del catálogo de impuesto
+        const cuentaIvaGlobalVal = cuentaIvaGlobal[idx];
+        const cuentaIvaItemVal = cuentaIvaItem[key];
+        const cuentaIvaFinal = (cuentaIvaGlobalVal && cuentaIvaGlobalVal !== "") ? cuentaIvaGlobalVal
+                             : (cuentaIvaItemVal && cuentaIvaItemVal !== "") ? cuentaIvaItemVal
+                             : impInfo?.cta_compras ?? "";
+
         mapeos.push({
           idx_factura: newIdx, descripcion: item.descripcion, base: item.base,
-          cod_impuesto: impInfo?.codigo ?? cod,
+          cod_impuesto: impInfo?.codigo ?? codIva,
           porcentaje: impInfo?.tarifa ?? item.porcentaje ?? 0,
           valor_impuesto: item.valor_impuesto,
           cuenta_gasto: cgFinal, fuente,
-          cuenta_impuesto_deb: impInfo?.cta_compras ?? "",
+          cuenta_impuesto_deb: cuentaIvaFinal,
           cuenta_impuesto_cre: "", es_retencion: false,
           cuenta_pago: pago, cuenta_pago_nombre: pagoNombre,
         });
@@ -376,6 +422,12 @@ export function Paso2() {
     }
 
     if (facturasVerificadas.length === 0) return;
+    setPaso2Cache({
+      facturaCount: facturas.length,
+      cuentaPago, tipoProveedor, nitEdit, cuentaGastoGlobal,
+      rfGlobal, riGlobal, codImpuestoGlobal, cuentaIvaGlobal,
+      cuentaGastoItem, rfItem, riItem, codImpuestoItem, cuentaIvaItem, verificadas,
+    });
     setFacturasParaCausar(facturasVerificadas);
     setMapeos(mapeos);
     setPaso(3);
@@ -425,7 +477,7 @@ export function Paso2() {
                 Ya causadas ({facturasYaCausadas.length})
               </button>
             )}
-            <Button variant="outline" size="sm" onClick={() => setPaso(1)}>← Volver</Button>
+            <Button variant="outline" size="sm" onClick={() => { setPaso2Cache(null); setPaso(1); }}>← Volver</Button>
             <Button
               data-tutorial="validar-partida-btn"
               size="sm"
@@ -1005,41 +1057,72 @@ export function Paso2() {
             </button>
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-3">
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium flex items-center gap-1.5" style={{ color: "var(--info-text)", opacity: 0.85 }}>
-              Cuenta gasto/costo
-              {cuentaGastoGlobalVacia && <span className="text-[10px] font-semibold uppercase tracking-wide rounded px-1 py-0.5" style={{ backgroundColor: "rgba(245,158,11,0.25)", color: "rgb(245,158,11)", opacity: 1 }}>O por ítem</span>}
-            </label>
-            <div className={cuentaGastoGlobalVacia ? "require-pulse rounded-lg" : ""}>
+        <div className="space-y-3">
+          {/* Row 1: Cuenta gasto + Retenciones */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium flex items-center gap-1.5" style={{ color: "var(--info-text)", opacity: 0.85 }}>
+                Cuenta gasto/costo
+                {cuentaGastoGlobalVacia && <span className="text-[10px] font-semibold uppercase tracking-wide rounded px-1 py-0.5" style={{ backgroundColor: "rgba(245,158,11,0.25)", color: "rgb(245,158,11)", opacity: 1 }}>O por ítem</span>}
+              </label>
+              <div className={cuentaGastoGlobalVacia ? "require-pulse rounded-lg" : ""}>
+                <Combobox
+                  options={gastoOpts}
+                  value={cuentaGastoGlobal[selectedIdx] ?? ""}
+                  onChange={(v) => setCuentaGastoGlobal((p) => ({ ...p, [selectedIdx]: v }))}
+                  placeholder="Aplica a todos los ítems…"
+                  disabled={isVerificada}
+                  clearable
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium" style={{ color: "var(--info-text)", opacity: 0.85 }}>Retefuente</label>
               <Combobox
-                options={gastoOpts}
-                value={cuentaGastoGlobal[selectedIdx] ?? ""}
-                onChange={(v) => setCuentaGastoGlobal((p) => ({ ...p, [selectedIdx]: v }))}
-                placeholder="Aplica a todos los ítems…"
+                options={rfOpts}
+                value={rfGlobal[selectedIdx] ?? ""}
+                onChange={(v) => setRfGlobal((p) => ({ ...p, [selectedIdx]: v }))}
+                placeholder="Código retefuente…"
                 disabled={isVerificada}
+                clearable
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium" style={{ color: "var(--info-text)", opacity: 0.85 }}>ReteICA</label>
+              <Combobox
+                options={riOpts}
+                value={riGlobal[selectedIdx] ?? ""}
+                onChange={(v) => setRiGlobal((p) => ({ ...p, [selectedIdx]: v }))}
+                placeholder="Código reteica…"
+                disabled={isVerificada}
+                clearable
               />
             </div>
           </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium" style={{ color: "var(--info-text)", opacity: 0.85 }}>Retefuente</label>
-            <Combobox
-              options={rfOpts}
-              value={rfGlobal[selectedIdx] ?? ""}
-              onChange={(v) => setRfGlobal((p) => ({ ...p, [selectedIdx]: v }))}
-              placeholder="Código retefuente…"
-              disabled={isVerificada}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium" style={{ color: "var(--info-text)", opacity: 0.85 }}>ReteICA</label>
-            <Combobox
-              options={riOpts}
-              value={riGlobal[selectedIdx] ?? ""}
-              onChange={(v) => setRiGlobal((p) => ({ ...p, [selectedIdx]: v }))}
-              placeholder="Código reteica…"
-              disabled={isVerificada}
-            />
+          {/* Row 2: IVA global (código + cuenta contable) */}
+          <div className="grid grid-cols-2 gap-3 pt-2" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium" style={{ color: "var(--info-text)", opacity: 0.85 }}>IVA — código global</label>
+              <Combobox
+                options={ivaOpts}
+                value={codImpuestoGlobal[selectedIdx] ?? ""}
+                onChange={(v) => setCodImpuestoGlobal((p) => ({ ...p, [selectedIdx]: v }))}
+                placeholder="Código IVA para todos…"
+                disabled={isVerificada}
+                clearable
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium" style={{ color: "var(--info-text)", opacity: 0.85 }}>IVA — cuenta contable global</label>
+              <Combobox
+                options={todasCuentasOpts}
+                value={cuentaIvaGlobal[selectedIdx] ?? ""}
+                onChange={(v) => setCuentaIvaGlobal((p) => ({ ...p, [selectedIdx]: v }))}
+                placeholder="Cuenta del PUC para IVA…"
+                disabled={isVerificada}
+                clearable
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -1126,6 +1209,11 @@ export function Paso2() {
                 const iaNoDisponible = sug?.origen === "ia_no_disponible";
                 const itemSinCuenta = !currentVal && !cuentaGastoGlobal[selectedIdx];
 
+                const ivaGlobalActivo = !!(codImpuestoGlobal[selectedIdx] && codImpuestoGlobal[selectedIdx] !== "");
+                const ivaEfectivoCod = ivaGlobalActivo ? codImpuestoGlobal[selectedIdx]
+                  : (codImpuestoItem[key] && codImpuestoItem[key] !== "" ? codImpuestoItem[key] : item.cod_impuesto ?? "");
+                const ivaEfectivoInfo = ivaEfectivoCod ? getImpInfo(ivaEfectivoCod) : null;
+
                 return (
                   <tr
                     key={jdx}
@@ -1144,16 +1232,31 @@ export function Paso2() {
                       {fmt(item.base)}
                     </td>
 
-                    {/* Impuesto */}
-                    <td className="px-4 py-3">
-                      {impInfo ? (
-                        <div className="space-y-0.5">
-                          <Badge variant="info">{impInfo.tipo_impuesto} {impInfo.tarifa}%</Badge>
-                          <p className="font-mono text-xs" style={{ color: "var(--text-muted)" }}>{impInfo.codigo}</p>
-                        </div>
-                      ) : (
-                        <span className="text-xs" style={{ color: "var(--text-muted)" }}>—</span>
-                      )}
+                    {/* Impuesto (editable: código + cuenta contable) */}
+                    <td className="px-4 py-3 space-y-1.5" style={{ minWidth: "200px" }}>
+                      <Combobox
+                        options={ivaOpts}
+                        value={ivaEfectivoCod}
+                        onChange={(v) => setCodImpuestoItem(p => ({ ...p, [key]: v }))}
+                        disabled={isVerificada || ivaGlobalActivo}
+                        placeholder={ivaGlobalActivo ? "← Global" : "Sin IVA"}
+                        clearable={!ivaGlobalActivo}
+                      />
+                      {(() => {
+                        const cuentaIvaGlobalActiva = !!(cuentaIvaGlobal[selectedIdx] && cuentaIvaGlobal[selectedIdx] !== "");
+                        const cuentaIvaEfectiva = cuentaIvaGlobalActiva ? cuentaIvaGlobal[selectedIdx]
+                          : (cuentaIvaItem[key] && cuentaIvaItem[key] !== "" ? cuentaIvaItem[key] : ivaEfectivoInfo?.cta_compras ?? "");
+                        return (
+                          <Combobox
+                            options={todasCuentasOpts}
+                            value={cuentaIvaEfectiva}
+                            onChange={(v) => setCuentaIvaItem(p => ({ ...p, [key]: v }))}
+                            disabled={isVerificada || cuentaIvaGlobalActiva}
+                            placeholder={cuentaIvaGlobalActiva ? "← Global" : "Cuenta contable IVA…"}
+                            clearable={!cuentaIvaGlobalActiva}
+                          />
+                        );
+                      })()}
                     </td>
 
                     {/* Cuenta gasto */}
@@ -1207,6 +1310,7 @@ export function Paso2() {
                           onChange={(v) => setCuentaGastoItem((p) => ({ ...p, [key]: v }))}
                           disabled={isVerificada || !!cuentaGastoGlobal[selectedIdx]}
                           placeholder={cuentaGastoGlobal[selectedIdx] ? "← Usando cuenta global" : iaSugerencia ? "Acepta sugerencia o busca otra…" : "Buscar cuenta…"}
+                          clearable
                         />
 
                         {/* Avisos */}
@@ -1237,6 +1341,7 @@ export function Paso2() {
                             onChange={(v) => setRfItem((p) => ({ ...p, [key]: v }))}
                             placeholder="Retefuente…"
                             disabled={isVerificada}
+                            clearable
                           />
                         </td>
                         <td className="min-w-[160px] px-4 py-3">
@@ -1246,6 +1351,7 @@ export function Paso2() {
                             onChange={(v) => setRiItem((p) => ({ ...p, [key]: v }))}
                             placeholder="ReteICA…"
                             disabled={isVerificada}
+                            clearable
                           />
                         </td>
                       </>

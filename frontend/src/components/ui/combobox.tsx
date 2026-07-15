@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronsUpDown, Search } from "lucide-react";
+import { Check, ChevronsUpDown, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Option {
@@ -16,6 +16,7 @@ interface ComboboxProps {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  clearable?: boolean;
 }
 
 export function Combobox({
@@ -25,6 +26,7 @@ export function Combobox({
   placeholder = "Buscar...",
   disabled,
   className,
+  clearable,
 }: ComboboxProps) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
@@ -153,7 +155,20 @@ export function Combobox({
         }}
       >
         <span className="truncate">{selected ? selected.label : placeholder}</span>
-        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0" style={{ color: "var(--text-muted)" }} />
+        <div className="ml-2 flex shrink-0 items-center gap-0.5">
+          {clearable && selected && !disabled && (
+            <span
+              role="button"
+              aria-label="Limpiar selección"
+              onClick={(e) => { e.stopPropagation(); onChange(""); }}
+              className="flex h-4 w-4 items-center justify-center rounded-full transition-opacity hover:opacity-70"
+              style={{ color: "var(--text-muted)" }}
+            >
+              <X className="h-3 w-3" />
+            </span>
+          )}
+          <ChevronsUpDown className="h-4 w-4" style={{ color: "var(--text-muted)" }} />
+        </div>
       </button>
 
       {mounted && dropdown ? createPortal(dropdown, document.body) : null}

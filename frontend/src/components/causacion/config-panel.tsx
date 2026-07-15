@@ -14,6 +14,7 @@ export function ConfigPanel() {
   const [histOpen, setHistOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [consecutivoManual, setConsecutivoManual] = useState(0);
+  const [aplicando, setAplicando] = useState(false);
   const [hovered, setHovered] = useState(false);
   const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -32,9 +33,14 @@ export function ConfigPanel() {
 
   const handleSetConsec = async () => {
     if (!tipoComp || consecutivoManual <= 0) return;
-    await api.setConsecutivo(tipoComp, consecutivoManual);
-    refetchConsec();
-    setConsecutivoManual(0);
+    setAplicando(true);
+    try {
+      await api.setConsecutivo(tipoComp, consecutivoManual);
+      refetchConsec();
+      setConsecutivoManual(0);
+    } finally {
+      setAplicando(false);
+    }
   };
 
   const tipoOpts = tipos.map((t) => ({ value: t.codigo, label: `${t.codigo} — ${t.titulo}` }));
@@ -110,8 +116,8 @@ export function ConfigPanel() {
                 <button
                   type="button"
                   onClick={handleSetConsec}
-                  disabled={consecutivoManual <= 0}
-                  className="h-8 shrink-0 px-3 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  disabled={consecutivoManual <= 0 || aplicando}
+                  className="h-8 shrink-0 px-3 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
                   style={{
                     background: consecutivoManual > 0
                       ? "linear-gradient(135deg, var(--brand-btn) 0%, var(--brand-accent) 100%)"
@@ -120,7 +126,13 @@ export function ConfigPanel() {
                     border: consecutivoManual > 0 ? "none" : "1px solid var(--border-soft)",
                   }}
                 >
-                  Aplicar
+                  {aplicando && (
+                    <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                  )}
+                  {aplicando ? "Aplicando..." : "Aplicar"}
                 </button>
               </div>
             </div>

@@ -15,6 +15,24 @@ interface TutorialMockMapeo {
   verificadas: Record<number, boolean>;
 }
 
+interface Paso2Cache {
+  facturaCount: number;
+  cuentaPago: Record<number, string>;
+  tipoProveedor: Record<number, string>;
+  nitEdit: Record<number, string>;
+  cuentaGastoGlobal: Record<number, string>;
+  rfGlobal: Record<number, string>;
+  riGlobal: Record<number, string>;
+  codImpuestoGlobal: Record<number, string>;
+  cuentaIvaGlobal: Record<number, string>;
+  cuentaGastoItem: Record<string, string>;
+  rfItem: Record<string, string>;
+  riItem: Record<string, string>;
+  codImpuestoItem: Record<string, string>;
+  cuentaIvaItem: Record<string, string>;
+  verificadas: Record<number, boolean>;
+}
+
 interface WizardState {
   paso: PasoWizard;
   tipoComp: string;
@@ -27,6 +45,7 @@ interface WizardState {
   xlsxBlob: Blob | null;
   suggestions: Record<string, Sugerencia>;
   pdfUrls: Record<string, string>;
+  paso2Cache: Paso2Cache | null;
   tutorialActivo: boolean;
   tutorialMockMapeo: TutorialMockMapeo | null;
 
@@ -41,6 +60,7 @@ interface WizardState {
   setXlsxBlob: (b: Blob) => void;
   setSuggestions: (s: Record<string, Sugerencia>) => void;
   setPdfUrls: (urls: Record<string, string>) => void;
+  setPaso2Cache: (cache: Paso2Cache | null) => void;
   setTutorialActivo: (v: boolean) => void;
   setTutorialMockMapeo: (m: TutorialMockMapeo | null) => void;
   reset: () => void;
@@ -58,6 +78,7 @@ const initial = {
   xlsxBlob: null,
   suggestions: {},
   pdfUrls: {} as Record<string, string>,
+  paso2Cache: null as Paso2Cache | null,
   tutorialActivo: false,
   tutorialMockMapeo: null,
 };
@@ -75,6 +96,7 @@ export const useWizardStore = create<WizardState>((set) => ({
   setXlsxBlob: (xlsxBlob) => set({ xlsxBlob }),
   setSuggestions: (suggestions) => set({ suggestions }),
   setPdfUrls: (pdfUrls) => set({ pdfUrls }),
+  setPaso2Cache: (paso2Cache) => set({ paso2Cache }),
   setTutorialActivo: (tutorialActivo) => set({ tutorialActivo }),
   setTutorialMockMapeo: (tutorialMockMapeo) => set({ tutorialMockMapeo }),
   reset: () => set((state) => {

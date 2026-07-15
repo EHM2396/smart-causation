@@ -37,6 +37,12 @@ def get_metodos_pago(db: DB, empresa: EmpresaActiva):
     return cuentas_service.listar_metodos_pago(db, empresa_id=empresa.id)
 
 
+@router.get("/todas", response_model=list[CuentaOpcion])
+def get_todas_cuentas(db: DB, empresa: EmpresaActiva):
+    cuentas = cuentas_service.listar_todas(db, empresa_id=empresa.id)
+    return [{"codigo": c.codigo, "nombre": c.nombre, "label": f"{c.codigo} – {c.nombre}"} for c in cuentas]
+
+
 @router.get("/sugerencias", response_model=list[dict])
 def get_sugerencias(
     descripcion: Annotated[str, Query(min_length=3)],

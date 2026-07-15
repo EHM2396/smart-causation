@@ -155,6 +155,7 @@ export const api = {
   // Cuentas
   getCuentasGasto: () => req<CuentaOpcion[]>("/cuentas/gasto"),
   getCuentasPago: () => req<CuentaOpcion[]>("/cuentas/pago"),
+  getCuentasTodas: () => req<CuentaOpcion[]>("/cuentas/todas"),
   crearCuenta: (body: { codigo: string; nombre: string; fiscal?: boolean }) =>
     req<{ id: number; codigo: string; nombre: string }>("/cuentas/", {
       method: "POST",
