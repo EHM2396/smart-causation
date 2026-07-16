@@ -37,8 +37,8 @@ except ImportError:
 # Modelo a usar (puede cambiarse sin tocar el resto del código)
 _MODELO_DEFAULT = "gpt-4o-mini"
 
-# Máximo de cuentas enviadas al modelo para no exceder tokens
-_MAX_CUENTAS_PROMPT = 100
+# Máximo de cuentas enviadas al modelo por ítem (después de rankear por relevancia)
+_MAX_CUENTAS_PROMPT = 40
 
 # Umbral de confianza para preselección automática (Fase 2)
 _UMBRAL_CONFIANZA_ALTA = 0.80
@@ -68,6 +68,91 @@ _PALABRAS_INYECCION = (
     "disregard",
     "act as",
 )
+
+
+# ── Sinónimos PUC colombianos para ranking de cuentas ────────────────────────
+# Mapea palabras clave del ítem a palabras que aparecen en nombres de cuentas PUC.
+# Permite que "cemento" encuentre cuentas con "materiales" aunque la palabra exacta no coincida.
+_SINONIMOS_PUC: list[tuple[set[str], set[str]]] = [
+    # (palabras del ítem)  →  (palabras que buscamos en el nombre de la cuenta)
+    ({"cemento", "arena", "varilla", "ladrillo", "hierro", "tuberia", "tubería",
+      "bloque", "madera", "agregado", "concreto", "acero", "viga", "tornillo",
+      "pintura", "pvc", "cable", "alambre", "obra", "construccion", "construcción"},
+     {"material", "suministro", "construccion", "construcción", "ferreter", "obra"}),
+
+    ({"honorario", "honorarios", "asesoria", "asesoría", "consultoria", "consultoría",
+      "juridico", "jurídico", "contable", "contador", "abogado", "ingeniero"},
+     {"honorario", "asesoria", "asesoría", "consultoria", "profesional"}),
+
+    ({"arrendamiento", "alquiler", "canon", "renta", "arriendo"},
+     {"arrendamiento", "alquiler"}),
+
+    ({"acueducto", "agua", "energia", "energía", "electricidad", "gas", "telefono",
+      "teléfono", "internet", "vigilancia", "aseo", "correo", "domicilio"},
+     {"servicio", "public", "acueducto", "energia", "energía", "telefono", "internet"}),
+
+    ({"mantenimiento", "reparacion", "reparación", "repuesto", "pieza", "refaccion"},
+     {"mantenimiento", "reparacion", "reparación"}),
+
+    ({"papeleria", "papelería", "resma", "cartucho", "toner", "tóner", "lapiz",
+      "lápiz", "boligrafo", "bolígrafo", "utiles", "útiles"},
+     {"papeleria", "papelería", "utiles", "útiles", "oficina"}),
+
+    ({"seguro", "poliza", "póliza", "arl", "prima"},
+     {"seguro", "poliza", "póliza"}),
+
+    ({"combustible", "gasolina", "acpm", "diesel", "lubricante"},
+     {"combustible", "gasolina", "lubricante"}),
+
+    ({"publicidad", "marketing", "propaganda", "aviso", "pauta", "impresion"},
+     {"publicidad", "propaganda", "marketing"}),
+
+    ({"transporte", "flete", "envio", "envío", "mensajeria", "mensajería", "courier"},
+     {"transporte", "flete", "envio", "envío"}),
+
+    ({"hotel", "hospedaje", "viatico", "viático", "tiquete", "aéreo", "aereo"},
+     {"viaje", "viatico", "viático", "hospedaje"}),
+
+    ({"nomina", "nómina", "salario", "sueldo", "prestacion", "cesantia"},
+     {"nomina", "nómina", "salario", "personal"}),
+]
+
+_STOP_WORDS_ES = {
+    "de", "la", "el", "los", "las", "del", "un", "una", "y", "o",
+    "a", "en", "por", "para", "con", "que", "al", "se", "su",
+}
+
+
+def _rankear_cuentas(cuentas: list[dict], descripciones: list[str]) -> list[dict]:
+    """
+    Ordena las cuentas por relevancia a las descripciones dadas y retorna las
+    primeras _MAX_CUENTAS_PROMPT. Usa matching de palabras clave + sinónimos PUC.
+    Sin dependencias externas (solo regex/set), latencia <1ms.
+    """
+    if len(cuentas) <= _MAX_CUENTAS_PROMPT:
+        return cuentas
+
+    # Tokens de las descripciones
+    tokens_items: set[str] = set()
+    for desc in descripciones:
+        tokens_items.update(
+            t for t in re.findall(r"[a-záéíóúñ]{3,}", desc.lower())
+            if t not in _STOP_WORDS_ES
+        )
+
+    # Expandir con sinónimos: si el ítem menciona "cemento", agregamos "material"
+    tokens_expandidos = set(tokens_items)
+    for palabras_item, palabras_cuenta in _SINONIMOS_PUC:
+        if tokens_items & palabras_item:
+            tokens_expandidos.update(palabras_cuenta)
+
+    def _score(cuenta: dict) -> int:
+        nombre = cuenta["nombre"].lower()
+        # +2 por cada token expandido que aparece en el nombre de la cuenta
+        return sum(2 for t in tokens_expandidos if t in nombre)
+
+    scored = sorted(cuentas, key=_score, reverse=True)
+    return scored[:_MAX_CUENTAS_PROMPT]
 
 
 # ── Tipos de retorno ──────────────────────────────────────────────────────────
@@ -265,6 +350,7 @@ def sugerir_batch(
     cuentas_gasto: list[dict],
     codigos_impuesto: list[dict],
     cuentas_pago: list[dict] | None = None,
+    ejemplos_aprendizaje: list[dict] | None = None,
     modelo: str = _MODELO_DEFAULT,
 ) -> dict[str, "SugerenciaIA | None"]:
     """
@@ -279,13 +365,14 @@ def sugerir_batch(
     combo_to_keys: dict[tuple, list[str]] = {}
     for item in items:
         desc = _sanitizar_descripcion(item.get("descripcion") or "")
-        tipo = item.get("tipo_proveedor") or None  # no asumir tipo fijo
+        tipo = item.get("tipo_proveedor") or None
+        nombre_prov = (item.get("nombre_proveedor") or "")[:80]
         if not desc:
             continue
         if _detectar_inyeccion(desc):
             logger.warning("sugerir_batch: injection detectado en %r — omitido", desc[:80])
             continue
-        combo = (desc, tipo)
+        combo = (desc, tipo, nombre_prov)
         combo_to_keys.setdefault(combo, []).append(item["key"])
 
     if not combo_to_keys:
@@ -304,7 +391,8 @@ def sugerir_batch(
     if len(chunks) == 1:
         sug_por_combo.update(
             _procesar_chunk_batch(
-                chunks[0], cuentas_gasto, codigos_impuesto, cuentas_pago, modelo, api_key
+                chunks[0], cuentas_gasto, codigos_impuesto, cuentas_pago, modelo, api_key,
+                ejemplos_aprendizaje,
             )
         )
     else:
@@ -314,6 +402,7 @@ def sugerir_batch(
                 executor.submit(
                     _procesar_chunk_batch,
                     chunk, cuentas_gasto, codigos_impuesto, cuentas_pago, modelo, api_key,
+                    ejemplos_aprendizaje,
                 ): idx
                 for idx, chunk in enumerate(chunks)
             }
@@ -342,6 +431,7 @@ def _procesar_chunk_batch(
     cuentas_pago: list[dict] | None,
     modelo: str,
     api_key: str,
+    ejemplos_aprendizaje: list[dict] | None = None,
 ) -> dict[tuple, SugerenciaIA]:
     """Procesa un chunk de combos en 1 llamada a la API."""
     codigos_gasto_validos = {c["codigo"] for c in cuentas_gasto}
@@ -350,8 +440,8 @@ def _procesar_chunk_batch(
 
     try:
         client  = _OpenAI(api_key=api_key)
-        prompt  = _construir_prompt_batch(chunk, cuentas_gasto, codigos_impuesto, cuentas_pago)
-        max_tok = min(1500, max(300, 70 * len(chunk)))
+        prompt  = _construir_prompt_batch(chunk, cuentas_gasto, codigos_impuesto, cuentas_pago, ejemplos_aprendizaje)
+        max_tok = min(2500, max(600, 150 * len(chunk)))
 
         response = client.chat.completions.create(
             model=modelo,
@@ -417,9 +507,10 @@ def _construir_prompt(
     tipo_proveedor: str,
     cuentas_pago: list[dict] | None = None,
 ) -> str:
+    cuentas_rankeadas = _rankear_cuentas(cuentas_gasto, [descripcion])
     cuentas_str = "\n".join(
         f"  {c['codigo']} - {c['nombre']}"
-        for c in cuentas_gasto[:_MAX_CUENTAS_PROMPT]
+        for c in cuentas_rankeadas
     )
     impuestos_str = "\n".join(
         f"  {i['cod']} - {i['naturaleza']} {i['porcentaje']}%"
@@ -439,11 +530,21 @@ Cuentas de pago/acreedor disponibles (código - nombre):
 """
         cuenta_pago_json_field = '\n  "cuenta_pago": "<código de la lista de pago o null>",'
 
-    return f"""Eres un asistente de contabilidad colombiana especializado en causación \
-de facturas electrónicas DIAN para importar a SIIGO.
+    return f"""Eres un experto en contabilidad colombiana bajo el PUC (Decreto 2650). \
+Clasificas ítems de facturas DIAN para causación en SIIGO.
 
 Ítem de factura: "{descripcion}"
-Tipo de proveedor: {tipo_proveedor if tipo_proveedor else "desconocido (puede ser persona natural o empresa)"}
+Tipo de proveedor: {tipo_proveedor if tipo_proveedor else "desconocido"}
+
+REGLAS DE CLASIFICACIÓN (en orden de prioridad):
+- Materiales construcción, ferreterías, cemento, varillas, tubería, madera, cable → materiales/suministros. NUNCA papelería.
+- Papelería, resmas, tóner, útiles de oficina → útiles y papelería.
+- Honorarios, asesoría, consultoría, servicios profesionales → honorarios.
+- Arrendamiento, alquiler, canon → arrendamiento.
+- Servicios públicos, vigilancia, aseo, internet → servicios.
+- Mantenimiento, reparación, repuestos → mantenimiento.
+- Si ninguna cuenta coincide con el tipo real del ítem → null con confianza < 0.4.
+  NO uses papelería como opción por defecto.
 
 Cuentas PUC de gasto disponibles (código - nombre):
 {cuentas_str}
@@ -451,7 +552,7 @@ Cuentas PUC de gasto disponibles (código - nombre):
 Códigos de impuesto disponibles (código - tipo - tarifa):
 {impuestos_str}
 {pago_section}
-Responde ÚNICAMENTE en este formato JSON exacto, sin texto adicional:
+Responde ÚNICAMENTE en este formato JSON exacto:
 {{{cuenta_pago_json_field}
   "cuenta_gasto": "<código de 8 dígitos de la lista o null>",
   "cod_impuesto": "<código de impuesto de la lista o null>",
@@ -459,12 +560,10 @@ Responde ÚNICAMENTE en este formato JSON exacto, sin texto adicional:
   "explicacion": "<razón breve en español, máximo 80 caracteres>"
 }}
 
-Reglas estrictas:
-- Usa SOLO códigos de las listas proporcionadas. Nunca inventes códigos.
-- confianza >= 0.8 solo si estás muy seguro de la clasificación.
-- Si el ítem no coincide claramente con ninguna cuenta, usa null y baja confianza.
-- Para cuenta_pago: elige la más apropiada para el tipo de proveedor ({tipo_proveedor}).
-- Responde solo con el JSON, sin explicaciones fuera del JSON."""
+Reglas adicionales:
+- Usa SOLO códigos de las listas. Nunca inventes códigos.
+- confianza >= 0.8 solo si la cuenta coincide claramente con el tipo del ítem.
+- Responde solo con el JSON."""
 
 
 def _llamar_openai(
@@ -535,10 +634,15 @@ def _construir_prompt_batch(
     cuentas_gasto: list[dict],
     codigos_impuesto: list[dict],
     cuentas_pago: list[dict] | None = None,
+    ejemplos_aprendizaje: list[dict] | None = None,
 ) -> str:
+    # Rankear cuentas por relevancia a los ítems del chunk (desc + nombre proveedor)
+    descripciones = [f"{desc} {nombre_prov}" for desc, _tipo, nombre_prov in combos]
+    cuentas_rankeadas = _rankear_cuentas(cuentas_gasto, descripciones)
+
     cuentas_str = "\n".join(
         f"  {c['codigo']} - {c['nombre']}"
-        for c in cuentas_gasto[:_MAX_CUENTAS_PROMPT]
+        for c in cuentas_rankeadas
     )
     impuestos_str = "\n".join(
         f"  {i['cod']} - {i['naturaleza']} {i['porcentaje']}%"
@@ -552,14 +656,56 @@ def _construir_prompt_batch(
         pago_section = f"\nCuentas de pago/acreedor disponibles:\n{pago_str}\n"
         cuenta_pago_field = '\n      "cuenta_pago": "<código de la lista de pago o null>",'
 
+    # Sección de ejemplos aprendidos — vacía para usuarios nuevos, crece con el uso
+    ejemplos_section = ""
+    if ejemplos_aprendizaje:
+        # Seleccionar los ejemplos más relevantes a los ítems de este chunk
+        tokens_chunk = set()
+        for desc in [f"{d} {n}" for d, _t, n in combos]:
+            tokens_chunk.update(
+                t for t in re.findall(r"[a-záéíóúñ]{3,}", desc.lower())
+                if t not in _STOP_WORDS_ES
+            )
+
+        def _relevancia_ejemplo(e: dict) -> int:
+            nombre_e = e["descripcion"].lower()
+            return sum(1 for t in tokens_chunk if t in nombre_e)
+
+        ordenados = sorted(ejemplos_aprendizaje, key=_relevancia_ejemplo, reverse=True)
+        top = ordenados[:25]  # máximo 25 ejemplos en el prompt
+
+        if top:
+            lineas = "\n".join(
+                f'  "{e["descripcion"][:80]}" → {e["cuenta"]}'
+                + (f' ({e["nombre_cuenta"][:40]})' if e.get("nombre_cuenta") else "")
+                for e in top
+            )
+            ejemplos_section = f"""
+Decisiones previas de esta empresa (úsalas como guía principal):
+{lineas}
+
+"""
+
     items_str = "\n".join(
         f'{i + 1}. descripcion="{desc}"'
+        + (f', proveedor="{nombre_prov}"' if nombre_prov else "")
         + (f', tipo_proveedor="{tipo}"' if tipo else "")
-        for i, (desc, tipo) in enumerate(combos)
+        for i, (desc, tipo, nombre_prov) in enumerate(combos)
     )
     n = len(combos)
 
-    return f"""Eres un asistente de contabilidad colombiana especializado en causación de facturas DIAN para SIIGO.
+    return f"""Eres un experto en contabilidad colombiana bajo el PUC (Decreto 2650). \
+Clasificas ítems de facturas electrónicas DIAN para causación en SIIGO.
+{ejemplos_section}REGLAS DE CLASIFICACIÓN PUC (aplica cuando no hay ejemplo previo):
+1. Materiales de construcción, ferreterías, cemento, varillas, arena, tubería, madera, pintura, cable → cuenta de materiales/suministros/construcción. NUNCA papelería.
+2. Papelería, resmas, tóner, útiles de oficina, bolígrafos → cuenta de útiles y papelería.
+3. Honorarios, asesorías, consultoría, servicios profesionales → cuenta de honorarios.
+4. Arrendamiento, alquiler, canon → cuenta de arrendamiento.
+5. Servicios públicos (agua, luz, gas, teléfono, internet), vigilancia, aseo → cuenta de servicios.
+6. Mantenimiento, reparación, repuestos → cuenta de mantenimiento y reparaciones.
+7. Combustibles, gasolina, ACPM, lubricantes → cuenta de combustibles.
+8. Seguros, pólizas, ARL → cuenta de seguros.
+9. Si no hay cuenta específica, retorna null con confianza < 0.4. NO uses papelería como comodín.
 
 Cuentas PUC de gasto disponibles (código - nombre):
 {cuentas_str}
@@ -567,7 +713,7 @@ Cuentas PUC de gasto disponibles (código - nombre):
 Códigos de impuesto disponibles (código - tipo - tarifa):
 {impuestos_str}
 {pago_section}
-Clasifica CADA uno de los siguientes {n} ítems de facturas electrónicas DIAN:
+Clasifica CADA uno de los siguientes {n} ítems:
 
 {items_str}
 
@@ -585,9 +731,9 @@ Responde ÚNICAMENTE con este JSON exacto con {n} elementos en "resultados":
   ]
 }}
 
-Reglas:
+Reglas adicionales:
 - Incluye exactamente {n} objetos en "resultados", uno por ítem en el mismo orden.
-- Usa SOLO códigos de las listas. Nunca inventes códigos.
-- confianza >= 0.8 solo si estás muy seguro de la clasificación.
-- Si no hay coincidencia clara, usa null y confianza baja.
-- tipo_proveedor "juridica" = persona jurídica/empresa; "natural" = persona natural. Afecta la cuenta_pago sugerida."""
+- Usa SOLO códigos de la lista. Nunca inventes códigos.
+- Si hay un ejemplo previo para un ítem similar, priorízalo sobre las reglas genéricas.
+- confianza >= 0.8 solo si la cuenta coincide claramente con el tipo de ítem.
+- tipo_proveedor "juridica" = empresa; "natural" = persona natural. Afecta cuenta_pago."""

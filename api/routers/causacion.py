@@ -143,6 +143,7 @@ def sugerir_cuentas_batch(body: SugerenciaBatchRequest, db: DB, empresa: Empresa
             "nit": item.nit,
             "descripcion": item.descripcion,
             "tipo_proveedor": item.tipo_proveedor,
+            "nombre_proveedor": item.nombre_proveedor,
         }
         for item in body.items
     ]

@@ -216,7 +216,7 @@ export const api = {
 
   // Sugerencia batch (reemplaza múltiples llamadas a sugerirCuenta)
   sugerirCuentasBatch: (
-    items: { key: string; nit: string | null; descripcion: string; tipo_proveedor: string | null }[]
+    items: { key: string; nit: string | null; descripcion: string; tipo_proveedor: string | null; nombre_proveedor?: string | null }[]
   ) =>
     req<{
       resultados: Record<string, {

@@ -231,6 +231,62 @@ def sugerir_cuenta_gasto(
     )
 
 
+def _obtener_ejemplos_aprendizaje(
+    db: Session,
+    empresa_id: int | None,
+    cuentas_gasto_opts: list[dict],
+    limit: int = 200,
+) -> list[dict]:
+    """
+    Carga decisiones recientes confirmadas de la empresa para usar como ejemplos
+    en el prompt de la IA. Retorna lista de {descripcion, cuenta, nombre_cuenta}.
+    Si el historial está vacío (usuario nuevo), retorna lista vacía sin error.
+    """
+    try:
+        from sqlalchemy import select
+        from db.models.aprendizaje import HistorialDecision
+
+        stmt = (
+            select(HistorialDecision.descripcion_item, HistorialDecision.cuenta_aplicada)
+            .where(
+                HistorialDecision.cuenta_aplicada.is_not(None),
+                HistorialDecision.descripcion_item.is_not(None),
+            )
+            .order_by(HistorialDecision.created_at.desc())
+            .limit(limit)
+        )
+        if empresa_id is not None:
+            stmt = stmt.where(HistorialDecision.empresa_id == empresa_id)
+
+        rows = db.execute(stmt).all()
+
+        # Índice de nombres de cuenta para enriquecer los ejemplos
+        nombres_por_codigo = {c["codigo"]: c["nombre"] for c in cuentas_gasto_opts}
+
+        seen: set[tuple] = set()
+        result: list[dict] = []
+        for desc, cuenta in rows:
+            if not desc or not cuenta:
+                continue
+            key = (desc[:60].lower().strip(), cuenta)
+            if key in seen:
+                continue
+            seen.add(key)
+            nombre = nombres_por_codigo.get(cuenta, "")
+            result.append({
+                "descripcion": desc[:120],
+                "cuenta": cuenta,
+                "nombre_cuenta": nombre,
+            })
+            if len(result) >= 60:  # máximo 60 ejemplos únicos al prompt
+                break
+
+        return result
+    except Exception as exc:
+        logger.warning("[batch-sugerir] no se pudo cargar historial para IA: %s", exc)
+        return []
+
+
 def sugerir_cuentas_batch(
     db: Session,
     *,
@@ -308,12 +364,16 @@ def sugerir_cuentas_batch(
             ia_ok = False
 
         if ia_ok and cuentas_gasto_opts:
+            # Cargar historial de decisiones de la empresa como ejemplos para la IA
+            ejemplos = _obtener_ejemplos_aprendizaje(db, empresa_id, cuentas_gasto_opts)
+
             # 1 sola llamada a la IA con todos los ítems únicos
             items_para_batch = [
                 {
                     "key": item["key"],
                     "descripcion": item["descripcion"],
                     "tipo_proveedor": item.get("tipo_proveedor"),
+                    "nombre_proveedor": item.get("nombre_proveedor"),
                 }
                 for item in sin_aprendizaje
             ]
@@ -322,6 +382,7 @@ def sugerir_cuentas_batch(
                 cuentas_gasto=cuentas_gasto_opts,
                 codigos_impuesto=codigos_imp,
                 cuentas_pago=cuentas_pago,
+                ejemplos_aprendizaje=ejemplos,
             )
 
             for item in sin_aprendizaje:

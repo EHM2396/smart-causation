@@ -207,6 +207,7 @@ export function Paso2() {
         nit: f.nit,
         descripcion: item.descripcion,
         tipo_proveedor: f.tipo_proveedor ?? "juridica",
+        nombre_proveedor: f.razon_social ?? null,
       }))
     );
 
@@ -1149,6 +1150,33 @@ export function Paso2() {
             </span>
           )}
           <div className="ml-auto flex items-center gap-2">
+            {(() => {
+              const pendientesSug = factura.items.filter((_, jdx) => {
+                const k = `${selectedIdx}_${jdx}`;
+                return suggestions[k]?.cuenta && !cuentaGastoItem[k] && !cuentaGastoGlobal[selectedIdx];
+              }).length;
+              if (!pendientesSug || isVerificada) return null;
+              return (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCuentaGastoItem(prev => {
+                      const next = { ...prev };
+                      factura.items.forEach((_, jdx) => {
+                        const k = `${selectedIdx}_${jdx}`;
+                        if (suggestions[k]?.cuenta && !next[k]) next[k] = suggestions[k].cuenta!;
+                      });
+                      return next;
+                    });
+                  }}
+                  className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
+                  style={{ backgroundColor: "var(--brand)", color: "#fff" }}
+                >
+                  <Sparkles className="h-3 w-3" />
+                  Aplicar {pendientesSug} sugerencia{pendientesSug !== 1 ? "s" : ""}
+                </button>
+              );
+            })()}
             <div className="relative">
               <Search
                 className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5"

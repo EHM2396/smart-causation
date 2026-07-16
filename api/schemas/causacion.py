@@ -61,6 +61,7 @@ class SugerenciaBatchItem(BaseModel):
     nit: str | None = None
     descripcion: str
     tipo_proveedor: str | None = None
+    nombre_proveedor: str | None = None
 
 
 class SugerenciaBatchRequest(BaseModel):
