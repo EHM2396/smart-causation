@@ -51,18 +51,18 @@ export function ConfigPanel() {
     <>
       {/* Tipo comprobante */}
       <div data-tutorial="tipo-comprobante" className="space-y-2">
-        <label className="text-xs text-[var(--sidebar-text)]">Tipo de comprobante</label>
-        <Combobox
-          options={tipoOpts}
-          value={tipoComp}
-          onChange={setTipoComp}
-          placeholder="Selecciona un tipo..."
-        />
-        {!tipoComp && (
-          <div className="flex items-center gap-1.5 text-xs text-amber-500">
-            <AlertTriangle className="h-3 w-3" /> Obligatorio para continuar
-          </div>
-        )}
+        <label className="text-xs font-medium flex items-center gap-1.5 text-[var(--sidebar-text)]">
+          Tipo de comprobante
+          {!tipoComp && <span className="require-badge">Obligatorio</span>}
+        </label>
+        <div className={!tipoComp ? "require-pulse rounded-lg" : ""}>
+          <Combobox
+            options={tipoOpts}
+            value={tipoComp}
+            onChange={setTipoComp}
+            placeholder="Selecciona un tipo..."
+          />
+        </div>
       </div>
 
       {/* Consecutivo */}

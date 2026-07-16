@@ -9,7 +9,7 @@ import { fmt } from "@/lib/utils";
 import type { Factura } from "@/lib/types";
 
 export function Paso1() {
-  const { setFacturas, setFacturasYaCausadas, setPaso, facturas: stored, setPdfUrls, pdfUrls, setFilesProcesando } = useWizardStore();
+  const { setFacturas, setFacturasYaCausadas, setPaso, facturas: stored, setPdfUrls, pdfUrls, setFilesProcesando, setSuggestions, setPaso2Cache } = useWizardStore();
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -44,6 +44,11 @@ export function Paso1() {
     setErrors([]);
     setVentasDetectadas([]);
     setOmitidas([]);
+
+    // Limpiar estado anterior para que paso2 no vea datos obsoletos de la sesión previa
+    setFacturas([]);
+    setSuggestions({});
+    setPaso2Cache(null);
 
     // Avanzar a paso2 de inmediato — el overlay de paso2 muestra el progreso combinado
     setFilesProcesando(true);
@@ -114,11 +119,10 @@ export function Paso1() {
       return;
     }
 
-    // Camino limpio: pasar facturas a paso2 (ya está ahí) y liberar el flag
+    // Camino limpio: pasar facturas a paso2 — paso2 apagará filesProcesando cuando arranque sugsLoading
     setErrors(errs);
     setFacturasYaCausadas(causadasInfo);
     setFacturas(nuevas);
-    setFilesProcesando(false);
     setLoading(false);
   };
 

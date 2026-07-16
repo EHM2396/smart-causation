@@ -28,13 +28,14 @@ function impOpts(imps: ImpuestoOut[], tipos?: string[]) {
 }
 
 const ORIGEN_BADGE: Record<string, { label: string; variant: "success" | "info" | "purple" | "warning" | "default" }> = {
-  aprendizaje: { label: "Aprendido",      variant: "success" },
-  regla:       { label: "Regla",          variant: "info" },
-  ia_alta:     { label: "IA · Alta",      variant: "purple" },
-  ia_media:    { label: "IA · Media",     variant: "warning" },
-  ia_baja:     { label: "IA · Baja",      variant: "default" },
-  ia:          { label: "IA",             variant: "purple" },
-  manual:      { label: "Manual",         variant: "default" },
+  aprendizaje:  { label: "Aprendido",      variant: "success" },
+  regla:        { label: "Regla",          variant: "info" },
+  forma_pago:   { label: "Forma pago",     variant: "info" },
+  ia_alta:      { label: "IA · Alta",      variant: "purple" },
+  ia_media:     { label: "IA · Media",     variant: "warning" },
+  ia_baja:      { label: "IA · Baja",      variant: "default" },
+  ia:           { label: "IA",             variant: "purple" },
+  manual:       { label: "Manual",         variant: "default" },
 };
 
 function origenToFuente(origen: string | null): FuenteMapeo {
@@ -62,7 +63,7 @@ function DataField({ label, value, mono = false }: { label: string; value: strin
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function Paso2() {
-  const { facturas, facturasYaCausadas, tipoComp, setPaso, setFacturas, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, pdfUrls, paso2Cache, setPaso2Cache, filesProcesando, tutorialActivo, tutorialMockMapeo } = useWizardStore();
+  const { facturas, facturasYaCausadas, tipoComp, setPaso, setFacturas, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, pdfUrls, paso2Cache, setPaso2Cache, filesProcesando, setFilesProcesando, tutorialActivo, tutorialMockMapeo } = useWizardStore();
   const [modalCausadasOpen, setModalCausadasOpen] = useState(false);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
 
@@ -208,6 +209,8 @@ export function Paso2() {
         descripcion: item.descripcion,
         tipo_proveedor: f.tipo_proveedor ?? "juridica",
         nombre_proveedor: f.razon_social ?? null,
+        forma_pago: f.forma_pago ?? null,
+        medio_pago: f.medio_pago ?? null,
       }))
     );
 
@@ -229,7 +232,8 @@ export function Paso2() {
           if (next[idx]) return;
           for (let jdx = 0; jdx < factura.items.length; jdx++) {
             const sug = sugs[`${idx}_${jdx}`];
-            if (sug?.cuenta_pago_sugerida && sug.cuenta_pago_origen === "aprendizaje") {
+            const origenAutoFill = sug?.cuenta_pago_origen === "aprendizaje" || sug?.cuenta_pago_origen === "forma_pago";
+            if (sug?.cuenta_pago_sugerida && origenAutoFill) {
               next[idx] = sug.cuenta_pago_sugerida;
               break;
             }
@@ -258,16 +262,19 @@ export function Paso2() {
       setCodImpuestoItem(cache.codImpuestoItem ?? {});
       setCuentaIvaItem(cache.cuentaIvaItem ?? {});
       setVerificadas(cache.verificadas);
+      setFilesProcesando(false);
       return;
     }
 
     if (pendientes.length === 0) {
       // Todo cacheado (re-montaje sin cache de paso2): reaplicar auto-fill desde el store para restaurar estado local
       autoFill(suggestions);
+      setFilesProcesando(false);
       return;
     }
 
     setSugsLoading(true);
+    setFilesProcesando(false); // transición sin hueco: filesProcesando → sugsLoading
 
     // En tutorial no hacemos llamada real (NITs ficticios fallarían)
     if (tutorialActivo) {
@@ -558,11 +565,10 @@ export function Paso2() {
                 <span
                   key={i}
                   className="h-1.5 w-1.5 rounded-full"
-                  style={{ backgroundColor: "var(--brand-btn)", animation: `sug-bounce 1.2s ease-in-out ${i * 0.15}s infinite` }}
+                  style={{ backgroundColor: "var(--brand-btn)", animation: `ciolix-sug-bounce 1.2s ease-in-out ${i * 0.15}s infinite` }}
                 />
               ))}
             </div>
-            <style>{`@keyframes sug-bounce { 0%,80%,100%{transform:scaleY(1);opacity:.4} 40%{transform:scaleY(2);opacity:1} }`}</style>
           </div>
         )}
 
@@ -842,14 +848,6 @@ export function Paso2() {
 
   return (
     <>
-    <style>{`
-      @keyframes ring-pulse {
-        0%, 100% { box-shadow: 0 0 0 0px rgba(245,158,11,0.5); }
-        50%       { box-shadow: 0 0 0 4px rgba(245,158,11,0.12); }
-      }
-      .require-pulse { animation: ring-pulse 1.8s ease-in-out infinite; border-color: rgba(245,158,11,0.6) !important; }
-      .require-row   { background: color-mix(in srgb, #f59e0b 6%, transparent) !important; }
-    `}</style>
     <div className="space-y-4">
       {/* Navigation bar */}
       <div className="flex items-center gap-2">
@@ -1085,7 +1083,7 @@ export function Paso2() {
             <div className="space-y-1.5">
               <label className="text-xs font-medium flex items-center gap-1.5" style={{ color: "var(--info-text)", opacity: 0.85 }}>
                 Cuenta gasto/costo
-                {cuentaGastoGlobalVacia && <span className="text-[10px] font-semibold uppercase tracking-wide rounded px-1 py-0.5" style={{ backgroundColor: "rgba(245,158,11,0.25)", color: "rgb(245,158,11)", opacity: 1 }}>O por ítem</span>}
+                {cuentaGastoGlobalVacia && <span className="require-badge">O por ítem</span>}
               </label>
               <div className={cuentaGastoGlobalVacia ? "require-pulse rounded-lg" : ""}>
                 <Combobox

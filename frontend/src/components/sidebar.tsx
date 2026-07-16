@@ -42,7 +42,7 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
           width={120}
           height={36}
           className="block dark:hidden"
-          style={{ objectFit: "contain" }}
+          style={{ objectFit: "contain", width: "auto", height: "auto", maxWidth: "120px", maxHeight: "36px" }}
           priority
         />
         <Image
@@ -51,7 +51,7 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
           width={120}
           height={36}
           className="hidden dark:block"
-          style={{ objectFit: "contain" }}
+          style={{ objectFit: "contain", width: "auto", height: "auto", maxWidth: "120px", maxHeight: "36px" }}
           priority
         />
       </div>

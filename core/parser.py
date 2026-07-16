@@ -608,17 +608,29 @@ def _parsear_pdf_plumber(archivo: BytesIO, nombre_archivo: str) -> list[dict]:
         )
 
     # ── Total ──
+    # Buscar en todas las páginas con múltiples etiquetas reconocidas
+    _TOTAL_LABELS = {"total factura", "total a pagar", "valor total", "gran total",
+                     "total neto", "valor a pagar", "total comprobante", "total general"}
     total = 0.0
-    for table in page2_tables:
+    all_tables = list(page1_tables) + list(page2_tables)
+    for table in all_tables:
         for row in table:
             if not row:
                 continue
-            label = str(row[0] or "")
-            val_str = str(row[1] or "") if len(row) > 1 else ""
-            if "total factura" in label.lower() and val_str:
-                cand = _to_float(re.sub(r"[^\d.,]", "", val_str))
-                if cand > total:
-                    total = cand
+            label = str(row[0] or "").lower().strip()
+            if any(lbl in label for lbl in _TOTAL_LABELS):
+                # Intentar la última celda no vacía como valor
+                for cell in reversed(row[1:]):
+                    val_str = str(cell or "").strip()
+                    if val_str:
+                        cand = _to_float(re.sub(r"[^\d.,]", "", val_str))
+                        if cand > total:
+                            total = cand
+                        break
+
+    # Fallback: calcular desde la suma de ítems si aún es 0
+    if total == 0.0 and items:
+        total = round(sum(i["total_linea"] for i in items), 2)
 
     return [{
         "numero_dian":    numero_dian,
@@ -777,6 +789,8 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
         total = _xml_float(monetary.find("cbc:PayableAmount", _NS))
         if total == 0.0:
             total = _xml_float(monetary.find("cbc:TaxInclusiveAmount", _NS))
+        if total == 0.0:
+            total = _xml_float(monetary.find("cbc:LineExtensionAmount", _NS))
 
     # ── Ítems ──
     items: list[dict] = []
@@ -833,6 +847,10 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
 
     if not items:
         advertencias.append("No se detectaron ítems en el XML DIAN.")
+
+    # Fallback: si el total no se pudo leer del XML, calcularlo desde los ítems
+    if total == 0.0 and items:
+        total = round(sum(i["total_linea"] for i in items), 2)
 
     return {
         "numero_dian":    numero_dian,

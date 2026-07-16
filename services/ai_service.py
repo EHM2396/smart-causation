@@ -75,10 +75,31 @@ _PALABRAS_INYECCION = (
 # Permite que "cemento" encuentre cuentas con "materiales" aunque la palabra exacta no coincida.
 _SINONIMOS_PUC: list[tuple[set[str], set[str]]] = [
     # (palabras del ítem)  →  (palabras que buscamos en el nombre de la cuenta)
+
+    # Materiales de construcción, acabados y pintura
     ({"cemento", "arena", "varilla", "ladrillo", "hierro", "tuberia", "tubería",
       "bloque", "madera", "agregado", "concreto", "acero", "viga", "tornillo",
-      "pintura", "pvc", "cable", "alambre", "obra", "construccion", "construcción"},
-     {"material", "suministro", "construccion", "construcción", "ferreter", "obra"}),
+      "pvc", "cable", "alambre", "obra", "construccion", "construcción",
+      "placa", "panel", "yeso", "drywall", "angulo", "ángulo", "omega",
+      "perfil", "riel", "cielo", "estuco", "vinilo", "vinillo", "baldosa",
+      "ceramica", "cerámica", "revoque", "pañete", "pañetado",
+      # Pinturas, acabados y diluyentes
+      "pintura", "esmalte", "esmalteco", "thinner", "tinner", "barniz",
+      "masilla", "laca", "diluyente", "impermeabilizante", "sika", "anticorrosivo",
+      # Herramientas y abrasivos de obra
+      "lija", "lijas", "abrasivo", "disco", "broca", "taladro", "pulidora",
+      "espátula", "espatula", "brocha", "rodillo",
+      # Embalaje/empaque industrial
+      "carton", "cartón", "empaque", "embalaje", "zuncho", "stretch"},
+     {"material", "construccion", "construcción", "ferreter", "obra",
+      "acondicionamiento", "mantenimiento", "reparacion", "reparación"}),
+
+    # Dotación y EPP para trabajadores
+    ({"guante", "guantes", "bota", "botas", "casco", "cascos", "gafa", "gafas",
+      "uniforme", "uniformes", "chaleco", "mascarilla", "tapaoido", "tapaoidó",
+      "overol", "dotacion", "dotación", "epp", "proteccion", "protección",
+      "calzado", "zapato", "zapatilla", "goggle", "gogles"},
+     {"dotacion", "dotación", "suministro", "trabajador"}),
 
     ({"honorario", "honorarios", "asesoria", "asesoría", "consultoria", "consultoría",
       "juridico", "jurídico", "contable", "contador", "abogado", "ingeniero"},
@@ -536,15 +557,23 @@ Clasificas ítems de facturas DIAN para causación en SIIGO.
 Ítem de factura: "{descripcion}"
 Tipo de proveedor: {tipo_proveedor if tipo_proveedor else "desconocido"}
 
-REGLAS DE CLASIFICACIÓN (en orden de prioridad):
-- Materiales construcción, ferreterías, cemento, varillas, tubería, madera, cable → materiales/suministros. NUNCA papelería.
-- Papelería, resmas, tóner, útiles de oficina → útiles y papelería.
-- Honorarios, asesoría, consultoría, servicios profesionales → honorarios.
-- Arrendamiento, alquiler, canon → arrendamiento.
-- Servicios públicos, vigilancia, aseo, internet → servicios.
-- Mantenimiento, reparación, repuestos → mantenimiento.
-- Si ninguna cuenta coincide con el tipo real del ítem → null con confianza < 0.4.
-  NO uses papelería como opción por defecto.
+GLOSARIO PUC — naturaleza contable de cada tipo de gasto:
+• Honorarios / consultoría / asesoría → servicios profesionales externos
+• Arrendamiento / alquiler / canon → arrendamientos
+• Servicios públicos (agua, energía, gas, telefonía, internet) → servicios públicos
+• Mantenimiento y reparación de activos → mantenimiento y reparaciones
+• Materiales físicos para construcción, proceso productivo o acabados → materiales / acondicionamiento
+• Combustibles, lubricantes → combustibles
+• Seguros, pólizas, ARL → seguros
+• Dotación personal de empleados (uniformes, EPP: guantes de seguridad, botas, casco, gafas, overol)
+  → dotación a trabajadores
+  ⚠️ Dotación NO aplica para materiales de proceso, insumos de obra ni herramientas
+• Papelería, útiles de oficina → papelería y útiles
+• Publicidad, mercadeo → publicidad
+• Transporte, flete, mensajería → transporte
+• Viáticos, tiquetes, hospedaje → gastos de viaje
+
+Clasifica según la naturaleza real del ítem. Si no encaja en ninguna cuenta → null confianza < 0.4.
 
 Cuentas PUC de gasto disponibles (código - nombre):
 {cuentas_str}
@@ -696,16 +725,29 @@ Decisiones previas de esta empresa (úsalas como guía principal):
 
     return f"""Eres un experto en contabilidad colombiana bajo el PUC (Decreto 2650). \
 Clasificas ítems de facturas electrónicas DIAN para causación en SIIGO.
-{ejemplos_section}REGLAS DE CLASIFICACIÓN PUC (aplica cuando no hay ejemplo previo):
-1. Materiales de construcción, ferreterías, cemento, varillas, arena, tubería, madera, pintura, cable → cuenta de materiales/suministros/construcción. NUNCA papelería.
-2. Papelería, resmas, tóner, útiles de oficina, bolígrafos → cuenta de útiles y papelería.
-3. Honorarios, asesorías, consultoría, servicios profesionales → cuenta de honorarios.
-4. Arrendamiento, alquiler, canon → cuenta de arrendamiento.
-5. Servicios públicos (agua, luz, gas, teléfono, internet), vigilancia, aseo → cuenta de servicios.
-6. Mantenimiento, reparación, repuestos → cuenta de mantenimiento y reparaciones.
-7. Combustibles, gasolina, ACPM, lubricantes → cuenta de combustibles.
-8. Seguros, pólizas, ARL → cuenta de seguros.
-9. Si no hay cuenta específica, retorna null con confianza < 0.4. NO uses papelería como comodín.
+{ejemplos_section}INSTRUCCIONES:
+1. Si hay ejemplos previos de la empresa, úsalos como guía principal.
+2. Para ítems sin ejemplo, clasifica por la NATURALEZA CONTABLE real usando el glosario PUC.
+3. Elige la cuenta más específica de la lista disponible.
+4. Si ninguna encaja → null con confianza < 0.4.
+
+GLOSARIO PUC (Decreto 2650) — tipos de gasto y su naturaleza contable:
+• Honorarios / consultoría / asesoría legal, contable, técnica → servicios profesionales externos
+• Arrendamiento / alquiler / canon de inmuebles o equipos → arrendamientos
+• Servicios públicos domiciliarios: agua, energía, gas, telefonía, internet → servicios públicos
+• Mantenimiento y reparación de activos fijos (edificios, maquinaria, vehículos) → mantenimiento y reparaciones
+• Materiales físicos para construcción, remodelación, acabados, proceso productivo → materiales / suministros / acondicionamiento
+• Combustibles y lubricantes para vehículos y maquinaria → combustibles y lubricantes
+• Seguros de bienes, vehículos, personas, pólizas, ARL → seguros
+• Dotación personal de empleados: uniformes, EPP (guantes de seguridad, botas, casco, gafas protección, overol) → dotación a trabajadores
+• Papelería y útiles de oficina: papel, tóner, esferos, archivadores → papelería y útiles
+• Publicidad, mercadeo, impresión comercial → gastos de publicidad
+• Transporte, fletes, mensajería, logística → gastos de transporte
+• Viáticos, tiquetes, hospedaje para viajes de negocios → gastos de viaje
+• Gastos de representación, reuniones, atención a clientes → gastos de representación
+• Aseo, vigilancia, cafetería → gastos generales de administración
+
+Usa SOLO códigos de la lista entregada. Nunca inventes códigos.
 
 Cuentas PUC de gasto disponibles (código - nombre):
 {cuentas_str}

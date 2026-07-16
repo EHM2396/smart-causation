@@ -60,6 +60,44 @@ class ResultadoSugerencia:
     cuenta_pago_origen: str | None = None  # 'aprendizaje' | 'ia_alta' | 'ia_media' | 'ia_baja'
 
 
+def _cuenta_pago_por_forma_pago(
+    forma_pago: str | None,
+    medio_pago: str | None,
+    cuentas_pago: list[dict] | None,
+) -> tuple[str | None, str | None]:
+    """
+    Determina cuenta de pago y su origen basado en la forma/medio de pago.
+    Retorna (codigo_cuenta | None, origen | None).
+
+    Reglas (orden de prioridad):
+      CRÉDITO de cualquier medio            → 2205x (proveedores nacionales)
+      CONTADO + efectivo                    → 1105x (caja general)
+      CONTADO + transferencia/débito/tarjeta→ 1110x (bancos)
+    """
+    fp = (forma_pago or "").lower()
+    mp = (medio_pago or "").lower()
+
+    if "crédit" in fp or "credit" in fp:
+        prefix = "2205"
+    elif "efect" in mp:
+        prefix = "1105"
+    elif any(kw in mp for kw in ("transfer", "débit", "debit", "tarjeta")):
+        prefix = "1110"
+    else:
+        return None, None
+
+    # Buscar en el catálogo la cuenta hoja que empiece con el prefijo
+    for cuenta in (cuentas_pago or []):
+        codigo = str(cuenta.get("codigo", ""))
+        if codigo.startswith(prefix):
+            return codigo, "forma_pago"
+
+    # Si no hay catálogo, retornar el prefijo base para que el frontend lo muestre
+    if not cuentas_pago:
+        return prefix, "forma_pago"
+    return None, None
+
+
 def _obtener_cuentas_pago_batch(
     db: Session,
     nits: list[str],
@@ -330,19 +368,31 @@ def sugerir_cuentas_batch(
             else:
                 sin_aprendizaje.append(item)
 
-    # 4. Cuenta de pago en lote para todos los NITs únicos (1 query)
+    # 4. Cuenta de pago por item (regla determinista > historial NIT)
     nits_unicos = list({item["nit"] for item in items if item.get("nit")})
     cp_por_nit = _obtener_cuentas_pago_batch(db, nits_unicos, empresa_id)
 
+    # cp_por_key: llave de item → (codigo_cuenta, origen)
+    # Regla forma_pago tiene máxima prioridad; si no aplica, usa historial del NIT
+    cp_por_key: dict[str, tuple[str | None, str | None]] = {}
+    for item in items:
+        k = item["key"]
+        codigo, origen = _cuenta_pago_por_forma_pago(
+            item.get("forma_pago"), item.get("medio_pago"), cuentas_pago
+        )
+        if codigo:
+            cp_por_key[k] = (codigo, origen)
+        else:
+            nit = item.get("nit")
+            cp_hist = cp_por_nit.get(nit) if nit else None
+            cp_por_key[k] = (cp_hist, "aprendizaje" if cp_hist else None)
+
     # Inyectar cuenta_pago a los ya resueltos por regla/aprendizaje
     for key, res in resultados.items():
-        item = next((i for i in items if i["key"] == key), None)
-        if item:
-            nit = item.get("nit")
-            cp = cp_por_nit.get(nit) if nit else None
-            if cp:
-                res.cuenta_pago = cp
-                res.cuenta_pago_origen = "aprendizaje"
+        cp, cp_orig = cp_por_key.get(key, (None, None))
+        if cp:
+            res.cuenta_pago = cp
+            res.cuenta_pago_origen = cp_orig
 
     # 5. IA para los ítems sin regla ni aprendizaje
     if sin_aprendizaje:
@@ -387,8 +437,7 @@ def sugerir_cuentas_batch(
 
             for item in sin_aprendizaje:
                 sug = ai_results_by_key.get(item["key"])
-                nit = item.get("nit")
-                cp = cp_por_nit.get(nit) if nit else None
+                cp, cp_orig = cp_por_key.get(item["key"], (None, None))
                 if sug and sug.cuenta_gasto:
                     confianza = sug.confianza or 0.0
                     if confianza >= 0.80:
@@ -397,30 +446,30 @@ def sugerir_cuentas_batch(
                         origen_ia = "ia_media"
                     else:
                         origen_ia = "ia_baja"
+                    # Regla determinista / historial tienen prioridad sobre IA
                     cp_final = cp or sug.cuenta_pago
-                    cp_origen = "aprendizaje" if cp else (origen_ia if sug.cuenta_pago else None)
+                    cp_origen_final = cp_orig if cp else (origen_ia if sug.cuenta_pago else None)
                     resultados[item["key"]] = ResultadoSugerencia(
                         cuenta=sug.cuenta_gasto,
                         origen=origen_ia,
                         explicacion=sug.explicacion,
                         confianza=sug.confianza,
                         cuenta_pago=cp_final,
-                        cuenta_pago_origen=cp_origen,
+                        cuenta_pago_origen=cp_origen_final,
                     )
                 else:
                     resultados[item["key"]] = ResultadoSugerencia(
                         cuenta=None, origen=None,
-                        cuenta_pago=cp, cuenta_pago_origen="aprendizaje" if cp else None,
+                        cuenta_pago=cp, cuenta_pago_origen=cp_orig,
                     )
         else:
             # IA no disponible o sin catálogo de cuentas
             origen_fallback = "sin_catalogo" if ia_ok else "ia_no_disponible"
             for item in sin_aprendizaje:
-                nit = item.get("nit")
-                cp = cp_por_nit.get(nit) if nit else None
+                cp, cp_orig = cp_por_key.get(item["key"], (None, None))
                 resultados[item["key"]] = ResultadoSugerencia(
                     cuenta=None, origen=origen_fallback,
-                    cuenta_pago=cp, cuenta_pago_origen="aprendizaje" if cp else None,
+                    cuenta_pago=cp, cuenta_pago_origen=cp_orig,
                 )
 
     return resultados

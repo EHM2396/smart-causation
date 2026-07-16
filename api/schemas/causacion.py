@@ -62,6 +62,8 @@ class SugerenciaBatchItem(BaseModel):
     descripcion: str
     tipo_proveedor: str | None = None
     nombre_proveedor: str | None = None
+    forma_pago: str | None = None    # "CRÉDITO" | "CONTADO" | …
+    medio_pago: str | None = None    # "EFECTIVO" | "TRANSFERENCIA DÉBITO BANCARIA" | …
 
 
 class SugerenciaBatchRequest(BaseModel):
