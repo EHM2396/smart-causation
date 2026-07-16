@@ -62,7 +62,7 @@ function DataField({ label, value, mono = false }: { label: string; value: strin
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function Paso2() {
-  const { facturas, facturasYaCausadas, tipoComp, setPaso, setFacturas, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, pdfUrls, paso2Cache, setPaso2Cache, tutorialActivo, tutorialMockMapeo } = useWizardStore();
+  const { facturas, facturasYaCausadas, tipoComp, setPaso, setFacturas, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, pdfUrls, paso2Cache, setPaso2Cache, filesProcesando, tutorialActivo, tutorialMockMapeo } = useWizardStore();
   const [modalCausadasOpen, setModalCausadasOpen] = useState(false);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
 
@@ -506,8 +506,8 @@ export function Paso2() {
           </span>
         </div>
 
-        {/* Overlay pantalla completa mientras carga sugerencias IA */}
-        {sugsLoading && (
+        {/* Overlay pantalla completa mientras procesa archivos o analiza sugerencias IA */}
+        {(filesProcesando || sugsLoading) && (
           <div
             className="fixed inset-0 z-[9999] flex flex-col items-center justify-center gap-6"
             style={{ backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
@@ -524,13 +524,34 @@ export function Paso2() {
               <Sparkles className="h-8 w-8" style={{ color: "#fff" }} />
             </div>
             <div className="flex flex-col items-center gap-2 text-center">
-              <p className="text-lg font-semibold text-white">Analizando sugerencias IA</p>
-              <p className="rounded-full px-3 py-0.5 text-sm" style={{ backgroundColor: "rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.8)" }}>
-                {facturas.length} facturas · {facturas.reduce((s, f) => s + f.items.length, 0)} ítems
+              <p className="text-lg font-semibold text-white">
+                {filesProcesando ? "Procesando facturas DIAN" : "Analizando sugerencias IA"}
               </p>
-              <p className="text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>
-                Por favor espera antes de configurar las facturas…
-              </p>
+              <div className="flex flex-col items-center gap-1">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: filesProcesando ? "var(--brand-btn)" : "rgba(255,255,255,0.3)" }}
+                  />
+                  <span className="text-sm" style={{ color: filesProcesando ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.35)" }}>
+                    Extrayendo facturas electrónicas DIAN
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: sugsLoading ? "var(--brand-btn)" : "rgba(255,255,255,0.3)" }}
+                  />
+                  <span className="text-sm" style={{ color: sugsLoading ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.35)" }}>
+                    Analizando sugerencias IA
+                  </span>
+                </div>
+              </div>
+              {facturas.length > 0 && (
+                <p className="rounded-full px-3 py-0.5 text-xs mt-1" style={{ backgroundColor: "rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.6)" }}>
+                  {facturas.length} factura{facturas.length !== 1 ? "s" : ""} · {facturas.reduce((s, f) => s + f.items.length, 0)} ítems
+                </p>
+              )}
             </div>
             <div className="flex gap-1.5">
               {[0, 1, 2, 3, 4].map((i) => (

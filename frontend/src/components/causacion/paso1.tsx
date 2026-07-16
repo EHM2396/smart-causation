@@ -9,7 +9,7 @@ import { fmt } from "@/lib/utils";
 import type { Factura } from "@/lib/types";
 
 export function Paso1() {
-  const { setFacturas, setFacturasYaCausadas, setPaso, facturas: stored, setPdfUrls, pdfUrls } = useWizardStore();
+  const { setFacturas, setFacturasYaCausadas, setPaso, facturas: stored, setPdfUrls, pdfUrls, setFilesProcesando } = useWizardStore();
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -44,6 +44,11 @@ export function Paso1() {
     setErrors([]);
     setVentasDetectadas([]);
     setOmitidas([]);
+
+    // Avanzar a paso2 de inmediato — el overlay de paso2 muestra el progreso combinado
+    setFilesProcesando(true);
+    setPaso(2);
+
     const parsed: Factura[] = [];
     const errs: string[] = [];
     const ventas: { filename: string; numero: string }[] = [];
@@ -71,12 +76,15 @@ export function Paso1() {
     }
 
     setPdfUrls(newPdfUrls);
-    setVentasDetectadas(ventas);
 
     if (!parsed.length) {
+      // Sin facturas válidas — volver a paso1 a mostrar errores
+      setFilesProcesando(false);
+      setVentasDetectadas(ventas);
       if (!ventas.length) errs.push("No se procesó ninguna factura válida.");
       setErrors(errs);
       setLoading(false);
+      setPaso(1);
       return;
     }
 
@@ -93,14 +101,24 @@ export function Paso1() {
     const causadasNums = new Set(causadasInfo.map((c) => c.numero_dian));
     const nuevas = parsed.filter((f) => !causadasNums.has(f.numero_dian));
 
+    if (ventas.length || causadasInfo.length) {
+      // Hay advertencias que el usuario debe ver — volver a paso1
+      setVentasDetectadas(ventas);
+      setErrors(errs);
+      setOmitidas(causadasInfo.map((c) => c.numero_dian));
+      setFacturasYaCausadas(causadasInfo);
+      setFacturas(nuevas);
+      setFilesProcesando(false);
+      setLoading(false);
+      setPaso(1);
+      return;
+    }
+
+    // Camino limpio: pasar facturas a paso2 (ya está ahí) y liberar el flag
     setErrors(errs);
-    setOmitidas(causadasInfo.map((c) => c.numero_dian));
     setFacturasYaCausadas(causadasInfo);
     setFacturas(nuevas);
-    // Auto-avanzar solo si no hay nada que mostrarle al usuario antes de continuar
-    if (!ventas.length && !causadasInfo.length) {
-      setPaso(2);
-    }
+    setFilesProcesando(false);
     setLoading(false);
   };
 

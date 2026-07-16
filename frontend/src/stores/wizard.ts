@@ -46,6 +46,7 @@ interface WizardState {
   suggestions: Record<string, Sugerencia>;
   pdfUrls: Record<string, string>;
   paso2Cache: Paso2Cache | null;
+  filesProcesando: boolean;
   tutorialActivo: boolean;
   tutorialMockMapeo: TutorialMockMapeo | null;
 
@@ -61,6 +62,7 @@ interface WizardState {
   setSuggestions: (s: Record<string, Sugerencia>) => void;
   setPdfUrls: (urls: Record<string, string>) => void;
   setPaso2Cache: (cache: Paso2Cache | null) => void;
+  setFilesProcesando: (v: boolean) => void;
   setTutorialActivo: (v: boolean) => void;
   setTutorialMockMapeo: (m: TutorialMockMapeo | null) => void;
   reset: () => void;
@@ -79,6 +81,7 @@ const initial = {
   suggestions: {},
   pdfUrls: {} as Record<string, string>,
   paso2Cache: null as Paso2Cache | null,
+  filesProcesando: false,
   tutorialActivo: false,
   tutorialMockMapeo: null,
 };
@@ -97,6 +100,7 @@ export const useWizardStore = create<WizardState>((set) => ({
   setSuggestions: (suggestions) => set({ suggestions }),
   setPdfUrls: (pdfUrls) => set({ pdfUrls }),
   setPaso2Cache: (paso2Cache) => set({ paso2Cache }),
+  setFilesProcesando: (filesProcesando) => set({ filesProcesando }),
   setTutorialActivo: (tutorialActivo) => set({ tutorialActivo }),
   setTutorialMockMapeo: (tutorialMockMapeo) => set({ tutorialMockMapeo }),
   reset: () => set((state) => {
