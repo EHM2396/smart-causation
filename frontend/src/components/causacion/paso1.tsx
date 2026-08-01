@@ -49,10 +49,8 @@ export function Paso1() {
     setFacturas([]);
     setSuggestions({});
     setPaso2Cache(null);
-
-    // Avanzar a paso2 de inmediato — el overlay de paso2 muestra el progreso combinado
-    setFilesProcesando(true);
-    setPaso(2);
+    // NO avanzar a paso2 todavía — el componente debe permanecer montado para que
+    // los setters de estado local (ventasDetectadas, errors, omitidas) sean visibles
 
     const parsed: Factura[] = [];
     const errs: string[] = [];
@@ -83,13 +81,11 @@ export function Paso1() {
     setPdfUrls(newPdfUrls);
 
     if (!parsed.length) {
-      // Sin facturas válidas — volver a paso1 a mostrar errores
-      setFilesProcesando(false);
+      // Sin facturas de compra parseadas — mostrar aviso y quedarse en paso1
       setVentasDetectadas(ventas);
       if (!ventas.length) errs.push("No se procesó ninguna factura válida.");
       setErrors(errs);
       setLoading(false);
-      setPaso(1);
       return;
     }
 
@@ -109,20 +105,18 @@ export function Paso1() {
     const hayComprasValidas = nuevas.length > 0;
 
     if (!hayComprasValidas) {
-      // Solo ventas o ya causadas, nada nuevo que procesar → volver a paso1 con avisos
+      // Todas las facturas son ventas o ya causadas — quedarse en paso1 con aviso
+      // (el componente sigue montado, el estado local es visible)
       setVentasDetectadas(ventas);
       setErrors(errs);
       setOmitidas(causadasInfo.map((c) => c.numero_dian));
       setFacturasYaCausadas(causadasInfo);
       setFacturasOmitidas([]);
-      if (!ventas.length && !causadasInfo.length) errs.push("No se procesó ninguna factura válida.");
-      setFilesProcesando(false);
       setLoading(false);
-      setPaso(1);
       return;
     }
 
-    // Construir array unificado de omisiones para paso2
+    // Hay compras válidas → construir omisiones y avanzar a paso2
     const omisionesParaPaso2: import("@/lib/types").FacturaOmitida[] = [
       ...ventas.map((v) => ({ filename: v.filename, numero: v.numero, motivo: "venta" as const })),
       ...causadasInfo.map((c) => ({
@@ -132,7 +126,6 @@ export function Paso1() {
       })),
     ];
 
-    // Hay compras válidas → continuar a paso2 aunque haya ventas/ya causadas omitidas
     setFacturasOmitidas(omisionesParaPaso2);
     setVentasDetectadas(ventas);
     setErrors(errs);
@@ -140,7 +133,9 @@ export function Paso1() {
     setFacturasYaCausadas(causadasInfo);
     setFacturas(nuevas);
     setLoading(false);
-    // No apagar filesProcesando aquí — paso2 lo hace al arrancar sugsLoading
+    // Avanzar a paso2 — filesProcesando activa el overlay mientras cargan las sugerencias IA
+    setFilesProcesando(true);
+    setPaso(2);
   };
 
   return (
