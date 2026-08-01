@@ -55,6 +55,12 @@ export interface FacturaCausadaInfo {
   datos_json: string | null;
 }
 
+export interface FacturaOmitida {
+  filename: string;
+  numero: string;
+  motivo: "venta" | "ya_causada";
+}
+
 // ─── Facturas / Parseo ────────────────────────────────────────────────────────
 
 export interface ItemFactura {

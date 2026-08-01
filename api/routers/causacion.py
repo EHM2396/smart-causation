@@ -55,23 +55,35 @@ async def parsear_facturas(
     except Exception as exc:
         raise HTTPException(400, f"Error al parsear el archivo: {exc}") from exc
 
-    # Detectar facturas de venta: si el NIT de la empresa coincide con el emisor (proveedor),
-    # significa que la empresa es quien expide la factura → es una factura de VENTA, no de compra.
+    # Detectar facturas de venta: el NIT emisor coincide con el NIT de la empresa.
     if empresa.nit:
         nit_empresa = re.sub(r"[^\d]", "", empresa.nit)
         if nit_empresa:
+            compras, ventas_nums = [], []
             for fac in facturas:
                 nit_emisor = re.sub(r"[^\d]", "", fac.get("nit", "") or "")
                 if nit_emisor and nit_empresa == nit_emisor:
-                    num = fac.get("numero_dian") or archivo.filename or "desconocida"
-                    raise HTTPException(
-                        status_code=400,
-                        detail=(
-                            f"[VENTA] {num}: Esta factura electrónica es una VENTA de tu empresa, "
-                            "no una compra. El módulo actual solo procesa facturas de compra. "
-                            "La causación de ventas estará disponible próximamente."
-                        ),
-                    )
+                    ventas_nums.append(fac.get("numero_dian") or archivo.filename or "desconocida")
+                else:
+                    compras.append(fac)
+
+            if ventas_nums and not compras:
+                # Archivo es 100% ventas → error para que el frontend lo registre como venta
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"[VENTA] {ventas_nums[0]}: Esta factura electrónica es una VENTA de tu empresa, "
+                        "no una compra. El módulo actual solo procesa facturas de compra. "
+                        "La causación de ventas estará disponible próximamente."
+                    ),
+                )
+
+            if ventas_nums:
+                # Mezcla: retornar solo las compras; agregar advertencia en la primera
+                compras[0].setdefault("advertencias", []).append(
+                    f"[VENTA] {ventas_nums[0]}: {len(ventas_nums)} factura(s) de venta omitida(s) de este archivo."
+                )
+            facturas = compras
 
     return facturas
 

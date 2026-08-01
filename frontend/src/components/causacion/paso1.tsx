@@ -9,7 +9,7 @@ import { fmt } from "@/lib/utils";
 import type { Factura } from "@/lib/types";
 
 export function Paso1() {
-  const { setFacturas, setFacturasYaCausadas, setPaso, facturas: stored, setPdfUrls, pdfUrls, setFilesProcesando, setSuggestions, setPaso2Cache } = useWizardStore();
+  const { setFacturas, setFacturasYaCausadas, setPaso, facturas: stored, setPdfUrls, pdfUrls, setFilesProcesando, setSuggestions, setPaso2Cache, setFacturasOmitidas } = useWizardStore();
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -106,24 +106,41 @@ export function Paso1() {
     const causadasNums = new Set(causadasInfo.map((c) => c.numero_dian));
     const nuevas = parsed.filter((f) => !causadasNums.has(f.numero_dian));
 
-    if (ventas.length || causadasInfo.length) {
-      // Hay advertencias que el usuario debe ver — volver a paso1
+    const hayComprasValidas = nuevas.length > 0;
+
+    if (!hayComprasValidas) {
+      // Solo ventas o ya causadas, nada nuevo que procesar → volver a paso1 con avisos
       setVentasDetectadas(ventas);
       setErrors(errs);
       setOmitidas(causadasInfo.map((c) => c.numero_dian));
       setFacturasYaCausadas(causadasInfo);
-      setFacturas(nuevas);
+      setFacturasOmitidas([]);
+      if (!ventas.length && !causadasInfo.length) errs.push("No se procesó ninguna factura válida.");
       setFilesProcesando(false);
       setLoading(false);
       setPaso(1);
       return;
     }
 
-    // Camino limpio: pasar facturas a paso2 — paso2 apagará filesProcesando cuando arranque sugsLoading
+    // Construir array unificado de omisiones para paso2
+    const omisionesParaPaso2: import("@/lib/types").FacturaOmitida[] = [
+      ...ventas.map((v) => ({ filename: v.filename, numero: v.numero, motivo: "venta" as const })),
+      ...causadasInfo.map((c) => ({
+        filename: parsed.find((f) => f.numero_dian === c.numero_dian)?._archivo ?? "",
+        numero: c.numero_dian,
+        motivo: "ya_causada" as const,
+      })),
+    ];
+
+    // Hay compras válidas → continuar a paso2 aunque haya ventas/ya causadas omitidas
+    setFacturasOmitidas(omisionesParaPaso2);
+    setVentasDetectadas(ventas);
     setErrors(errs);
+    setOmitidas(causadasInfo.map((c) => c.numero_dian));
     setFacturasYaCausadas(causadasInfo);
     setFacturas(nuevas);
     setLoading(false);
+    // No apagar filesProcesando aquí — paso2 lo hace al arrancar sugsLoading
   };
 
   return (

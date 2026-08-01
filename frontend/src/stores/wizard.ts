@@ -4,6 +4,7 @@ import type {
   BatchValidacionResponse,
   Factura,
   FacturaCausadaInfo,
+  FacturaOmitida,
   MapeoItem,
   PasoWizard,
   Sugerencia,
@@ -47,6 +48,7 @@ interface WizardState {
   pdfUrls: Record<string, string>;
   paso2Cache: Paso2Cache | null;
   filesProcesando: boolean;
+  facturasOmitidas: FacturaOmitida[];
   tutorialActivo: boolean;
   tutorialMockMapeo: TutorialMockMapeo | null;
 
@@ -63,6 +65,7 @@ interface WizardState {
   setPdfUrls: (urls: Record<string, string>) => void;
   setPaso2Cache: (cache: Paso2Cache | null) => void;
   setFilesProcesando: (v: boolean) => void;
+  setFacturasOmitidas: (items: FacturaOmitida[]) => void;
   setTutorialActivo: (v: boolean) => void;
   setTutorialMockMapeo: (m: TutorialMockMapeo | null) => void;
   reset: () => void;
@@ -82,6 +85,7 @@ const initial = {
   pdfUrls: {} as Record<string, string>,
   paso2Cache: null as Paso2Cache | null,
   filesProcesando: false,
+  facturasOmitidas: [],
   tutorialActivo: false,
   tutorialMockMapeo: null,
 };
@@ -101,6 +105,7 @@ export const useWizardStore = create<WizardState>((set) => ({
   setPdfUrls: (pdfUrls) => set({ pdfUrls }),
   setPaso2Cache: (paso2Cache) => set({ paso2Cache }),
   setFilesProcesando: (filesProcesando) => set({ filesProcesando }),
+  setFacturasOmitidas: (facturasOmitidas) => set({ facturasOmitidas }),
   setTutorialActivo: (tutorialActivo) => set({ tutorialActivo }),
   setTutorialMockMapeo: (tutorialMockMapeo) => set({ tutorialMockMapeo }),
   reset: () => set((state) => {

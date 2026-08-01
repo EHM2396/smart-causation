@@ -8,6 +8,7 @@ import { Combobox } from "@/components/ui/combobox";
 import { Badge } from "@/components/ui/badge";
 import { NuevoImpuestoDialog } from "@/components/causacion/nuevo-impuesto-dialog";
 import { CausadasModal } from "@/components/causacion/causadas-modal";
+import { OmitidasModal } from "@/components/causacion/omitidas-modal";
 import { fmt } from "@/lib/utils";
 import {
   AlertTriangle, Plus, Sparkles, Loader2,
@@ -63,8 +64,9 @@ function DataField({ label, value, mono = false }: { label: string; value: strin
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function Paso2() {
-  const { facturas, facturasYaCausadas, tipoComp, setPaso, setFacturas, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, pdfUrls, paso2Cache, setPaso2Cache, filesProcesando, setFilesProcesando, tutorialActivo, tutorialMockMapeo } = useWizardStore();
+  const { facturas, facturasYaCausadas, tipoComp, setPaso, setFacturas, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, pdfUrls, paso2Cache, setPaso2Cache, filesProcesando, setFilesProcesando, tutorialActivo, tutorialMockMapeo, facturasOmitidas, setFacturasOmitidas } = useWizardStore();
   const [modalCausadasOpen, setModalCausadasOpen] = useState(false);
+  const [modalOmitidasOpen, setModalOmitidasOpen] = useState(false);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
 
   const { data: cuentasGasto = [] } = useQuery({ queryKey: ["cuentas-gasto"], queryFn: api.getCuentasGasto });
@@ -496,6 +498,50 @@ export function Paso2() {
             </Button>
           </div>
         </div>
+
+        {/* Banner — facturas omitidas (ventas + ya causadas) */}
+        {facturasOmitidas.length > 0 && (
+          <div
+            className="flex items-center justify-between gap-3 rounded-xl border px-4 py-3"
+            style={{ borderColor: "rgba(99,102,241,0.35)", backgroundColor: "rgba(99,102,241,0.08)" }}
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <AlertTriangle className="h-4 w-4 shrink-0" style={{ color: "rgb(99,102,241)" }} />
+              <p className="text-sm" style={{ color: "var(--text-primary)" }}>
+                <span className="font-semibold" style={{ color: "rgb(99,102,241)" }}>
+                  {facturasOmitidas.length} factura{facturasOmitidas.length !== 1 ? "s" : ""} omitida{facturasOmitidas.length !== 1 ? "s" : ""}
+                </span>
+                {(() => {
+                  const v = facturasOmitidas.filter(o => o.motivo === "venta").length;
+                  const c = facturasOmitidas.filter(o => o.motivo === "ya_causada").length;
+                  if (v > 0 && c > 0) return ` — ${v} de venta, ${c} ya causada${c !== 1 ? "s" : ""}`;
+                  if (v > 0) return " — facturas de venta (próximamente disponible)";
+                  return " — ya causadas anteriormente";
+                })()}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => setModalOmitidasOpen(true)}
+                className="rounded-lg border px-2.5 py-1 text-xs font-medium transition-opacity hover:opacity-80"
+                style={{ borderColor: "rgba(99,102,241,0.4)", color: "rgb(99,102,241)", backgroundColor: "rgba(99,102,241,0.1)" }}
+              >
+                Ver detalle
+              </button>
+              <button
+                onClick={() => setFacturasOmitidas([])}
+                className="opacity-50 hover:opacity-100 transition-opacity"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {modalOmitidasOpen && (
+          <OmitidasModal omitidas={facturasOmitidas} onClose={() => setModalOmitidasOpen(false)} />
+        )}
 
         {/* Progress bar */}
         <div
