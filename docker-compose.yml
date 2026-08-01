@@ -40,7 +40,7 @@ services:
       - "8000:8000"
     # Monta el código fuente, aplica migraciones y arranca la API.
     command: >
-      sh -c "alembic upgrade head && python scripts/migrate_xlsx.py && uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload"
+      sh -c "alembic upgrade head && python scripts/migrate_xlsx.py && python scripts/seed_geo.py && uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload"
 
   # ── Next.js Frontend (pruebas) ─────────────────────────────────────────────
   frontend:

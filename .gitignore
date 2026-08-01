@@ -54,7 +54,17 @@ docker-compose.override.yml
 # Temporary exports and generated spreadsheets
 *.xlsx
 *.xls
+*.xlsm
 *.csv
+# Excepción: datos de referencia geográfica necesarios para seed en producción
+!0111 paises.xlsx
+
+# Next.js build artifacts
+frontend/.next/
+
+# Notas de planificación en la raíz (archivos con prefijos numéricos o #)
+/[0-9]*.md
+/\#*.md
 
 # Keep source code and project config only
 # (remove patterns above if you need to version specific data files)

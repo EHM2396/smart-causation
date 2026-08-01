@@ -31,6 +31,7 @@ from db.models.auth import Empresa, Usuario
 from db.models.contabilidad import FacturaCausada
 from db.session import get_db
 from services import causacion_service, consecutivos_service, cuentas_service
+from services import terceros_service
 from core import exporter, validator
 
 router = APIRouter(prefix="/causacion", tags=["Causación"])
@@ -440,6 +441,13 @@ def batch_generar(body: BatchRequest, db: DB, empresa: EmpresaActiva, current_us
                     default=str,
                 ),
             )
+        # Upsert tercero (proveedor) con los datos extraídos de la factura
+        for item in body.items:
+            try:
+                terceros_service.upsert_tercero(db, empresa.id, item.factura)
+            except Exception:
+                pass  # No bloquear la causación si falla el upsert del tercero
+
         consecutivos_service.set_ultimo(db, body.tipo_comprobante, ultimo + len(body.items), empresa_id=empresa.id)
         db.commit()
 

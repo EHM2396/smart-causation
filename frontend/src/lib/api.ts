@@ -2,12 +2,17 @@ import type {
   BatchValidacionResponse,
   ConsecutivoOut,
   CuentaOpcion,
+  CiudadOut,
+  DepartamentoOut,
   FacturaCausadaInfo,
   HistorialItem,
   IADecision,
   IARegla,
   ImpuestoOut,
   LoginResponse,
+  TerceroOut,
+  TercerosCatalogos,
+  TercerosStats,
   TipoComprobanteOpcion,
 } from "./types";
 import { useAuthStore } from "@/stores/auth";
@@ -322,4 +327,35 @@ export const api = {
   eliminarImpuesto: (codigo: string) => req<{ ok: boolean }>(`/impuestos/${codigo}`, { method: "DELETE" }),
   eliminarCuenta: (codigo: string) => req<{ ok: boolean }>(`/cuentas/${codigo}`, { method: "DELETE" }),
   eliminarTipo: (codigo: string) => req<{ ok: boolean }>(`/tipos-comprobante/${codigo}`, { method: "DELETE" }),
+
+  // Terceros
+  getTerceros: (params?: { q?: string; tipo_persona?: string; solo_activos?: boolean }) => {
+    const qp = new URLSearchParams();
+    if (params?.q) qp.set("q", params.q);
+    if (params?.tipo_persona) qp.set("tipo_persona", params.tipo_persona);
+    if (params?.solo_activos === false) qp.set("solo_activos", "false");
+    const qs = qp.toString();
+    return req<TerceroOut[]>(`/terceros${qs ? `?${qs}` : ""}`);
+  },
+  getTercero: (id: number) => req<TerceroOut>(`/terceros/${id}`),
+  actualizarTercero: (id: number, body: Partial<TerceroOut>) =>
+    req<TerceroOut>(`/terceros/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  eliminarTercero: (id: number) =>
+    req<void>(`/terceros/${id}`, { method: "DELETE" }),
+  getTercerosCatalogos: () => req<TercerosCatalogos>("/terceros/catalogos"),
+  getTercerosStats: () => req<TercerosStats>("/terceros/stats/resumen"),
+  getDepartamentos: (paisCodigo = "Col") =>
+    req<DepartamentoOut[]>(`/terceros/departamentos?pais_codigo=${paisCodigo}`),
+  buscarCiudades: (q: string, departamentoCodigo?: string) => {
+    const qp = new URLSearchParams({ q });
+    if (departamentoCodigo) qp.set("departamento_codigo", departamentoCodigo);
+    return req<CiudadOut[]>(`/terceros/ciudades?${qp.toString()}`);
+  },
+
+  exportarTerceros: (ids?: number[]): Promise<Blob> =>
+    reqBlob("/terceros/exportar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: ids ?? [] }),
+    }),
 };

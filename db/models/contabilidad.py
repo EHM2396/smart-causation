@@ -12,6 +12,8 @@ from datetime import date, datetime, timezone
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
+
+
 from db.base import Base
 
 
@@ -22,29 +24,75 @@ from db.base import Base
 class Proveedor(Base):
     """
     Terceros (proveedores) que emiten facturas electrónicas a la empresa.
+    Campos alineados con el formato de importación masiva de Siigo Nube.
 
     tipo_persona: 'juridica' | 'natural'
     cuenta_pagar: código PUC de la cuenta por pagar (ej. '22050501')
-                  → FK lógica a cuentas_contables.codigo
+    tipo_identificacion: código DIAN (31=NIT, 13=CC, 22=CE, etc.)
     """
     __tablename__ = "proveedores"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    nit: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
+
+    # ── Identificación ─────────────────────────────────────────────────────────
+    nit: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    digito_verificacion: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    codigo_sucursal: Mapped[str | None] = mapped_column(String(10))
+    tipo_identificacion: Mapped[int | None] = mapped_column(Integer, nullable=True)  # código DIAN
+
+    # ── Tipo y nombre ──────────────────────────────────────────────────────────
+    tipo_persona: Mapped[str | None] = mapped_column(String(20))        # 'juridica' | 'natural'
     razon_social: Mapped[str | None] = mapped_column(String(255))
-    tipo_persona: Mapped[str | None] = mapped_column(String(20))     # 'juridica' | 'natural'
-    regimen: Mapped[str | None] = mapped_column(String(50))
-    cuenta_pagar: Mapped[str | None] = mapped_column(String(10))     # PUC cuentas por pagar
-    ciudad: Mapped[str | None] = mapped_column(String(100))
+    nombres_tercero: Mapped[str | None] = mapped_column(String(150))    # personas naturales
+    apellidos_tercero: Mapped[str | None] = mapped_column(String(150))  # personas naturales
+    nombre_comercial: Mapped[str | None] = mapped_column(String(255))
+
+    # ── Ubicación ──────────────────────────────────────────────────────────────
     direccion: Mapped[str | None] = mapped_column(String(255))
-    empresa_id: Mapped[int | None] = mapped_column(ForeignKey("empresas.id"), nullable=True, index=True)
+    ciudad: Mapped[str | None] = mapped_column(String(100))             # texto libre (display)
+    departamento: Mapped[str | None] = mapped_column(String(100))       # texto libre (display)
+    codigo_pais: Mapped[str | None] = mapped_column(String(10), default="Col")
+    codigo_departamento: Mapped[str | None] = mapped_column(String(10))
+    codigo_ciudad_siigo: Mapped[str | None] = mapped_column(String(10))
+    codigo_postal: Mapped[str | None] = mapped_column(String(10))
+
+    # ── Contacto ───────────────────────────────────────────────────────────────
+    indicativo_tel: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    telefono: Mapped[str | None] = mapped_column(String(50))
+    extension_tel: Mapped[str | None] = mapped_column(String(10))
+    email: Mapped[str | None] = mapped_column(String(255))
+
+    # ── Fiscal / Siigo ─────────────────────────────────────────────────────────
+    regimen: Mapped[str | None] = mapped_column(String(50))             # texto libre
+    tipo_regimen_iva: Mapped[str | None] = mapped_column(String(20))    # código Siigo (R-99-PN, RC…)
+    codigo_responsabilidad: Mapped[str | None] = mapped_column(String(50))  # O-23, ZZ…
+    cuenta_pagar: Mapped[str | None] = mapped_column(String(10))        # PUC cuentas por pagar
+
+    # ── Contacto principal ─────────────────────────────────────────────────────
+    nombres_contacto: Mapped[str | None] = mapped_column(String(150))
+    apellidos_contacto: Mapped[str | None] = mapped_column(String(150))
+    indicativo_tel_contacto: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    telefono_contacto: Mapped[str | None] = mapped_column(String(50))
+    extension_tel_contacto: Mapped[str | None] = mapped_column(String(10))
+    email_contacto: Mapped[str | None] = mapped_column(String(255))
+
+    # ── Flags ──────────────────────────────────────────────────────────────────
+    es_cliente: Mapped[bool] = mapped_column(Boolean, default=False)
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
-    ia_habilitada: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # None = heredar global (True)
+    ia_habilitada: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    fuente: Mapped[str | None] = mapped_column(String(20))              # 'xml' | 'pdf' | 'manual'
+
+    # ── Meta ───────────────────────────────────────────────────────────────────
+    empresa_id: Mapped[int | None] = mapped_column(ForeignKey("empresas.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("nit", "empresa_id", name="uq_proveedores_nit_empresa"),
     )
 
     def __repr__(self) -> str:

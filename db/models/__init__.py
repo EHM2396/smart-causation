@@ -26,6 +26,15 @@ from db.models.aprendizaje import (                        # noqa: F401
     HistorialDecision,
     ReglaClasificacion,
 )
+from db.models.geo import (                                # noqa: F401
+    TipoIdentificacion,
+    Pais,
+    Departamento,
+    Ciudad,
+    SiigoTipoPersona,
+    SiigoRegimenIva,
+    SiigoResponsabilidadFiscal,
+)
 
 __all__ = [
     "Base",
@@ -42,4 +51,11 @@ __all__ = [
     "MapeoPUC",
     "HistorialDecision",
     "ReglaClasificacion",
+    "TipoIdentificacion",
+    "Pais",
+    "Departamento",
+    "Ciudad",
+    "SiigoTipoPersona",
+    "SiigoRegimenIva",
+    "SiigoResponsabilidadFiscal",
 ]

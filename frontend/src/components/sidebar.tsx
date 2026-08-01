@@ -2,12 +2,13 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { FileSpreadsheet, BookOpen, History, UserCircle } from "lucide-react";
+import { FileSpreadsheet, BookOpen, History, UserCircle, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/causacion", icon: FileSpreadsheet, label: "Causación", desc: "Procesar facturas DIAN" },
   { href: "/historial", icon: History, label: "Historial", desc: "Facturas causadas" },
+  { href: "/terceros", icon: Users, label: "Terceros", desc: "Proveedores y vendedores" },
   { href: "/catalogos", icon: BookOpen, label: "Catálogos", desc: "Impuestos, PUC, comprobantes" },
 ];
 

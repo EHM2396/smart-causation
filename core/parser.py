@@ -530,12 +530,48 @@ def _parsear_pdf_plumber(archivo: BytesIO, nombre_archivo: str) -> list[dict]:
     # Separar sección del emisor (antes de "Adquiriente")
     emisor_text = re.split(r"Datos del Adquiriente", page1_text, maxsplit=1, flags=re.I)[0]
     razon_social = rval(r"Raz[oó]n Social:\s*(.+?)(?:\n|$)", emisor_text)
+    nombre_comercial = rval(r"Nombre Comercial:\s*(.+?)(?:\n|$)", emisor_text)
     nit = re.sub(r"[^\d\-]", "", rval(r"Nit del Emisor:\s*(\S+)", emisor_text))
     ciudad = rval(r"Municipio / Ciudad:\s*(\S+)", emisor_text)
+    departamento = rval(r"Departamento:\s*(.+?)(?:\s{2,}|\n|$)", emisor_text)
+    direccion = rval(r"Direcci[oó]n:\s*(.+?)(?:\s{2,}|\n|$)", emisor_text)
+    telefono = rval(r"Tel[eé]fono\s*[/\s]*M[oó]vil:\s*(.+?)(?:\s{2,}|\n|$)", emisor_text)
+    email = rval(r"Correo:\s*(\S+)", emisor_text)
 
-    tipo_proveedor = "juridica"
-    if "natural" in rval(r"Tipo de Contribuyente:\s*(.+?)(?:\s{2,}|\n|$)", emisor_text).lower():
-        tipo_proveedor = "natural"
+    tipo_contribuyente_raw = rval(r"Tipo de Contribuyente:\s*(.+?)(?:\s{2,}|\n|$)", emisor_text)
+    tipo_proveedor = "natural" if "natural" in tipo_contribuyente_raw.lower() else "juridica"
+
+    # Régimen fiscal: "R-99-PN; ZZ-No aplica" → separar responsabilidad fiscal y régimen IVA
+    # Siigo distingue dos campos:
+    #   - Código Responsabilidad fiscal (col R): O-13, O-15, O-23, O-47, R-99-PN
+    #   - Tipo de régimen IVA (col Q): 0=No responsable, 2=Responsable
+    # ZZ significa "no aplica" = no responsable de IVA → tipo_regimen_iva = "0"
+    # R-XX-XX y O-XX son códigos de responsabilidad fiscal
+    regimen_fiscal_raw = rval(r"R[eé]gimen Fiscal:\s*(.+?)(?:\n|$)", emisor_text)
+    tipo_regimen_iva = ""
+    codigo_responsabilidad_pdf = ""
+    if regimen_fiscal_raw:
+        # Responsabilidad fiscal: O-XX o R-XX-XX (ej. R-99-PN, O-13, O-23)
+        m_resp = re.search(r"\b(O-\d{2,3}|R-\d{2}-\w+)\b", regimen_fiscal_raw, re.I)
+        if m_resp:
+            codigo_responsabilidad_pdf = m_resp.group(1).upper()
+        # Régimen IVA: RC/GC = responsable (2); RS/NC/RNC/ZZ/no aplica = no responsable (0)
+        m_reg = re.search(r"\b(ZZ|RC|RS|GC|NC|RNC)\b", regimen_fiscal_raw, re.I)
+        if m_reg:
+            tipo_regimen_iva = "2" if m_reg.group(1).upper() in ("RC", "GC") else "0"
+        elif re.search(r"no\s+aplica", regimen_fiscal_raw, re.I):
+            tipo_regimen_iva = "0"
+
+    # "Responsabilidad tributaria: ZZ - No aplica" sobreescribe si existe
+    responsabilidad_raw = rval(r"Responsabilidad tributaria:\s*(.+?)(?:\n|$)", emisor_text)
+    if responsabilidad_raw:
+        # Responsabilidad fiscal explícita
+        m_resp2 = re.search(r"\b(O-\d{2,3}|R-\d{2}-\w+)\b", responsabilidad_raw, re.I)
+        if m_resp2:
+            codigo_responsabilidad_pdf = m_resp2.group(1).upper()
+        # "no aplica" o ZZ en responsabilidad tributaria = no responsable de IVA
+        if re.search(r"no\s+aplica|\bZZ\b", responsabilidad_raw, re.I):
+            tipo_regimen_iva = "0"
 
     # ── Forma y medio de pago (solo XML/PDF, no Excel) ──
     forma_pago_raw = rval(r"Forma\s+de\s+Pago[:\s]+(.+?)(?:\s{2,}|\n|$)", page1_text)
@@ -633,19 +669,27 @@ def _parsear_pdf_plumber(archivo: BytesIO, nombre_archivo: str) -> list[dict]:
         total = round(sum(i["total_linea"] for i in items), 2)
 
     return [{
-        "numero_dian":    numero_dian,
-        "cufe":           cufe,
-        "fecha":          fecha,
-        "nit":            nit,
-        "razon_social":   razon_social,
-        "tipo_proveedor": tipo_proveedor,
-        "regimen":        "",
-        "ciudad":         ciudad,
-        "medio_pago":     medio_pago,
-        "forma_pago":     forma_pago,
-        "total":          total,
-        "items":          items,
-        "advertencias":   [
+        "numero_dian":              numero_dian,
+        "cufe":                     cufe,
+        "fecha":                    fecha,
+        "nit":                      nit,
+        "razon_social":             razon_social,
+        "nombre_comercial":         nombre_comercial,
+        "tipo_proveedor":           tipo_proveedor,
+        "regimen":                  "",
+        "tipo_regimen_iva":         tipo_regimen_iva,
+        "codigo_responsabilidad":   codigo_responsabilidad_pdf,
+        "ciudad":                   ciudad,
+        "departamento":             departamento,
+        "direccion":                direccion,
+        "telefono":                 telefono,
+        "email":                    email,
+        "_fuente":                  "pdf",
+        "medio_pago":               medio_pago,
+        "forma_pago":               forma_pago,
+        "total":                    total,
+        "items":                    items,
+        "advertencias":             [
             "Extraído del PDF (representación gráfica). "
             "Verifique los montos contra la factura original antes de causar."
         ],
@@ -708,36 +752,69 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
     # ── Proveedor ──
     nit = ""
     razon_social = ""
+    nombre_comercial = ""
     tipo_proveedor = "juridica"
+    tipo_identificacion_codigo = ""
     ciudad = ""
+    departamento = ""
+    direccion = ""
+    codigo_postal = ""
+    telefono = ""
+    email = ""
+    nombres_tercero = ""
+    apellidos_tercero = ""
 
     supplier = find("cac:AccountingSupplierParty/cac:Party")
     if supplier is not None:
-        # NIT
+        # NIT y tipo identificación
         tax_scheme = supplier.find("cac:PartyTaxScheme", _NS)
         if tax_scheme is not None:
             nit_el = tax_scheme.find("cbc:CompanyID", _NS)
             if nit_el is not None and nit_el.text:
                 nit = re.sub(r"[^\d\-]", "", nit_el.text.strip())
                 scheme_id = (nit_el.get("schemeID") or "").strip()
-                if scheme_id in ("13", "22", "31"):
-                    tipo_proveedor = "natural" if scheme_id in ("13", "22") else "juridica"
+                tipo_identificacion_codigo = scheme_id
+                if scheme_id in ("13", "22"):
+                    tipo_proveedor = "natural"
+                elif scheme_id == "31":
+                    tipo_proveedor = "juridica"
 
         # Razón social
         legal = supplier.find("cac:PartyLegalEntity", _NS)
         if legal is not None:
             razon_social = _xml_text(legal.find("cbc:RegistrationName", _NS))
-        if not razon_social:
-            pname = supplier.find("cac:PartyName", _NS)
-            if pname is not None:
-                razon_social = _xml_text(pname.find("cbc:Name", _NS))
+        # Nombre comercial (PartyName puede ser diferente de RegistrationName)
+        pname = supplier.find("cac:PartyName", _NS)
+        if pname is not None:
+            candidate = _xml_text(pname.find("cbc:Name", _NS))
+            if not razon_social:
+                razon_social = candidate
+            elif candidate and candidate.upper() != razon_social.upper():
+                nombre_comercial = candidate
 
-        # Ciudad
+        # Dirección completa
         addr = supplier.find("cac:PhysicalLocation/cac:Address", _NS)
         if addr is None:
             addr = supplier.find("cac:PostalAddress", _NS)
         if addr is not None:
             ciudad = _xml_text(addr.find("cbc:CityName", _NS))
+            departamento = _xml_text(addr.find("cbc:CountrySubentity", _NS))
+            codigo_postal = _xml_text(addr.find("cbc:PostalZone", _NS))
+            addr_line = addr.find("cac:AddressLine", _NS)
+            if addr_line is not None:
+                direccion = _xml_text(addr_line.find("cbc:Line", _NS))
+
+        # Contacto
+        contact = supplier.find("cac:Contact", _NS)
+        if contact is not None:
+            telefono = _xml_text(contact.find("cbc:Telephone", _NS))
+            email = _xml_text(contact.find("cbc:ElectronicMail", _NS))
+
+        # Nombres/apellidos para personas naturales
+        person = supplier.find("cac:Person", _NS)
+        if person is not None:
+            nombres_tercero = _xml_text(person.find("cbc:FirstName", _NS))
+            apellidos_tercero = _xml_text(person.find("cbc:FamilyName", _NS))
 
     # ── Medios y forma de pago (para sugerencias de cuenta de pago) ──
     _PM_CODE: dict[str, str] = {
@@ -853,20 +930,32 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
         total = round(sum(i["total_linea"] for i in items), 2)
 
     return {
-        "numero_dian":    numero_dian,
-        "cufe":           cufe,
-        "fecha":          fecha,
-        "nit":            nit,
-        "nit_comprador":  nit_comprador,
-        "razon_social":   razon_social,
-        "tipo_proveedor": tipo_proveedor,
-        "regimen":        "",
-        "ciudad":         ciudad,
-        "medio_pago":     medio_pago,
-        "forma_pago":     forma_pago,
-        "total":          total,
-        "items":          items,
-        "advertencias":   advertencias,
+        "numero_dian":              numero_dian,
+        "cufe":                     cufe,
+        "fecha":                    fecha,
+        "nit":                      nit,
+        "nit_comprador":            nit_comprador,
+        "razon_social":             razon_social,
+        "nombre_comercial":         nombre_comercial,
+        "tipo_proveedor":           tipo_proveedor,
+        "tipo_identificacion_codigo": tipo_identificacion_codigo,
+        "regimen":                  "",
+        "tipo_regimen_iva":         "",
+        "codigo_responsabilidad":   "",
+        "ciudad":                   ciudad,
+        "departamento":             departamento,
+        "direccion":                direccion,
+        "codigo_postal":            codigo_postal,
+        "telefono":                 telefono,
+        "email":                    email,
+        "nombres_tercero":          nombres_tercero,
+        "apellidos_tercero":        apellidos_tercero,
+        "_fuente":                  "xml",
+        "medio_pago":               medio_pago,
+        "forma_pago":               forma_pago,
+        "total":                    total,
+        "items":                    items,
+        "advertencias":             advertencias,
     }
 
 

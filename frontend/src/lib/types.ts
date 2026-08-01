@@ -181,6 +181,99 @@ export interface IADecision {
   created_at: string;
 }
 
+// ─── Terceros ─────────────────────────────────────────────────────────────────
+
+export interface TerceroOut {
+  id: number;
+  nit: string;
+  digito_verificacion: number | null;
+  codigo_sucursal: string | null;
+  tipo_identificacion: number | null;
+  tipo_persona: string | null;
+  razon_social: string | null;
+  nombres_tercero: string | null;
+  apellidos_tercero: string | null;
+  nombre_comercial: string | null;
+  direccion: string | null;
+  ciudad: string | null;
+  departamento: string | null;
+  codigo_pais: string | null;
+  codigo_departamento: string | null;
+  codigo_ciudad_siigo: string | null;
+  codigo_postal: string | null;
+  indicativo_tel: number | null;
+  telefono: string | null;
+  extension_tel: string | null;
+  email: string | null;
+  regimen: string | null;
+  tipo_regimen_iva: string | null;
+  codigo_responsabilidad: string | null;
+  cuenta_pagar: string | null;
+  nombres_contacto: string | null;
+  apellidos_contacto: string | null;
+  indicativo_tel_contacto: number | null;
+  telefono_contacto: string | null;
+  extension_tel_contacto: string | null;
+  email_contacto: string | null;
+  es_cliente: boolean;
+  activo: boolean;
+  ia_habilitada: boolean | null;
+  fuente: string | null;
+  empresa_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TipoIdentificacionOut {
+  codigo: number;
+  descripcion: string;
+}
+
+export interface DepartamentoOut {
+  codigo: string;
+  nombre: string;
+  pais_codigo: string | null;
+}
+
+export interface CiudadOut {
+  codigo: string;
+  nombre: string;
+  departamento_codigo: string | null;
+  pais_codigo: string | null;
+}
+
+export interface SiigoTipoPersonaOut {
+  codigo: string;
+  descripcion: string;
+  valor_interno: string | null;
+}
+
+export interface SiigoRegimenIvaOut {
+  codigo: string;
+  etiqueta: string;
+}
+
+export interface SiigoResponsabilidadFiscalOut {
+  codigo: string;
+  descripcion: string;
+}
+
+export interface TercerosCatalogos {
+  tipos_identificacion: TipoIdentificacionOut[];
+  paises: { codigo: string; nombre: string }[];
+  tipos_persona: SiigoTipoPersonaOut[];
+  regimenes_iva: SiigoRegimenIvaOut[];
+  responsabilidades_fiscales: SiigoResponsabilidadFiscalOut[];
+}
+
+export interface TercerosStats {
+  total: number;
+  juridicas: number;
+  naturales: number;
+  completos: number;
+  pct_completos: number;
+}
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 export interface LoginResponse {
