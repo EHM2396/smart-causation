@@ -37,7 +37,7 @@ services:
       MAIL_SSL: ${MAIL_SSL:-false}
       FRONTEND_URL: ${FRONTEND_URL}
     command: >
-      sh -c "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port 8000"
+      sh -c "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"
     volumes:
       - api_data:/app/data
 
