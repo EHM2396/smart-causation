@@ -33,10 +33,11 @@ services:
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
       MAIL_FROM: ${MAIL_FROM:-}
       MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Smart Causación}
-      MAIL_SERVER: ${MAIL_SERVER:-smtp.hostinger.com}
+      MAIL_SERVER: ${MAIL_SERVER:-smtp.gmail.com}
       MAIL_PORT: ${MAIL_PORT:-587}
       MAIL_TLS: ${MAIL_TLS:-true}
       MAIL_SSL: ${MAIL_SSL:-false}
+      EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
       FRONTEND_URL: ${FRONTEND_URL}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
     command: >

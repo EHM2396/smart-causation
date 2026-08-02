@@ -4,7 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2, MailCheck } from "lucide-react";
+import { LogoCiolix } from "@/components/logo-ciolix";
 import { api } from "@/lib/api";
+import { VERSION_LEGAL } from "@/lib/legal";
 import { useAuthStore } from "@/stores/auth";
 
 export default function RegistroPage() {
@@ -15,6 +17,7 @@ export default function RegistroPage() {
     nombre_empresa: "",
     nit_empresa: "",
   });
+  const [aceptaLegal, setAceptaLegal] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [registradoEmail, setRegistradoEmail] = useState("");
@@ -27,6 +30,10 @@ export default function RegistroPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!aceptaLegal) {
+      setError("Debes aceptar los Términos y Condiciones y la Política de Privacidad");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -36,6 +43,8 @@ export default function RegistroPage() {
         nombre: form.nombre,
         nombre_empresa: form.nombre_empresa,
         nit_empresa: form.nit_empresa || undefined,
+        acepta_legal: true,
+        version_legal: VERSION_LEGAL,
       });
       login(data);
       if (!data.email_verificado) {
@@ -88,20 +97,12 @@ export default function RegistroPage() {
         ) : (
           <>
             <div className="mb-8 text-center">
-              <div
-                className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl"
-                style={{ background: "linear-gradient(135deg, var(--brand-btn) 0%, var(--brand-accent) 100%)" }}
-              >
-                <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6 text-white" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 11h.01M12 11h.01M15 11h.01M4 19h16a2 2 0 002-2V7a2 2 0 00-2-2H4a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
+              <div className="mx-auto mb-4 flex items-center justify-center">
+                <LogoCiolix variante="login" priority />
               </div>
               <h1 className="text-xl font-bold" style={{ color: "var(--text-primary)" }}>
                 Crear cuenta
               </h1>
-              <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-                Ciolix
-              </p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -195,6 +196,43 @@ export default function RegistroPage() {
                 </div>
               </div>
 
+              {/*
+                Casilla de aceptación. Nunca debe venir premarcada: la Ley 1581
+                de 2012 exige consentimiento expreso e inequívoco, y una casilla
+                marcada por defecto no lo acredita.
+              */}
+              <label className="flex cursor-pointer items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  name="acepta_legal"
+                  checked={aceptaLegal}
+                  onChange={(e) => setAceptaLegal(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded"
+                  style={{ accentColor: "var(--brand-btn)" }}
+                />
+                <span className="text-xs leading-relaxed" style={{ color: "var(--text-secondary)" }}>
+                  He leído y acepto los{" "}
+                  <Link
+                    href="/legal/terminos"
+                    target="_blank"
+                    className="font-medium underline"
+                    style={{ color: "var(--brand)" }}
+                  >
+                    Términos y Condiciones
+                  </Link>{" "}
+                  y autorizo el tratamiento de mis datos personales conforme a la{" "}
+                  <Link
+                    href="/legal/privacidad"
+                    target="_blank"
+                    className="font-medium underline"
+                    style={{ color: "var(--brand)" }}
+                  >
+                    Política de Privacidad
+                  </Link>
+                  , incluida la transmisión a proveedores en el exterior descrita en ella.
+                </span>
+              </label>
+
               {error && (
                 <p
                   className="rounded-lg px-3 py-2 text-sm"
@@ -206,7 +244,7 @@ export default function RegistroPage() {
 
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !aceptaLegal}
                 className="flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-60"
                 style={{ background: "linear-gradient(135deg, var(--brand-btn) 0%, var(--brand-accent) 100%)" }}
               >
@@ -220,6 +258,15 @@ export default function RegistroPage() {
               <Link href="/login" className="font-medium" style={{ color: "var(--brand)" }}>
                 Inicia sesión
               </Link>
+            </p>
+
+            <p
+              className="mt-4 border-t pt-4 text-center text-xs"
+              style={{ borderColor: "var(--border-soft)", color: "var(--text-muted)" }}
+            >
+              <Link href="/legal/terminos">Términos y Condiciones</Link>
+              {" · "}
+              <Link href="/legal/privacidad">Política de Privacidad</Link>
             </p>
           </>
         )}

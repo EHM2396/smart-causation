@@ -11,7 +11,10 @@ import { useAuthStore } from "@/stores/auth";
 import { useWizardStore } from "@/stores/wizard";
 import { Tutorial } from "@/components/tutorial/tutorial";
 
-const AUTH_PATHS = ["/login", "/registro"];
+// Rutas que se renderizan sin el shell y sin exigir sesión.
+// /legal debe ser accesible para cualquiera: los documentos legales tienen que
+// poder consultarse ANTES de registrarse, no solo desde una cuenta activa.
+const AUTH_PATHS = ["/login", "/registro", "/legal"];
 
 const PAGE_META: Record<string, { title: string; description: string }> = {
   "/causacion": {

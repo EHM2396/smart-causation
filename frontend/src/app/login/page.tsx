@@ -185,6 +185,15 @@ export default function LoginPage() {
             Regístrate
           </Link>
         </p>
+
+        <p
+          className="mt-4 border-t pt-4 text-center text-xs"
+          style={{ borderColor: "var(--border-soft)", color: "var(--text-muted)" }}
+        >
+          <Link href="/legal/terminos">Términos y Condiciones</Link>
+          {" · "}
+          <Link href="/legal/privacidad">Política de Privacidad</Link>
+        </p>
       </div>
     </div>
   );

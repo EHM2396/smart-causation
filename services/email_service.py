@@ -1,12 +1,12 @@
 """
-EmailService – envío de correos transaccionales vía SMTP (Hostinger).
+EmailService – envío de correos transaccionales vía SMTP (Gmail).
 
 Configuración por variables de entorno:
-    MAIL_USERNAME   noreply@smartcausacion.com
-    MAIL_PASSWORD   contraseña de la cuenta en Hostinger
-    MAIL_FROM       noreply@smartcausacion.com
-    MAIL_FROM_NAME  Smart Causación
-    MAIL_SERVER     smtp.hostinger.com
+    MAIL_USERNAME   noreply.ciolix@gmail.com
+    MAIL_PASSWORD   app-password de 16 caracteres generada en Google
+    MAIL_FROM       noreply.ciolix@gmail.com
+    MAIL_FROM_NAME  Ciolix
+    MAIL_SERVER     smtp.gmail.com
     MAIL_PORT       587
     MAIL_TLS        true
     MAIL_SSL        false
@@ -28,7 +28,7 @@ _USERNAME   = os.getenv("MAIL_USERNAME", "")
 _PASSWORD   = os.getenv("MAIL_PASSWORD", "")
 _FROM       = os.getenv("MAIL_FROM", _USERNAME)
 _FROM_NAME  = os.getenv("MAIL_FROM_NAME", "Smart Causación")
-_SERVER     = os.getenv("MAIL_SERVER", "smtp.hostinger.com")
+_SERVER     = os.getenv("MAIL_SERVER", "smtp.gmail.com")
 _PORT       = int(os.getenv("MAIL_PORT", "587"))
 _TLS        = os.getenv("MAIL_TLS", "true").lower() == "true"
 _SSL        = os.getenv("MAIL_SSL", "false").lower() == "true"

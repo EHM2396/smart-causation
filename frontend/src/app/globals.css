@@ -256,6 +256,80 @@ html[data-theme="dark"] select {
   color: rgb(245,158,11);
 }
 
+/* ─── Impresión / exportación a PDF ──────────────────────────
+   Usada por el botón "Descargar PDF" de /legal/*. No generamos el PDF con
+   una librería a propósito: el documento impreso debe ser exactamente el
+   publicado, y duplicar un texto legal versionado garantiza que un día se
+   desincronicen.                                                        */
+@media print {
+  /* Toda la app estiliza con variables, así que redefinirlas aquí reestila
+     el documento completo. Sin esto, quien tenga el tema oscuro activo se
+     llevaría un PDF de fondo negro. */
+  :root,
+  html[data-theme="dark"] {
+    --bg-app:        #ffffff;
+    --bg-surface:    #ffffff;
+    --bg-elevated:   #ffffff;
+    --text-primary:  #000000;
+    --text-secondary:#1a1a1a;
+    --text-muted:    #3d3d3d;
+    --border-soft:   #c8c8c8;
+    --border-strong: #909090;
+    --brand:         #000000;
+    --brand-accent:  #707070;
+    --brand-btn:     #000000;
+    --shadow-xs:     none;
+    --shadow-md:     none;
+  }
+
+  @page {
+    margin: 18mm 16mm;
+  }
+
+  body {
+    background: #fff;
+    font-size: 10.5pt;
+    line-height: 1.45;
+  }
+
+  /* Cromo de navegación: no forma parte del documento legal. */
+  [data-print="hide"] {
+    display: none !important;
+  }
+
+  /* La impresión fuerza fondo blanco arriba, así que los assets pensados para
+     tema oscuro (logos blancos) saldrían invisibles. Se invierte la selección
+     de variante para que siempre se imprima la del tema claro. */
+  html[data-theme="dark"] img.dark\:block {
+    display: none !important;
+  }
+  html[data-theme="dark"] img.dark\:hidden {
+    display: block !important;
+  }
+
+  /* En papel el color de un enlace no comunica nada. */
+  a {
+    color: #000 !important;
+    text-decoration: underline;
+  }
+
+  /* Cortes de página legibles. */
+  h1, h2, h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  table, tr, li {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* El ancho acotado es para leer en pantalla; en papel desperdicia margen. */
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+}
+
 /* ─── Puntos animados de carga (overlay sugerencias IA) ─────── */
 @keyframes ciolix-sug-bounce {
   0%, 80%, 100% { transform: scaleY(1); opacity: 0.4; }

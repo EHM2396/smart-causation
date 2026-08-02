@@ -11,6 +11,9 @@ from db.models.auth import (                               # noqa: F401
     Empresa,
     UsuarioEmpresa,
 )
+from db.models.legal import (                              # noqa: F401
+    Consentimiento,
+)
 from db.models.catalogo import (                           # noqa: F401
     CuentaContable,
     CodigoImpuesto,
@@ -42,6 +45,7 @@ __all__ = [
     "Usuario",
     "Empresa",
     "UsuarioEmpresa",
+    "Consentimiento",
     "CuentaContable",
     "CodigoImpuesto",
     "TipoComprobante",

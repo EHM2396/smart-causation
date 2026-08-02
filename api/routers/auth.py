@@ -12,7 +12,7 @@ import re
 
 import bcrypt as _bcrypt
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from jose import jwt
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from api.dependencies import ALGORITHM, SECRET_KEY, get_current_user
 from db.models.auth import Empresa, Plan, TokenEmail, Usuario, UsuarioEmpresa
+from db.models.legal import Consentimiento
 from db.session import get_db
 from services import email_service
 
@@ -45,6 +46,11 @@ class RegistroRequest(BaseModel):
     nombre: str
     nombre_empresa: str
     nit_empresa: str | None = None
+    # Aceptación de Términos y Política de Privacidad. Sin esto no hay registro:
+    # la Ley 1581 de 2012 exige autorización previa, expresa e informada.
+    acepta_legal: bool = False
+    # Versión de los documentos que el usuario tuvo a la vista (VERSION_LEGAL).
+    version_legal: str | None = None
 
 
 class TokenResponse(BaseModel):
@@ -119,6 +125,35 @@ def _validar_complejidad_password(password: str) -> str | None:
     return None
 
 
+def _client_ip(request: Request) -> str | None:
+    """
+    IP real del cliente. La API corre detrás de Caddy, así que uvicorn ya
+    resuelve X-Forwarded-For vía --proxy-headers; el header se lee como
+    respaldo por si el despliegue cambia de proxy.
+    """
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()[:45]
+    return request.client.host[:45] if request.client else None
+
+
+def _registrar_consentimiento(
+    db: Session, usuario_id: int, version: str, request: Request, origen: str = "registro"
+) -> None:
+    """Deja la prueba de aceptación: una fila por documento, append-only."""
+    ip = _client_ip(request)
+    user_agent = (request.headers.get("user-agent") or "")[:1000] or None
+    for documento in ("terminos", "privacidad"):
+        db.add(Consentimiento(
+            usuario_id=usuario_id,
+            documento=documento,
+            version=version,
+            ip=ip,
+            user_agent=user_agent,
+            origen=origen,
+        ))
+
+
 def _empresa_del_usuario(db: Session, usuario_id: int) -> Empresa | None:
     return db.scalar(
         select(Empresa)
@@ -183,7 +218,13 @@ def login(body: LoginRequest, db: DB):
 
 
 @router.post("/registro", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-def registro(body: RegistroRequest, background_tasks: BackgroundTasks, db: DB):
+def registro(body: RegistroRequest, request: Request, background_tasks: BackgroundTasks, db: DB):
+    if not body.acepta_legal or not body.version_legal:
+        raise HTTPException(
+            status_code=400,
+            detail="Debes aceptar los Términos y Condiciones y la Política de Privacidad",
+        )
+
     email = body.email.lower().strip()
     if db.scalar(select(Usuario).where(Usuario.email == email)):
         raise HTTPException(status_code=409, detail="El email ya está registrado")
@@ -210,6 +251,10 @@ def registro(body: RegistroRequest, background_tasks: BackgroundTasks, db: DB):
     db.flush()
 
     db.add(UsuarioEmpresa(usuario_id=usuario.id, empresa_id=empresa.id, rol="owner"))
+
+    # Prueba de la autorización, en la misma transacción que la creación del
+    # usuario: si algo falla, no queda una cuenta sin consentimiento registrado.
+    _registrar_consentimiento(db, usuario.id, body.version_legal, request)
 
     if EMAIL_ENABLED:
         token_verif = _crear_token_email(db, usuario.id, "verificacion", minutos=1440)

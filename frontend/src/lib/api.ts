@@ -113,6 +113,8 @@ export const api = {
     nombre: string;
     nombre_empresa: string;
     nit_empresa?: string;
+    acepta_legal: boolean;
+    version_legal: string;
   }) => req<LoginResponse>("/auth/registro", { method: "POST", body: JSON.stringify(body) }),
   me: () => req<{ id: number; email: string; nombre: string; rol: string; email_verificado: boolean; empresa_id: number | null; empresa_nombre: string | null; empresa_nit: string | null }>("/auth/me"),
 
