@@ -29,8 +29,9 @@ logger = logging.getLogger(__name__)
 _USERNAME   = os.getenv("MAIL_USERNAME", "")
 _PASSWORD   = os.getenv("MAIL_PASSWORD", "")
 _FROM       = os.getenv("MAIL_FROM", _USERNAME)
-_FROM_NAME  = os.getenv("MAIL_FROM_NAME", APP_NAME)
-_SERVER     = os.getenv("MAIL_SERVER", "smtp.gmail.com")
+_FROM_NAME    = os.getenv("MAIL_FROM_NAME", APP_NAME)
+_SERVER       = os.getenv("MAIL_SERVER", "smtp.gmail.com")
+_FRONTEND_URL = os.getenv("FRONTEND_URL", "").rstrip("/")
 _PORT       = int(os.getenv("MAIL_PORT", "587"))
 _TLS        = os.getenv("MAIL_TLS", "true").lower() == "true"
 _SSL        = os.getenv("MAIL_SSL", "false").lower() == "true"
@@ -102,9 +103,12 @@ def _base_template(titulo: str, cuerpo: str) -> str:
 
         <!-- Header -->
         <tr>
-          <td style="background:linear-gradient(135deg,#4F46E5 0%,#4338CA 100%);padding:32px 40px;">
-            <p style="margin:0;font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">{APP_NAME}</p>
-            <p style="margin:4px 0 0;font-size:12px;color:#c7d2fe;">{APP_TAGLINE}</p>
+          <td style="background:linear-gradient(135deg,#4F46E5 0%,#4338CA 100%);padding:28px 40px;">
+            <img src="{_FRONTEND_URL}/brand/Logo-blanco.webp"
+                 alt="{APP_NAME}"
+                 width="130"
+                 style="display:block;height:auto;max-height:40px;object-fit:contain;" />
+            <p style="margin:8px 0 0;font-size:12px;color:#c7d2fe;">{APP_TAGLINE}</p>
           </td>
         </tr>
 

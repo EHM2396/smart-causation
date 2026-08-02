@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2, MailCheck } from "lucide-react";
 import { PasswordStrength } from "@/components/password-strength";
+import { PasswordInput } from "@/components/password-input";
 import { LogoCiolix } from "@/components/logo-ciolix";
 import { api } from "@/lib/api";
 import { VERSION_LEGAL } from "@/lib/legal";
@@ -144,17 +145,13 @@ export default function RegistroPage() {
                 <label className="mb-1.5 block text-sm font-medium" style={{ color: "var(--text-secondary)" }}>
                   Contraseña
                 </label>
-                <input
-                  name="password"
-                  type="password"
-                  required
-                  autoComplete="new-password"
-                  value={form.password}
-                  onChange={handleChange}
-                  placeholder="••••••••"
-                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                  style={{ backgroundColor: "var(--bg-elevated)", borderColor: "var(--border-soft)", color: "var(--text-primary)" }}
-                />
+                <PasswordInput
+                    name="password"
+                    value={form.password}
+                    onChange={handleChange}
+                    autoComplete="new-password"
+                    required
+                  />
                 <PasswordStrength password={form.password} />
               </div>
 

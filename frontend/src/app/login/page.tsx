@@ -7,6 +7,7 @@ import Image from "next/image";
 import { Loader2, MailWarning, CheckCircle2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
+import { PasswordInput } from "@/components/password-input";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -149,16 +150,12 @@ export default function LoginPage() {
                 ¿Olvidaste tu contraseña?
               </Link>
             </div>
-            <input
+            <PasswordInput
               id="password"
-              type="password"
-              required
-              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors"
-              style={{ backgroundColor: "var(--bg-elevated)", borderColor: "var(--border-soft)", color: "var(--text-primary)" }}
+              autoComplete="current-password"
+              required
             />
           </div>
 

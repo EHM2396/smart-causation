@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Loader2, CheckCircle2, AlertCircle, ArrowLeft } from "lucide-react";
 import { api } from "@/lib/api";
 import { PasswordStrength } from "@/components/password-strength";
+import { PasswordInput } from "@/components/password-input";
 
 function ResetPasswordForm() {
   const searchParams = useSearchParams();
@@ -70,16 +71,13 @@ function ResetPasswordForm() {
         <label className="mb-1.5 block text-sm font-medium" style={{ color: "var(--text-secondary)" }}>
           Nueva contraseña
         </label>
-        <input
-          type="password"
-          required
-          minLength={8}
-          autoComplete="new-password"
+        <PasswordInput
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          autoComplete="new-password"
           placeholder="Mínimo 8 caracteres"
-          className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors"
-          style={{ backgroundColor: "var(--bg-elevated)", borderColor: "var(--border-soft)", color: "var(--text-primary)" }}
+          required
+          minLength={8}
         />
         <PasswordStrength password={password} />
       </div>
@@ -87,15 +85,12 @@ function ResetPasswordForm() {
         <label className="mb-1.5 block text-sm font-medium" style={{ color: "var(--text-secondary)" }}>
           Confirmar contraseña
         </label>
-        <input
-          type="password"
-          required
-          autoComplete="new-password"
+        <PasswordInput
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
+          autoComplete="new-password"
           placeholder="Repite la contraseña"
-          className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors"
-          style={{ backgroundColor: "var(--bg-elevated)", borderColor: "var(--border-soft)", color: "var(--text-primary)" }}
+          required
         />
       </div>
 
