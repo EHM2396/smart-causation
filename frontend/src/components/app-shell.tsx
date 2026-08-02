@@ -14,7 +14,7 @@ import { Tutorial } from "@/components/tutorial/tutorial";
 // Rutas que se renderizan sin el shell y sin exigir sesión.
 // /legal debe ser accesible para cualquiera: los documentos legales tienen que
 // poder consultarse ANTES de registrarse, no solo desde una cuenta activa.
-const AUTH_PATHS = ["/login", "/registro", "/legal"];
+const AUTH_PATHS = ["/login", "/registro", "/legal", "/forgot-password", "/reset-password", "/verify-email"];
 
 const PAGE_META: Record<string, { title: string; description: string }> = {
   "/causacion": {
