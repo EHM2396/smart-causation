@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Loader2, CheckCircle2, AlertCircle, ArrowLeft } from "lucide-react";
 import { api } from "@/lib/api";
+import { PasswordStrength } from "@/components/password-strength";
 
 function ResetPasswordForm() {
   const searchParams = useSearchParams();
@@ -80,6 +81,7 @@ function ResetPasswordForm() {
           className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors"
           style={{ backgroundColor: "var(--bg-elevated)", borderColor: "var(--border-soft)", color: "var(--text-primary)" }}
         />
+        <PasswordStrength password={password} />
       </div>
       <div>
         <label className="mb-1.5 block text-sm font-medium" style={{ color: "var(--text-secondary)" }}>

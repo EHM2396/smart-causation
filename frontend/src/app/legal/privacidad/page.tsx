@@ -13,6 +13,7 @@ import { Documento } from "@/components/legal/documento";
 import { Callout, H2, H3, OL, P, Tabla, Term, UL } from "@/components/legal/prose";
 import { NP as N, SECCIONES_PRIVACIDAD as SECCIONES } from "@/components/legal/secciones";
 import { ENTIDAD, SUBENCARGADOS } from "@/lib/legal";
+import { BRAND } from "@/lib/brand";
 
 export const metadata: Metadata = {
   title: `Política de Privacidad — ${ENTIDAD.marca}`,
@@ -473,7 +474,7 @@ export default function PrivacidadPage() {
         headers={["Clave", "Qué guarda", "Duración"]}
         rows={[
           [
-            "smart-causacion-auth",
+            BRAND.storageKey,
             "Tu sesión iniciada (token de acceso y empresa activa), para que no tengas que autenticarte en cada pantalla",
             "Hasta que cierras sesión o expira el token",
           ],

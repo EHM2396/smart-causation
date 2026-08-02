@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2, MailCheck } from "lucide-react";
+import { PasswordStrength } from "@/components/password-strength";
 import { LogoCiolix } from "@/components/logo-ciolix";
 import { api } from "@/lib/api";
 import { VERSION_LEGAL } from "@/lib/legal";
@@ -154,6 +155,7 @@ export default function RegistroPage() {
                   className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
                   style={{ backgroundColor: "var(--bg-elevated)", borderColor: "var(--border-soft)", color: "var(--text-primary)" }}
                 />
+                <PasswordStrength password={form.password} />
               </div>
 
               <div

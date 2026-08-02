@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { LoginResponse } from "@/lib/types";
+import { BRAND } from "@/lib/brand";
 
 interface AuthState {
   token: string | null;
@@ -48,7 +49,7 @@ export const useAuthStore = create<AuthState>()(
       _setHydrated: () => set({ _hydrated: true }),
     }),
     {
-      name: "smart-causacion-auth",
+      name: BRAND.storageKey,
       onRehydrateStorage: () => (state) => {
         state?._setHydrated();
       },

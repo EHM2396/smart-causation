@@ -22,6 +22,7 @@ from api.dependencies import ALGORITHM, SECRET_KEY, get_current_user
 from db.models.auth import Empresa, Plan, TokenEmail, Usuario, UsuarioEmpresa
 from db.models.legal import Consentimiento
 from db.session import get_db
+from core.brand import APP_NAME
 from services import email_service
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -265,7 +266,7 @@ def registro(body: RegistroRequest, request: Request, background_tasks: Backgrou
     if EMAIL_ENABLED:
         enlace = f"{FRONTEND_URL}/verify-email?token={token_verif}"
         html = email_service.plantilla_verificacion(usuario.nombre, enlace)
-        background_tasks.add_task(email_service.send_email, to=email, subject="Verifica tu cuenta — Smart Causación", body_html=html)
+        background_tasks.add_task(email_service.send_email, to=email, subject=f"Verifica tu cuenta — {APP_NAME}", body_html=html)
 
     return TokenResponse(
         access_token=_create_token(usuario.id),
@@ -294,7 +295,7 @@ def forgot_password(body: EmailRequest, background_tasks: BackgroundTasks, db: D
 
     enlace = f"{FRONTEND_URL}/reset-password?token={token_reset}"
     html = email_service.plantilla_recuperacion(usuario.nombre, enlace)
-    background_tasks.add_task(email_service.send_email, to=usuario.email, subject="Restablece tu contraseña — Smart Causación", body_html=html)
+    background_tasks.add_task(email_service.send_email, to=usuario.email, subject=f"Restablece tu contraseña — {APP_NAME}", body_html=html)
 
     return MsgResponse(message="Si el correo está registrado recibirás un enlace en breve.")
 
@@ -339,7 +340,7 @@ def resend_verification(body: EmailRequest, background_tasks: BackgroundTasks, d
 
     enlace = f"{FRONTEND_URL}/verify-email?token={token_verif}"
     html = email_service.plantilla_verificacion(usuario.nombre, enlace)
-    background_tasks.add_task(email_service.send_email, to=usuario.email, subject="Verifica tu cuenta — Smart Causación", body_html=html)
+    background_tasks.add_task(email_service.send_email, to=usuario.email, subject=f"Verifica tu cuenta — {APP_NAME}", body_html=html)
 
     return MsgResponse(message="Si el correo está registrado recibirás un nuevo enlace.")
 

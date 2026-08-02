@@ -10,6 +10,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { useAuthStore } from "@/stores/auth";
 import { useWizardStore } from "@/stores/wizard";
 import { Tutorial } from "@/components/tutorial/tutorial";
+import { BRAND } from "@/lib/brand";
 
 // Rutas que se renderizan sin el shell y sin exigir sesión.
 // /legal debe ser accesible para cualquiera: los documentos legales tienen que
@@ -154,7 +155,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {sidebarOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
             </button>
             <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-              Ciolix
+              {BRAND.name}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -183,7 +184,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-3">
             {/* Page breadcrumb pill */}
             <div className="flex items-center gap-1.5">
-              <span className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>Ciolix</span>
+              <span className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>{BRAND.name}</span>
               <span style={{ color: "var(--border-strong)" }}>/</span>
               <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{pageMeta.title}</span>
             </div>

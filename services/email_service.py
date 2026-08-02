@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 import os
 
+from core.brand import APP_NAME, APP_TAGLINE
+
 logger = logging.getLogger(__name__)
 
 # ── Configuración desde entorno ───────────────────────────────────────────────
@@ -27,7 +29,7 @@ logger = logging.getLogger(__name__)
 _USERNAME   = os.getenv("MAIL_USERNAME", "")
 _PASSWORD   = os.getenv("MAIL_PASSWORD", "")
 _FROM       = os.getenv("MAIL_FROM", _USERNAME)
-_FROM_NAME  = os.getenv("MAIL_FROM_NAME", "Smart Causación")
+_FROM_NAME  = os.getenv("MAIL_FROM_NAME", APP_NAME)
 _SERVER     = os.getenv("MAIL_SERVER", "smtp.gmail.com")
 _PORT       = int(os.getenv("MAIL_PORT", "587"))
 _TLS        = os.getenv("MAIL_TLS", "true").lower() == "true"
@@ -92,33 +94,33 @@ def _base_template(titulo: str, cuerpo: str) -> str:
 <!DOCTYPE html>
 <html lang="es">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f4f6f8;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:40px 0;">
+<body style="margin:0;padding:0;background:#e9ecf1;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#e9ecf1;padding:40px 0;">
     <tr><td align="center">
       <table width="560" cellpadding="0" cellspacing="0"
-             style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08);">
+             style="background:#f5f6f8;border-radius:14px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,.08);">
 
         <!-- Header -->
         <tr>
-          <td style="background:linear-gradient(135deg,#059669 0%,#047857 100%);padding:32px 40px;">
-            <p style="margin:0;font-size:20px;font-weight:700;color:#ffffff;">⚡ Smart Causación</p>
-            <p style="margin:4px 0 0;font-size:12px;color:#a7f3d0;">Gestión contable inteligente</p>
+          <td style="background:linear-gradient(135deg,#4F46E5 0%,#4338CA 100%);padding:32px 40px;">
+            <p style="margin:0;font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">{APP_NAME}</p>
+            <p style="margin:4px 0 0;font-size:12px;color:#c7d2fe;">{APP_TAGLINE}</p>
           </td>
         </tr>
 
         <!-- Body -->
         <tr>
-          <td style="padding:40px;">
-            <h1 style="margin:0 0 16px;font-size:22px;color:#111827;">{titulo}</h1>
+          <td style="padding:40px;background:#ffffff;">
+            <h1 style="margin:0 0 16px;font-size:22px;color:#0f172a;font-weight:700;">{titulo}</h1>
             {cuerpo}
           </td>
         </tr>
 
         <!-- Footer -->
         <tr>
-          <td style="padding:24px 40px;border-top:1px solid #e5e7eb;">
+          <td style="padding:24px 40px;background:#f5f6f8;border-top:1px solid #e2e8f0;">
             <p style="margin:0;font-size:12px;color:#9ca3af;">
-              Este correo fue enviado por Smart Causación.<br>
+              Este correo fue enviado por {APP_NAME}.<br>
               Si no solicitaste este correo puedes ignorarlo.
             </p>
           </td>
@@ -141,7 +143,7 @@ def plantilla_recuperacion(nombre: str, enlace: str) -> str:
     </p>
     <p style="text-align:center;margin:32px 0;">
       <a href="{enlace}"
-         style="display:inline-block;background:#059669;color:#ffffff;font-weight:700;
+         style="display:inline-block;background:#4F46E5;color:#ffffff;font-weight:700;
                 font-size:15px;padding:14px 32px;border-radius:8px;text-decoration:none;">
         Restablecer contraseña
       </a>
@@ -158,12 +160,12 @@ def plantilla_verificacion(nombre: str, enlace: str) -> str:
     cuerpo = f"""
     <p style="color:#374151;font-size:15px;line-height:1.6;">
       Hola <strong>{nombre}</strong>,<br><br>
-      Gracias por registrarte en Smart Causación.
+      Gracias por registrarte en {APP_NAME}.
       Confirma tu correo electrónico haciendo clic en el botón:
     </p>
     <p style="text-align:center;margin:32px 0;">
       <a href="{enlace}"
-         style="display:inline-block;background:#059669;color:#ffffff;font-weight:700;
+         style="display:inline-block;background:#4F46E5;color:#ffffff;font-weight:700;
                 font-size:15px;padding:14px 32px;border-radius:8px;text-decoration:none;">
         Verificar mi correo
       </a>
