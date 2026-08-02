@@ -562,16 +562,19 @@ def _parsear_pdf_plumber(archivo: BytesIO, nombre_archivo: str) -> list[dict]:
         elif re.search(r"no\s+aplica", regimen_fiscal_raw, re.I):
             tipo_regimen_iva = "0"
 
-    # "Responsabilidad tributaria: ZZ - No aplica" sobreescribe si existe
+    # "Responsabilidad tributaria: 01 - IVA" o "ZZ - No aplica" sobreescribe si existe
     responsabilidad_raw = rval(r"Responsabilidad tributaria:\s*(.+?)(?:\n|$)", emisor_text)
     if responsabilidad_raw:
-        # Responsabilidad fiscal explícita
+        # Responsabilidad fiscal explícita (O-XX o R-XX-XX)
         m_resp2 = re.search(r"\b(O-\d{2,3}|R-\d{2}-\w+)\b", responsabilidad_raw, re.I)
         if m_resp2:
             codigo_responsabilidad_pdf = m_resp2.group(1).upper()
-        # "no aplica" o ZZ en responsabilidad tributaria = no responsable de IVA
+        # "no aplica" o ZZ = no responsable de IVA
         if re.search(r"no\s+aplica|\bZZ\b", responsabilidad_raw, re.I):
             tipo_regimen_iva = "0"
+        # "01 - IVA" o "\d+ - IVA" = responsable de IVA (código DIAN de obligación tributaria)
+        elif re.search(r"\bIVA\b", responsabilidad_raw, re.I):
+            tipo_regimen_iva = "2"
 
     # ── Forma y medio de pago (solo XML/PDF, no Excel) ──
     forma_pago_raw = rval(r"Forma\s+de\s+Pago[:\s]+(.+?)(?:\s{2,}|\n|$)", page1_text)

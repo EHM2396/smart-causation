@@ -107,6 +107,10 @@ def upsert_tercero(db: Session, empresa_id: int, factura: dict) -> Proveedor | N
         db.flush()  # visible en la misma sesión para llamadas posteriores del mismo batch
         return prov
 
+    # Reactivar si estaba desactivado (eliminado desde la UI)
+    if not existing.activo:
+        existing.activo = True
+
     # Actualizar campos que traigan valor nuevo diferente al almacenado.
     # Campos sin valor en la factura (None) no tocan lo que ya hay.
     for field, value in campos.items():

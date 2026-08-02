@@ -102,8 +102,9 @@ def _prov_to_siigo_row(p: Proveedor) -> list:
         nombres = p.nombres_tercero or ""
         apellidos = p.apellidos_tercero or ""
     else:
+        # Jurídica: razón social en col F; nombres y apellidos se dejan vacíos (Siigo)
         razon = p.razon_social or ""
-        nombres = razon  # jurídica repite razón social en nombres (campo obligatorio Siigo)
+        nombres = ""
         apellidos = ""
 
     # Régimen IVA: mapear código interno → etiqueta Siigo

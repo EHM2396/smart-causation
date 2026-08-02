@@ -598,6 +598,8 @@ export default function TercerosPage() {
   const [selected, setSelected] = useState<TerceroOut | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
   const [exporting, setExporting] = useState(false);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const queryClient = useQueryClient();
 
   const { data: terceros = [], isLoading, refetch } = useQuery({
@@ -679,6 +681,24 @@ export default function TercerosPage() {
     );
     queryClient.invalidateQueries({ queryKey: ["terceros-stats"] });
     setCheckedIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
+  }
+
+  async function handleBulkDelete() {
+    setBulkDeleting(true);
+    try {
+      await Promise.all([...checkedIds].map((id) => api.eliminarTercero(id)));
+      const deleted = new Set(checkedIds);
+      queryClient.setQueryData<TerceroOut[]>(["terceros", filterTipo], (old) =>
+        old ? old.filter((t) => !deleted.has(t.id)) : old
+      );
+      queryClient.invalidateQueries({ queryKey: ["terceros-stats"] });
+      setCheckedIds(new Set());
+      setConfirmBulkDelete(false);
+    } catch (err) {
+      alert(String(err));
+    } finally {
+      setBulkDeleting(false);
+    }
   }
 
   return (
@@ -773,17 +793,27 @@ export default function TercerosPage() {
             />
           </div>
 
-          {/* Exportar seleccionados */}
+          {/* Acciones sobre seleccionados */}
           {checkedIds.size > 0 && (
-            <button
-              onClick={() => handleExport([...checkedIds])}
-              disabled={exporting}
-              className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-opacity hover:opacity-80 disabled:opacity-50"
-              style={{ backgroundColor: "rgb(99,102,241)", color: "white" }}
-            >
-              <Download className="h-4 w-4" />
-              Exportar {checkedIds.size} seleccionado{checkedIds.size !== 1 ? "s" : ""}
-            </button>
+            <>
+              <button
+                onClick={() => handleExport([...checkedIds])}
+                disabled={exporting}
+                className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-opacity hover:opacity-80 disabled:opacity-50"
+                style={{ backgroundColor: "rgb(99,102,241)", color: "white" }}
+              >
+                <Download className="h-4 w-4" />
+                Exportar {checkedIds.size} seleccionado{checkedIds.size !== 1 ? "s" : ""}
+              </button>
+              <button
+                onClick={() => setConfirmBulkDelete(true)}
+                className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-opacity hover:opacity-80"
+                style={{ backgroundColor: "rgba(239,68,68,0.12)", color: "rgb(239,68,68)" }}
+              >
+                <Trash2 className="h-4 w-4" />
+                Eliminar {checkedIds.size} seleccionado{checkedIds.size !== 1 ? "s" : ""}
+              </button>
+            </>
           )}
 
           {/* Exportar todo */}
@@ -891,6 +921,47 @@ export default function TercerosPage() {
           </p>
         )}
       </div>
+
+      {/* Modal confirmación eliminación masiva */}
+      {confirmBulkDelete && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border p-6 shadow-2xl"
+            style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-page)" }}
+          >
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full" style={{ backgroundColor: "rgba(239,68,68,0.12)" }}>
+              <Trash2 className="h-6 w-6" style={{ color: "rgb(239,68,68)" }} />
+            </div>
+            <h3 className="text-base font-semibold" style={{ color: "var(--text-primary)" }}>
+              ¿Eliminar {checkedIds.size} tercero{checkedIds.size !== 1 ? "s" : ""}?
+            </h3>
+            <p className="mt-2 text-sm" style={{ color: "var(--text-secondary)" }}>
+              Los {checkedIds.size} terceros seleccionados serán removidos del módulo. Esta acción no se puede deshacer desde la plataforma.
+            </p>
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => setConfirmBulkDelete(false)}
+                disabled={bulkDeleting}
+                className="flex-1 rounded-xl border py-2 text-sm font-medium transition-opacity hover:opacity-70 disabled:opacity-40"
+                style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)" }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                disabled={bulkDeleting}
+                className="flex-1 rounded-xl py-2 text-sm font-semibold transition-opacity hover:opacity-80 disabled:opacity-50"
+                style={{ backgroundColor: "rgb(239,68,68)", color: "white" }}
+              >
+                {bulkDeleting ? "Eliminando…" : `Sí, eliminar ${checkedIds.size}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal detalle */}
       {selected && (
