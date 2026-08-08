@@ -1,5 +1,6 @@
 ﻿"use client";
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useWizardStore } from "@/stores/wizard";
 import { api } from "@/lib/api";
@@ -276,7 +277,6 @@ export function Paso2() {
     }
 
     setSugsLoading(true);
-    setFilesProcesando(false); // transición sin hueco: filesProcesando → sugsLoading
 
     // En tutorial no hacemos llamada real (NITs ficticios fallarían)
     if (tutorialActivo) {
@@ -286,7 +286,9 @@ export function Paso2() {
       });
       setSuggestions({ ...suggestions, ...emptySugs });
       setSugsLoading(false);
-      return;
+      // Mantener "Procesando facturas DIAN" visible ~800ms antes de ocultar el overlay
+      const t = setTimeout(() => setFilesProcesando(false), 800);
+      return () => clearTimeout(t);
     }
 
     api.sugerirCuentasBatch(pendientes)
@@ -316,6 +318,9 @@ export function Paso2() {
         setSuggestions({ ...suggestions, ...fallback });
         setSugsLoading(false);
       });
+    // Mantener "Procesando facturas DIAN" visible ~800ms antes de pasar a "Analizando IA"
+    const t = setTimeout(() => setFilesProcesando(false), 800);
+    return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [facturas]);
 
@@ -560,7 +565,7 @@ export function Paso2() {
         </div>
 
         {/* Overlay pantalla completa mientras procesa archivos o analiza sugerencias IA */}
-        {(filesProcesando || sugsLoading) && (
+        {(filesProcesando || sugsLoading) && createPortal(
           <div
             className="fixed inset-0 z-[9999] flex flex-col items-center justify-center gap-6"
             style={{ backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
@@ -615,7 +620,8 @@ export function Paso2() {
                 />
               ))}
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* Search + state filters */}
