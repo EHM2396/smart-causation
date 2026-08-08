@@ -89,6 +89,19 @@ _COLS_TOKEN: dict[str, list[str]] = {
 }
 
 
+def _limpiar_telefono(raw: str) -> str:
+    """Limpia teléfonos extraídos de PDF que vienen con pipes, ej. '602|3008473688|'.
+    Prefiere el número celular colombiano (10 dígitos, empieza con 3); si no, el más largo."""
+    if "|" not in raw:
+        return raw.strip()
+    partes = [re.sub(r"\D", "", p) for p in raw.split("|") if p.strip()]
+    for p in partes:
+        if len(p) == 10 and p.startswith("3"):
+            return p
+    validas = [p for p in partes if p]
+    return max(validas, key=len) if validas else raw.strip()
+
+
 def _detectar_cols_token(df: pd.DataFrame) -> dict[str, str | None]:
     cols_norm = {_norm(c): c for c in df.columns}
     asignadas: set[str] = set()
@@ -535,7 +548,7 @@ def _parsear_pdf_plumber(archivo: BytesIO, nombre_archivo: str) -> list[dict]:
     ciudad = rval(r"Municipio / Ciudad:\s*(\S+)", emisor_text)
     departamento = rval(r"Departamento:\s*(.+?)(?:\s{2,}|\n|$)", emisor_text)
     direccion = rval(r"Direcci[oó]n:\s*(.+?)(?:\s{2,}|\n|$)", emisor_text)
-    telefono = rval(r"Tel[eé]fono\s*[/\s]*M[oó]vil:\s*(.+?)(?:\s{2,}|\n|$)", emisor_text)
+    telefono = _limpiar_telefono(rval(r"Tel[eé]fono\s*[/\s]*M[oó]vil:\s*(.+?)(?:\s{2,}|\n|$)", emisor_text))
     email = rval(r"Correo:\s*(\S+)", emisor_text)
 
     tipo_contribuyente_raw = rval(r"Tipo de Contribuyente:\s*(.+?)(?:\s{2,}|\n|$)", emisor_text)
