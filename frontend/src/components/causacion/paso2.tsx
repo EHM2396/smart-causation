@@ -592,7 +592,7 @@ export function Paso2() {
                     style={{ backgroundColor: filesProcesando ? "var(--brand-btn)" : "rgba(255,255,255,0.3)" }}
                   />
                   <span className="text-sm" style={{ color: filesProcesando ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.35)" }}>
-                    Extrayendo facturas electrónicas DIAN
+                    Procesando archivos de facturas
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
