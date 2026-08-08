@@ -243,7 +243,7 @@ export function CausadasModal({ facturas, onClose }: Props) {
         style={{
           maxHeight: "90vh",
           borderColor: "var(--border-soft)",
-          backgroundColor: "var(--bg-page)",
+          backgroundColor: "var(--bg-surface)",
         }}
       >
         {/* Modal header */}

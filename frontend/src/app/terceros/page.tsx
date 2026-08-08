@@ -256,7 +256,7 @@ function TerceroModal({
     >
       <div
         className="relative flex w-full max-w-3xl flex-col rounded-2xl border shadow-2xl"
-        style={{ maxHeight: "90vh", borderColor: "var(--border-soft)", backgroundColor: "var(--bg-page)" }}
+        style={{ maxHeight: "90vh", borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}
       >
         {/* Header */}
         <div
@@ -485,7 +485,7 @@ function TerceroModal({
         >
           <div
             className="mx-4 w-full max-w-sm rounded-2xl border p-6 shadow-2xl"
-            style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-page)" }}
+            style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}
           >
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full" style={{ backgroundColor: "rgba(239,68,68,0.12)" }}>
               <Trash2 className="h-6 w-6" style={{ color: "rgb(239,68,68)" }} />
@@ -930,7 +930,7 @@ export default function TercerosPage() {
         >
           <div
             className="w-full max-w-sm rounded-2xl border p-6 shadow-2xl"
-            style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-page)" }}
+            style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}
           >
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full" style={{ backgroundColor: "rgba(239,68,68,0.12)" }}>
               <Trash2 className="h-6 w-6" style={{ color: "rgb(239,68,68)" }} />

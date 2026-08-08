@@ -37,7 +37,7 @@ export function OmitidasModal({ omitidas, onClose }: Props) {
     >
       <div
         className="flex w-full max-w-2xl flex-col rounded-2xl border shadow-2xl"
-        style={{ maxHeight: "85vh", borderColor: "var(--border-soft)", backgroundColor: "var(--bg-page)" }}
+        style={{ maxHeight: "85vh", borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}
       >
         {/* Header */}
         <div
