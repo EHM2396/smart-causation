@@ -42,14 +42,18 @@ services:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-siigo}:${POSTGRES_PASSWORD:-siigo_pass}@postgres:5432/${POSTGRES_DB:-siigo_db}
       CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:8501,http://127.0.0.1:8501
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ENV: ${ENV:-production}
+      GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
     volumes:
       - .:/app
       - ./data:/app/data
     ports:
       - "8000:8000"
     # Monta el código fuente, aplica migraciones y arranca la API.
-    command: >
-      sh -c "alembic upgrade head && python scripts/migrate_xlsx.py && python scripts/seed_geo.py && uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload"
+    # Scripts de setup inicial ya ejecutados en prod — descomentar solo si es necesario re-correr:
+    #   && python scripts/migrate_xlsx.py
+    #   && python scripts/seed_geo.py
+    command: sh -c "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload"
 
   # ── Next.js Frontend (pruebas) ─────────────────────────────────────────────
   frontend:
@@ -65,6 +69,7 @@ services:
         condition: service_started
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_GLITCHTIP_DSN: ${NEXT_PUBLIC_GLITCHTIP_DSN:-}
       CHOKIDAR_USEPOLLING: "true"
       WATCHPACK_POLLING: "true"
     volumes:

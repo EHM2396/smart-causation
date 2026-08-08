@@ -24,3 +24,6 @@ fastapi-mail>=1.4.1
 
 # IA — sugerencias de cuentas contables vía OpenAI
 openai>=1.30.0
+
+# Error reporting (compatible con GlitchTip y Sentry)
+sentry-sdk[fastapi]>=2.0.0

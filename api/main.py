@@ -7,10 +7,27 @@ Arranque:
 
 from __future__ import annotations
 
+import logging
+import os
 from contextlib import asynccontextmanager
 
+import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# En producción (ENV=production) solo se muestran WARNING y superiores.
+_log_level = logging.WARNING if os.getenv("ENV") == "production" else logging.INFO
+logging.basicConfig(level=_log_level)
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
+# Error reporting — activo solo si GLITCHTIP_DSN está configurado.
+_dsn = os.getenv("GLITCHTIP_DSN", "")
+if _dsn:
+    sentry_sdk.init(
+        dsn=_dsn,
+        environment=os.getenv("ENV", "development"),
+        traces_sample_rate=0.1,
+    )
 
 from api.routers import (
     aprendizaje_router,

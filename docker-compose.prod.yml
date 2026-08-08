@@ -4,7 +4,7 @@ services:
     container_name: ciolix_postgres
     restart: unless-stopped
     ports:
-      - "127.0.0.1:5432:5432" 
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -28,6 +28,8 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      ENV: production
+      GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       MAIL_USERNAME: ${MAIL_USERNAME:-}
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
@@ -40,8 +42,7 @@ services:
       EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
       FRONTEND_URL: ${FRONTEND_URL}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
-    command: >
-      sh -c "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"
+    command: sh -c "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"
     volumes:
       - api_data:/app/data
 
