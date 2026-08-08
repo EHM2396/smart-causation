@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Dependencias del sistema para psycopg2
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq-dev gcc postgresql-client \
+    libpq-dev gcc \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements_api.txt .

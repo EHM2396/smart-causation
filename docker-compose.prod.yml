@@ -42,14 +42,14 @@ services:
       EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
       FRONTEND_URL: ${FRONTEND_URL}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
-    command: >-
-      sh -c "
-      until pg_isready -h postgres -U $$POSTGRES_USER -d $$POSTGRES_DB; do
-        echo 'Esperando postgres...'; sleep 2;
-      done &&
-      alembic upgrade head &&
-      uvicorn api.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'
-      "
+    command:
+      - sh
+      - -c
+      - >-
+        until python -c "import socket; socket.create_connection(('postgres', 5432), 2)" 2>/dev/null;
+        do sleep 2; done &&
+        alembic upgrade head &&
+        uvicorn api.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'
     volumes:
       - api_data:/app/data
 
