@@ -91,15 +91,20 @@ _COLS_TOKEN: dict[str, list[str]] = {
 
 def _limpiar_telefono(raw: str) -> str:
     """Limpia teléfonos extraídos de PDF que vienen con pipes, ej. '602|3008473688|'.
-    Prefiere el número celular colombiano (10 dígitos, empieza con 3); si no, el más largo."""
+    Descarta indicativos sueltos (< 7 dígitos), prefiere celular colombiano (10 dígitos,
+    empieza con 3); si no, usa el segmento más largo (ej. fijo local 7 dígitos)."""
     if "|" not in raw:
         return raw.strip()
     partes = [re.sub(r"\D", "", p) for p in raw.split("|") if p.strip()]
-    for p in partes:
+    # Ignorar indicativos sueltos (602, 601…) — un número válido tiene mínimo 7 dígitos
+    validas = [p for p in partes if len(p) >= 7]
+    if not validas:
+        return raw.strip()
+    # Preferir celular colombiano (10 dígitos, empieza con 3)
+    for p in validas:
         if len(p) == 10 and p.startswith("3"):
             return p
-    validas = [p for p in partes if p]
-    return max(validas, key=len) if validas else raw.strip()
+    return max(validas, key=len)
 
 
 def _detectar_cols_token(df: pd.DataFrame) -> dict[str, str | None]:
