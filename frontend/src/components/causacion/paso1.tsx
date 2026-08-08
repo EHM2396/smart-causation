@@ -231,7 +231,7 @@ export function Paso1() {
               Analizando {files.length} archivo{files.length > 1 ? "s" : ""}…
             </p>
             <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
-              Extrayendo facturas electrónicas del portal DIAN
+              Procesando archivos de facturas
             </p>
           </div>
         </div>
