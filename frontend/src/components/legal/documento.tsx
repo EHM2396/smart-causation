@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { BotonPDF } from "@/components/legal/boton-pdf";
 import { LogoCiolixImpresion } from "@/components/logo-ciolix";
 import { ENTIDAD, FECHA_VIGENCIA, VERSION_LEGAL } from "@/lib/legal";
+import { TocLegal } from "@/components/legal/toc-legal";
 
 export interface Seccion {
   id: string;
@@ -81,26 +82,7 @@ export function Documento({
         <BotonPDF />
       </div>
 
-      <nav
-        className="mt-8 rounded-xl border p-5"
-        style={{ backgroundColor: "var(--bg-surface)", borderColor: "var(--border-soft)" }}
-      >
-        <p
-          className="text-xs font-semibold uppercase tracking-wide"
-          style={{ color: "var(--text-muted)" }}
-        >
-          Contenido
-        </p>
-        <ol className="mt-3 grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
-          {secciones.map((s, i) => (
-            <li key={s.id} className="text-sm">
-              <a href={`#${s.id}`} style={{ color: "var(--text-secondary)" }}>
-                <span style={{ color: "var(--text-muted)" }}>{i + 1}.</span> {s.titulo}
-              </a>
-            </li>
-          ))}
-        </ol>
-      </nav>
+      <TocLegal secciones={secciones} />
 
       <div className="mt-10">{children}</div>
     </article>

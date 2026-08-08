@@ -44,7 +44,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { token, usuario, logout, _hydrated } = useAuthStore();
   const resetWizard = useWizardStore((s) => s.reset);
 
-  const isAuthPage = AUTH_PATHS.some((p) => pathname.startsWith(p));
+  const isAuthPage = pathname === "/" || AUTH_PATHS.some((p) => pathname.startsWith(p));
 
   // Redirect only after hydration is complete to avoid F5 false-logout
   useEffect(() => {
