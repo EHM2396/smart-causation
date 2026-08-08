@@ -15,7 +15,7 @@ import {
   AlertTriangle, Plus, Sparkles, Loader2,
   ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search, History, X, Trash2,
 } from "lucide-react";
-import type { MapeoItem, CuentaOpcion, ImpuestoOut, FuenteMapeo, Sugerencia } from "@/lib/types";
+import type { MapeoItem, CuentaOpcion, ImpuestoOut, FuenteMapeo, Sugerencia, ItemFactura } from "@/lib/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -98,6 +98,7 @@ export function Paso2() {
   const [searchFacturas, setSearchFacturas] = useState("");
   const [filtroEstado, setFiltroEstado] = useState<"todos" | "pendiente" | "configurada" | "verificada">("todos");
   const [verificadas, setVerificadas] = useState<Record<number, boolean>>({});
+  const [baseOverride, setBaseOverride] = useState<Record<string, string>>({});
   const lastIdxRef = useRef<number | null>(null);
 
   // Pre-cargar estado de demo cuando el tutorial está activo
@@ -174,6 +175,7 @@ export function Paso2() {
     setRiItem(prev => reItems(prev));
     setCodImpuestoItem(prev => reItems(prev));
     setCuentaIvaItem(prev => reItems(prev));
+    setBaseOverride(prev => reItems(prev));
 
     // Re-indexar sugerencias en el store
     const newSugs: Record<string, Sugerencia> = {};
@@ -334,6 +336,10 @@ export function Paso2() {
     .map(i => ({ value: i.codigo, label: `${i.codigo} — ${i.tipo_impuesto ?? ""} ${i.tarifa ?? 0}%` }));
   const todasCuentasOpts = cuentaOpts(todasCuentas);
   const getImpInfo = (cod: string) => impuestosRaw.find((i) => i.codigo === cod);
+  const getEffBase = (key: string, item: ItemFactura): number => {
+    const v = Number(baseOverride[key]);
+    return v > 0 ? v : item.base;
+  };
 
   const handleValidar = () => {
     const mapeos: MapeoItem[] = [];
@@ -374,11 +380,15 @@ export function Paso2() {
                              : (cuentaIvaItemVal && cuentaIvaItemVal !== "") ? cuentaIvaItemVal
                              : impInfo?.cta_compras ?? "";
 
+        const effBase = getEffBase(key, item);
+        const tarifa = impInfo?.tarifa ?? item.porcentaje ?? 0;
+        const valorIva = tarifa > 0 ? Math.round(effBase * tarifa / 100) : item.valor_impuesto;
+
         mapeos.push({
-          idx_factura: newIdx, descripcion: item.descripcion, base: item.base,
+          idx_factura: newIdx, descripcion: item.descripcion, base: effBase,
           cod_impuesto: impInfo?.codigo ?? codIva,
-          porcentaje: impInfo?.tarifa ?? item.porcentaje ?? 0,
-          valor_impuesto: item.valor_impuesto,
+          porcentaje: tarifa,
+          valor_impuesto: valorIva,
           cuenta_gasto: cgFinal, fuente,
           cuenta_impuesto_deb: cuentaIvaFinal,
           cuenta_impuesto_cre: "", es_retencion: false,
@@ -390,8 +400,8 @@ export function Paso2() {
             const rf = getImpInfo(rfItem[key]);
             if (rf) mapeos.push({
               idx_factura: newIdx, descripcion: `Retefuente ${rf.tarifa}%`,
-              base: item.base, cod_impuesto: rf.codigo, porcentaje: rf.tarifa ?? 0,
-              valor_impuesto: Math.round((item.base * (rf.tarifa ?? 0)) / 100),
+              base: effBase, cod_impuesto: rf.codigo, porcentaje: rf.tarifa ?? 0,
+              valor_impuesto: Math.round((effBase * (rf.tarifa ?? 0)) / 100),
               cuenta_gasto: "", fuente: "manual",
               cuenta_impuesto_deb: "", cuenta_impuesto_cre: rf.cta_compras ?? "",
               es_retencion: true, cuenta_pago: pago, cuenta_pago_nombre: pagoNombre,
@@ -401,8 +411,8 @@ export function Paso2() {
             const ri = getImpInfo(riItem[key]);
             if (ri) mapeos.push({
               idx_factura: newIdx, descripcion: `ReteICA ${ri.tarifa}%`,
-              base: item.base, cod_impuesto: ri.codigo, porcentaje: ri.tarifa ?? 0,
-              valor_impuesto: Math.round((item.base * (ri.tarifa ?? 0)) / 100),
+              base: effBase, cod_impuesto: ri.codigo, porcentaje: ri.tarifa ?? 0,
+              valor_impuesto: Math.round((effBase * (ri.tarifa ?? 0)) / 100),
               cuenta_gasto: "", fuente: "manual",
               cuenta_impuesto_deb: "", cuenta_impuesto_cre: ri.cta_compras ?? "",
               es_retencion: true, cuenta_pago: pago, cuenta_pago_nombre: pagoNombre,
@@ -411,7 +421,7 @@ export function Paso2() {
         }
       }
 
-      const totalBase = factura.items.reduce((s, it) => s + it.base, 0);
+      const totalBase = factura.items.reduce((s, it, j) => s + getEffBase(`${idx}_${j}`, it), 0);
       if (rfGlobal[idx]) {
         const rf = getImpInfo(rfGlobal[idx]);
         if (rf) mapeos.push({
@@ -866,6 +876,18 @@ export function Paso2() {
 
   // ── DETAIL VIEW ──────────────────────────────────────────────────────────────
   const factura = facturas[selectedIdx];
+  const esPdf = !["xlsx", "xls"].some(ext => (factura._archivo ?? "").toLowerCase().endsWith(`.${ext}`));
+  const totalCalculado = factura.items.reduce((sum, item, jdx) => {
+    const k = `${selectedIdx}_${jdx}`;
+    const effBase = getEffBase(k, item);
+    const ivaGl = codImpuestoGlobal[selectedIdx];
+    const ivaIt = codImpuestoItem[k];
+    const codIva = (ivaGl && ivaGl !== "") ? ivaGl : (ivaIt && ivaIt !== "") ? ivaIt : item.cod_impuesto ?? "";
+    const ivaInfo = codIva ? getImpInfo(codIva) : null;
+    const tarifa = ivaInfo?.tarifa ?? 0;
+    const valorIva = tarifa > 0 ? Math.round(effBase * tarifa / 100) : item.valor_impuesto;
+    return sum + effBase + valorIva;
+  }, 0);
   const isFirst = selectedIdx === 0;
   const isLast  = selectedIdx === facturas.length - 1;
   const retGlobalActiva = !!(rfGlobal[selectedIdx] || riGlobal[selectedIdx]);
@@ -972,7 +994,7 @@ export function Paso2() {
           </div>
           <div>
             <p className="text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Total factura</p>
-            <p className="mt-1 text-xl font-bold tabular-nums" style={{ color: "var(--text-primary)" }}>{fmt(factura.total)}</p>
+            <p className="mt-1 text-xl font-bold tabular-nums" style={{ color: "var(--text-primary)" }}>{fmt(totalCalculado)}</p>
           </div>
         </div>
         {factura.advertencias && factura.advertencias.length > 0 && (
@@ -1326,9 +1348,30 @@ export function Paso2() {
                       </p>
                     </td>
 
-                    {/* Base */}
-                    <td className="px-4 py-3 text-right tabular-nums font-medium" style={{ color: "var(--success)" }}>
-                      {fmt(item.base)}
+                    {/* Base — editable solo si viene de PDF (extracción imprecisa) */}
+                    <td className="px-4 py-3 text-right tabular-nums font-medium" style={{ minWidth: "120px", color: "var(--success)" }}>
+                      {esPdf ? (
+                        <>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={baseOverride[key] !== undefined ? baseOverride[key] : String(item.base)}
+                            onChange={(e) => setBaseOverride(p => ({ ...p, [key]: e.target.value.replace(/[^0-9]/g, "") }))}
+                            disabled={isVerificada}
+                            className="w-full rounded border px-2 py-1 text-right text-sm font-mono tabular-nums outline-none focus:ring-2 focus:ring-[var(--brand)] disabled:cursor-not-allowed disabled:opacity-60"
+                            style={{
+                              color: "var(--success)",
+                              borderColor: baseOverride[key] !== undefined ? "var(--brand)" : "var(--border-soft)",
+                              backgroundColor: "var(--bg-surface)",
+                            }}
+                          />
+                          <p className="mt-0.5 text-right text-[10px]" style={{ color: "var(--text-muted)" }}>
+                            {fmt(getEffBase(key, item))}
+                          </p>
+                        </>
+                      ) : (
+                        fmt(item.base)
+                      )}
                     </td>
 
                     {/* Impuesto (editable: código + cuenta contable) */}
@@ -1356,6 +1399,20 @@ export function Paso2() {
                           />
                         );
                       })()}
+                      {/* Valor IVA calculado: base × tarifa% */}
+                      {ivaEfectivoInfo && (ivaEfectivoInfo.tarifa ?? 0) > 0 && (
+                        <div
+                          className="flex items-center justify-between rounded px-2 py-1 text-xs"
+                          style={{ backgroundColor: "var(--bg-elevated)", border: "1px solid var(--border-soft)" }}
+                        >
+                          <span style={{ color: "var(--text-muted)" }}>
+                            IVA {ivaEfectivoInfo.tarifa}%
+                          </span>
+                          <span className="font-mono font-semibold tabular-nums" style={{ color: "var(--success)" }}>
+                            {fmt(Math.round(getEffBase(key, item) * (ivaEfectivoInfo.tarifa ?? 0) / 100))}
+                          </span>
+                        </div>
+                      )}
                     </td>
 
                     {/* Cuenta gasto */}
