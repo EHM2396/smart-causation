@@ -309,6 +309,13 @@ def parsear_archivo(archivo: BytesIO | str, nombre_archivo: str = "") -> list[di
         return _parsear_zip_dian(archivo, nombre_archivo)
     if nombre_lower.endswith(".pdf"):
         return _parsear_pdf_dian(archivo, nombre_archivo)
+    if nombre_lower.endswith(".xml"):
+        if isinstance(archivo, str):
+            with open(archivo, "rb") as f:
+                xml_bytes = f.read()
+        else:
+            xml_bytes = archivo.read() if hasattr(archivo, "read") else archivo
+        return [_parsear_xml_dian(xml_bytes, nombre_archivo)]
 
     try:
         df_check = pd.read_excel(archivo, dtype=str, nrows=5)
