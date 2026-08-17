@@ -65,12 +65,39 @@ services:
     entrypoint: ["sh", "-c"]
     command:
       - |
-        cat > /etc/caddy/Caddyfile <<EOF
+        cat > /etc/caddy/Caddyfile <<'EOF'
         ${DUCKDNS_DOMAIN} {
             reverse_proxy api:8000
         }
+
+        # --- POS Esencial: la API (Supabase autohospedado) ---
+        brunoise-api.duckdns.org {
+            encode zstd gzip
+            reverse_proxy pos_kong:8000 {
+                header_up Host {host}
+                header_up X-Real-IP {remote_host}
+                # El POS vive de WebSockets: salón, cocina, cuentas y cajas se
+                # actualizan solos por ahí. Sin quitar los tiempos de espera,
+                # Caddy corta la conexión al minuto y todo deja de moverse sin
+                # que se vea ningún error.
+                transport http {
+                    read_timeout 0
+                    write_timeout 0
+                }
+            }
+        }
+
+        # --- POS Esencial: Studio, con usuario y contraseña ---
+        brunoise-db.duckdns.org {
+            encode zstd gzip
+            basic_auth {
+                admin ${STUDIO_PASSWORD_HASH}
+            }
+            reverse_proxy pos_studio:3000
+        }
         EOF
         exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    networks: [default, edge]
     volumes:
       - caddy_data:/data
       - caddy_config:/config
@@ -89,3 +116,8 @@ volumes:
   api_data:
   caddy_data:
   caddy_config:
+
+networks:
+  default:
+  edge:
+    external: true
