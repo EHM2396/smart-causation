@@ -95,7 +95,7 @@ services:
         brunoise-db.duckdns.org {
             encode zstd gzip
             basic_auth {
-                admin {env.STUDIO_PASSWORD_HASH}
+                admin {$$STUDIO_PASSWORD_HASH}
             }
             reverse_proxy pos_studio:3000
         }
