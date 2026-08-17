@@ -60,15 +60,17 @@ services:
     depends_on:
       - api
     environment:
-      # Pass-through sin '=' ni '${}': Portainer inyecta el valor crudo al
-      # contenedor sin que Compose toque los '$' del hash bcrypt.
-      - STUDIO_PASSWORD_HASH
+      # El hash del Studio va en base64 (sin '$') porque Portainer corrompe los
+      # '$' de un bcrypt crudo. Se decodifica en el arranque (ver command) y
+      # Caddy lo lee via {$STUDIO_PASSWORD_HASH}.
+      - STUDIO_PASSWORD_HASH_B64
     ports:
       - "80:80"
       - "443:443"
     entrypoint: ["sh", "-c"]
     command:
       - |
+        export STUDIO_PASSWORD_HASH="$$(printenv STUDIO_PASSWORD_HASH_B64 | base64 -d)"
         cat > /etc/caddy/Caddyfile <<'EOF'
         ${DUCKDNS_DOMAIN} {
             reverse_proxy api:8000
