@@ -92,6 +92,13 @@ services:
                 }
             }
         }
+        EOF
+        # El Studio se agrega SOLO si el hash es un bcrypt válido ($2...). Si
+        # falta o llega corrupto, se omite brunoise-db y Caddy arranca igual:
+        # un problema del POS nunca debe tumbar ciolix ni brunoise-api.
+        case "$$STUDIO_PASSWORD_HASH" in
+        '$$2'*)
+        cat >> /etc/caddy/Caddyfile <<'EOF2'
 
         # --- POS Esencial: Studio, con usuario y contraseña ---
         brunoise-db.duckdns.org {
@@ -101,7 +108,11 @@ services:
             }
             reverse_proxy pos_studio:3000
         }
-        EOF
+        EOF2
+        ;;
+        *)
+        echo "AVISO: STUDIO_PASSWORD_HASH ausente o inválido; se omite brunoise-db (Studio)." ;;
+        esac
         exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     networks: [default, edge]
     volumes:
