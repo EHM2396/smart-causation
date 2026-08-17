@@ -59,6 +59,10 @@ services:
     restart: unless-stopped
     depends_on:
       - api
+    environment:
+      # Pass-through sin '=' ni '${}': Portainer inyecta el valor crudo al
+      # contenedor sin que Compose toque los '$' del hash bcrypt.
+      - STUDIO_PASSWORD_HASH
     ports:
       - "80:80"
       - "443:443"
@@ -91,7 +95,7 @@ services:
         brunoise-db.duckdns.org {
             encode zstd gzip
             basic_auth {
-                admin ${STUDIO_PASSWORD_HASH}
+                admin {env.STUDIO_PASSWORD_HASH}
             }
             reverse_proxy pos_studio:3000
         }
