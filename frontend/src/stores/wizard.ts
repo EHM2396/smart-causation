@@ -2,6 +2,7 @@
 import { create } from "zustand";
 import type {
   BatchValidacionResponse,
+  BorradorSnapshot,
   Factura,
   FacturaCausadaInfo,
   FacturaOmitida,
@@ -32,6 +33,7 @@ interface Paso2Cache {
   codImpuestoItem: Record<string, string>;
   cuentaIvaItem: Record<string, string>;
   verificadas: Record<number, boolean>;
+  baseOverride: Record<string, string>;
 }
 
 interface WizardState {
@@ -68,6 +70,7 @@ interface WizardState {
   setFacturasOmitidas: (items: FacturaOmitida[]) => void;
   setTutorialActivo: (v: boolean) => void;
   setTutorialMockMapeo: (m: TutorialMockMapeo | null) => void;
+  hydrateBorrador: (snapshot: BorradorSnapshot) => void;
   reset: () => void;
 }
 
@@ -108,6 +111,21 @@ export const useWizardStore = create<WizardState>((set) => ({
   setFacturasOmitidas: (facturasOmitidas) => set({ facturasOmitidas }),
   setTutorialActivo: (tutorialActivo) => set({ tutorialActivo }),
   setTutorialMockMapeo: (tutorialMockMapeo) => set({ tutorialMockMapeo }),
+  hydrateBorrador: (snapshot) => set((state) => {
+    // Revocar object URLs previos (por si había facturas cargadas en memoria).
+    Object.values(state.pdfUrls).forEach((url) => { try { URL.revokeObjectURL(url); } catch {} });
+    return {
+      ...initial,
+      facturas: snapshot.facturas,
+      tipoComp: snapshot.tipoComp,
+      centroCosto: snapshot.centroCosto,
+      facturasYaCausadas: snapshot.facturasYaCausadas,
+      facturasOmitidas: snapshot.facturasOmitidas,
+      suggestions: snapshot.suggestions,
+      paso2Cache: snapshot.paso2,
+      paso: 2 as PasoWizard,
+    };
+  }),
   reset: () => set((state) => {
     Object.values(state.pdfUrls).forEach((url) => { try { URL.revokeObjectURL(url); } catch {} });
     return initial;

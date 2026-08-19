@@ -125,3 +125,31 @@ class ReglaOut(ReglaCreate):
     id: int
     activa: bool
     created_at: datetime
+
+
+# ── Borrador de causación (guardado temporal) ─────────────────────────────────
+
+class BorradorGuardarRequest(BaseModel):
+    """Body para PUT /causacion/borrador. `datos` es el snapshot completo del
+    wizard (facturas + configuración de paso 2); los demás son metadatos ligeros
+    para la tarjeta 'Continuar'."""
+    datos: dict
+    total_facturas: int = 0
+    total_verificadas: int = 0
+    tipo_comp: str | None = None
+
+
+class BorradorResumen(BaseModel):
+    """Metadatos del borrador, sin el snapshot pesado. Para saber si hay algo que
+    retomar y mostrarlo en una tarjeta."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    total_facturas: int
+    total_verificadas: int
+    tipo_comp: str | None = None
+    actualizado_at: datetime
+
+
+class BorradorCompleto(BorradorResumen):
+    """Borrador con el snapshot completo, para rehidratar el wizard al reanudar."""
+    datos: dict

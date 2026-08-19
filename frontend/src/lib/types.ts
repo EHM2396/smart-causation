@@ -292,3 +292,49 @@ export interface LoginResponse {
 // ─── Wizard state ─────────────────────────────────────────────────────────────
 
 export type PasoWizard = 1 | 2 | 3 | 4;
+
+// ─── Borrador de causación (guardado temporal) ────────────────────────────────
+
+/** Configuración de paso 2 capturada en el borrador (espejo del estado local
+ * de paso2.tsx). Incluye baseOverride, que no está en Paso2Cache. */
+export interface Paso2Snapshot {
+  facturaCount: number;
+  cuentaPago: Record<number, string>;
+  tipoProveedor: Record<number, string>;
+  nitEdit: Record<number, string>;
+  cuentaGastoGlobal: Record<number, string>;
+  rfGlobal: Record<number, string>;
+  riGlobal: Record<number, string>;
+  codImpuestoGlobal: Record<number, string>;
+  cuentaIvaGlobal: Record<number, string>;
+  cuentaGastoItem: Record<string, string>;
+  rfItem: Record<string, string>;
+  riItem: Record<string, string>;
+  codImpuestoItem: Record<string, string>;
+  cuentaIvaItem: Record<string, string>;
+  verificadas: Record<number, boolean>;
+  baseOverride: Record<string, string>;
+}
+
+/** Snapshot completo del wizard que se serializa en el borrador. */
+export interface BorradorSnapshot {
+  facturas: Factura[];
+  tipoComp: string;
+  centroCosto: string;
+  facturasYaCausadas: FacturaCausadaInfo[];
+  facturasOmitidas: FacturaOmitida[];
+  suggestions: Record<string, Sugerencia>;
+  paso2: Paso2Snapshot;
+}
+
+export interface BorradorResumen {
+  id: number;
+  total_facturas: number;
+  total_verificadas: number;
+  tipo_comp: string | null;
+  actualizado_at: string;
+}
+
+export interface BorradorCompleto extends BorradorResumen {
+  datos: BorradorSnapshot;
+}

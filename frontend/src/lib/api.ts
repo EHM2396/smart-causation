@@ -1,5 +1,7 @@
 import type {
   BatchValidacionResponse,
+  BorradorResumen,
+  BorradorCompleto,
   ConsecutivoOut,
   CuentaOpcion,
   CiudadOut,
@@ -308,6 +310,26 @@ export const api = {
     const qs = qp.toString();
     return reqBlob(`/causacion/historial/exportar-lote${qs ? `?${qs}` : ""}`);
   },
+
+  // Borrador de causación (guardado temporal)
+  guardarBorrador: (payload: {
+    datos: Record<string, unknown>;
+    total_facturas: number;
+    total_verificadas: number;
+    tipo_comp: string | null;
+  }) =>
+    req<BorradorResumen>("/causacion/borrador", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+
+  getBorrador: () => req<BorradorResumen | null>("/causacion/borrador"),
+
+  getBorradorCompleto: () =>
+    req<BorradorCompleto | null>("/causacion/borrador/completo"),
+
+  descartarBorrador: () =>
+    req<{ descartado: boolean }>("/causacion/borrador/descartar", { method: "POST" }),
 
   // Aprendizaje / IA
   getIAReglas: () => req<IARegla[]>("/aprendizaje/reglas"),

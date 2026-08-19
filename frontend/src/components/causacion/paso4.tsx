@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useWizardStore } from "@/stores/wizard";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ function _parseApiError(raw: string): string {
 
 export function Paso4() {
   const { facturas, mapeos, tipoComp, centroCosto, reporte, xlsxBlob, reset, setPaso, tutorialActivo } = useWizardStore();
+  const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
@@ -46,6 +48,10 @@ export function Paso4() {
       }));
       await api.batchGenerar({ items, tipo_comprobante: tipoComp, centro_costo: centroCosto, confirmar: true });
       setConfirmed(true);
+      // La causación quedó completa: descartar el borrador temporal si existía.
+      api.descartarBorrador()
+        .then(() => queryClient.invalidateQueries({ queryKey: ["borrador"] }))
+        .catch(() => {});
     } catch (e) {
       setConfirmError(_parseApiError((e as Error).message));
     }

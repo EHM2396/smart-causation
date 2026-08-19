@@ -1,21 +1,69 @@
 "use client";
 import { useState, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWizardStore } from "@/stores/wizard";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle2, Loader2, TrendingDown, Clock } from "lucide-react";
+import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle2, Loader2, TrendingDown, Clock, History, Trash2, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fmt } from "@/lib/utils";
 import type { Factura } from "@/lib/types";
 
+function fechaBorrador(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString("es-CO", {
+      day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+}
+
 export function Paso1() {
-  const { setFacturas, setFacturasYaCausadas, setPaso, facturas: stored, setPdfUrls, pdfUrls, setFilesProcesando, setSuggestions, setPaso2Cache, setFacturasOmitidas } = useWizardStore();
+  const { setFacturas, setFacturasYaCausadas, setPaso, facturas: stored, setPdfUrls, pdfUrls, setFilesProcesando, setSuggestions, setPaso2Cache, setFacturasOmitidas, hydrateBorrador, tutorialActivo } = useWizardStore();
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [ventasDetectadas, setVentasDetectadas] = useState<{ filename: string; numero: string }[]>([]);
   const [omitidas, setOmitidas] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
+
+  // ── Borrador guardado (guardado temporal) ────────────────────────────────────
+  const queryClient = useQueryClient();
+  const [continuandoBorrador, setContinuandoBorrador] = useState(false);
+  const [descartandoBorrador, setDescartandoBorrador] = useState(false);
+  const { data: borrador } = useQuery({
+    queryKey: ["borrador"],
+    queryFn: api.getBorrador,
+    enabled: !tutorialActivo,
+    staleTime: 0,
+  });
+
+  const continuarBorrador = async () => {
+    setContinuandoBorrador(true);
+    try {
+      const completo = await api.getBorradorCompleto();
+      if (completo?.datos) {
+        hydrateBorrador(completo.datos); // setea facturas + config + paso=2
+      }
+    } catch {
+      setErrors(["No se pudo cargar el borrador guardado. Intenta de nuevo."]);
+    } finally {
+      setContinuandoBorrador(false);
+    }
+  };
+
+  const descartarBorrador = async () => {
+    setDescartandoBorrador(true);
+    try {
+      await api.descartarBorrador();
+      await queryClient.invalidateQueries({ queryKey: ["borrador"] });
+    } catch {
+      // silencioso: si falla, la tarjeta sigue visible y puede reintentar
+    } finally {
+      setDescartandoBorrador(false);
+    }
+  };
 
   const handleFiles = (incoming: FileList | null) => {
     if (!incoming) return;
@@ -146,6 +194,53 @@ export function Paso1() {
           Sube archivos <code className="text-[var(--brand)] font-medium">.xlsx</code> del portal DIAN, archivos <code className="text-[var(--brand)] font-medium">.zip</code>, <code className="text-[var(--brand)] font-medium">.xml</code> o <code className="text-[var(--brand)] font-medium">.pdf</code> de factura electrónica DIAN. Puedes subir varios a la vez.
         </p>
       </div>
+
+      {/* Borrador guardado — ofrecer continuar donde quedó */}
+      {borrador && borrador.total_facturas > 0 && files.length === 0 && stored.length === 0 && (
+        <div
+          className="flex flex-col gap-3 rounded-xl border p-5 sm:flex-row sm:items-center sm:justify-between"
+          style={{ borderColor: "var(--brand)", backgroundColor: "var(--brand-muted)" }}
+        >
+          <div className="flex min-w-0 items-start gap-3">
+            <div
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+              style={{ backgroundColor: "color-mix(in srgb, var(--brand) 15%, transparent)" }}
+            >
+              <History className="h-5 w-5" style={{ color: "var(--brand)" }} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                Tienes un borrador guardado
+              </p>
+              <p className="mt-0.5 text-xs" style={{ color: "var(--text-secondary)" }}>
+                {borrador.total_facturas} factura{borrador.total_facturas !== 1 ? "s" : ""} · {borrador.total_verificadas} verificada{borrador.total_verificadas !== 1 ? "s" : ""}
+                {borrador.actualizado_at ? ` · actualizado ${fechaBorrador(borrador.actualizado_at)}` : ""}
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={descartarBorrador}
+              disabled={descartandoBorrador || continuandoBorrador}
+              className="gap-1.5"
+            >
+              {descartandoBorrador ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              Descartar
+            </Button>
+            <Button
+              size="sm"
+              onClick={continuarBorrador}
+              disabled={continuandoBorrador || descartandoBorrador}
+              className="gap-1.5"
+            >
+              {continuandoBorrador ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRight className="h-3.5 w-3.5" />}
+              Continuar
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Drop zone — compacto si ya hay archivos */}
       <label

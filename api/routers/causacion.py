@@ -26,8 +26,12 @@ from api.schemas import (
     FacturaCausadaInfo,
     VerificarCausadasRequest,
     VerificarCausadasResponse,
+    BorradorGuardarRequest,
+    BorradorResumen,
+    BorradorCompleto,
 )
 from db.models.auth import Empresa, Usuario
+from db.models.causacion import BorradorCausacion
 from db.models.contabilidad import FacturaCausada
 from db.session import get_db
 from services import causacion_service, consecutivos_service, cuentas_service
@@ -638,3 +642,80 @@ def limpiar_historial(
     result = db.execute(stmt)
     db.commit()
     return {"eliminados": result.rowcount}
+
+
+# ── Borrador de causación (guardado temporal) ─────────────────────────────────
+#
+# Un único borrador por (empresa, usuario). Guardar hace upsert sobre la misma
+# fila. Nunca se borra la fila: "descartar" es un soft-delete (estado).
+
+def _borrador_del_usuario(db: Session, empresa: Empresa, usuario: Usuario) -> BorradorCausacion | None:
+    return db.scalar(
+        select(BorradorCausacion).where(
+            BorradorCausacion.empresa_id == empresa.id,
+            BorradorCausacion.usuario_id == usuario.id,
+        )
+    )
+
+
+@router.put("/borrador", response_model=BorradorResumen)
+def guardar_borrador(
+    body: BorradorGuardarRequest,
+    db: DB,
+    empresa: EmpresaActiva,
+    current_user: CurrentUser,
+):
+    """Crea o reemplaza el borrador del usuario (upsert). Devuelve el resumen."""
+    datos_str = json.dumps(body.datos, ensure_ascii=False, default=str)
+    borrador = _borrador_del_usuario(db, empresa, current_user)
+    if borrador is None:
+        borrador = BorradorCausacion(
+            empresa_id=empresa.id,
+            usuario_id=current_user.id,
+            datos_json=datos_str,
+        )
+        db.add(borrador)
+    else:
+        borrador.datos_json = datos_str
+    borrador.total_facturas = body.total_facturas
+    borrador.total_verificadas = body.total_verificadas
+    borrador.tipo_comp = body.tipo_comp
+    borrador.estado = "activo"
+    db.commit()
+    db.refresh(borrador)
+    return borrador
+
+
+@router.get("/borrador", response_model=BorradorResumen | None)
+def get_borrador(db: DB, empresa: EmpresaActiva, current_user: CurrentUser):
+    """Resumen del borrador activo del usuario, o null si no hay ninguno."""
+    borrador = _borrador_del_usuario(db, empresa, current_user)
+    if borrador is None or borrador.estado != "activo":
+        return None
+    return borrador
+
+
+@router.get("/borrador/completo", response_model=BorradorCompleto | None)
+def get_borrador_completo(db: DB, empresa: EmpresaActiva, current_user: CurrentUser):
+    """Borrador activo con el snapshot completo, para rehidratar el wizard."""
+    borrador = _borrador_del_usuario(db, empresa, current_user)
+    if borrador is None or borrador.estado != "activo":
+        return None
+    return BorradorCompleto(
+        id=borrador.id,
+        total_facturas=borrador.total_facturas,
+        total_verificadas=borrador.total_verificadas,
+        tipo_comp=borrador.tipo_comp,
+        actualizado_at=borrador.actualizado_at,
+        datos=json.loads(borrador.datos_json),
+    )
+
+
+@router.post("/borrador/descartar", response_model=dict)
+def descartar_borrador(db: DB, empresa: EmpresaActiva, current_user: CurrentUser):
+    """Soft-delete: marca el borrador como descartado. No borra la fila."""
+    borrador = _borrador_del_usuario(db, empresa, current_user)
+    if borrador is not None and borrador.estado == "activo":
+        borrador.estado = "descartado"
+        db.commit()
+    return {"descartado": True}

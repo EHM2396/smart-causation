@@ -9,4 +9,5 @@ from api.schemas.causacion import (     # noqa: F401
     SugerenciaBatchItem, SugerenciaBatchRequest, SugerenciaBatchResponse,
     FacturaCausadaInfo, VerificarCausadasRequest, VerificarCausadasResponse,
     DecisionOut, ReglaCreate, ReglaOut,
+    BorradorGuardarRequest, BorradorResumen, BorradorCompleto,
 )

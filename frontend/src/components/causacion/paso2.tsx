@@ -1,5 +1,5 @@
 ﻿"use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useWizardStore } from "@/stores/wizard";
@@ -13,9 +13,9 @@ import { OmitidasModal } from "@/components/causacion/omitidas-modal";
 import { fmt } from "@/lib/utils";
 import {
   AlertTriangle, Plus, Sparkles, Loader2,
-  ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search, History, X, Trash2,
+  ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search, History, X, Trash2, Save,
 } from "lucide-react";
-import type { MapeoItem, CuentaOpcion, ImpuestoOut, FuenteMapeo, Sugerencia, ItemFactura } from "@/lib/types";
+import type { MapeoItem, CuentaOpcion, ImpuestoOut, FuenteMapeo, Sugerencia, ItemFactura, Paso2Snapshot, BorradorSnapshot } from "@/lib/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -65,7 +65,7 @@ function DataField({ label, value, mono = false }: { label: string; value: strin
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function Paso2() {
-  const { facturas, facturasYaCausadas, tipoComp, setPaso, setFacturas, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, pdfUrls, paso2Cache, setPaso2Cache, filesProcesando, setFilesProcesando, tutorialActivo, tutorialMockMapeo, facturasOmitidas, setFacturasOmitidas } = useWizardStore();
+  const { facturas, facturasYaCausadas, tipoComp, centroCosto, setPaso, setFacturas, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, pdfUrls, paso2Cache, setPaso2Cache, filesProcesando, setFilesProcesando, tutorialActivo, tutorialMockMapeo, facturasOmitidas, setFacturasOmitidas } = useWizardStore();
   const [modalCausadasOpen, setModalCausadasOpen] = useState(false);
   const [modalOmitidasOpen, setModalOmitidasOpen] = useState(false);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
@@ -100,6 +100,9 @@ export function Paso2() {
   const [verificadas, setVerificadas] = useState<Record<number, boolean>>({});
   const [baseOverride, setBaseOverride] = useState<Record<string, string>>({});
   const lastIdxRef = useRef<number | null>(null);
+
+  // Borrador (guardado temporal): "idle" | "guardando" | "guardado" | "error"
+  const [borradorEstado, setBorradorEstado] = useState<"idle" | "guardando" | "guardado" | "error">("idle");
 
   // Pre-cargar estado de demo cuando el tutorial está activo
   useEffect(() => {
@@ -267,6 +270,7 @@ export function Paso2() {
       setCodImpuestoItem(cache.codImpuestoItem ?? {});
       setCuentaIvaItem(cache.cuentaIvaItem ?? {});
       setVerificadas(cache.verificadas);
+      setBaseOverride(cache.baseOverride ?? {});
       setFilesProcesando(false);
       return;
     }
@@ -340,6 +344,44 @@ export function Paso2() {
     const v = Number(baseOverride[key]);
     return v > 0 ? v : item.base;
   };
+
+  // ── Borrador (guardado temporal) ─────────────────────────────────────────────
+  const buildPaso2Snapshot = useCallback((): Paso2Snapshot => ({
+    facturaCount: facturas.length,
+    cuentaPago, tipoProveedor, nitEdit, cuentaGastoGlobal,
+    rfGlobal, riGlobal, codImpuestoGlobal, cuentaIvaGlobal,
+    cuentaGastoItem, rfItem, riItem, codImpuestoItem, cuentaIvaItem,
+    verificadas, baseOverride,
+  }), [facturas.length, cuentaPago, tipoProveedor, nitEdit, cuentaGastoGlobal, rfGlobal, riGlobal, codImpuestoGlobal, cuentaIvaGlobal, cuentaGastoItem, rfItem, riItem, codImpuestoItem, cuentaIvaItem, verificadas, baseOverride]);
+
+  const guardarBorrador = useCallback(async () => {
+    setBorradorEstado("guardando");
+    try {
+      const snapshot: BorradorSnapshot = {
+        facturas, tipoComp, centroCosto,
+        facturasYaCausadas, facturasOmitidas, suggestions,
+        paso2: buildPaso2Snapshot(),
+      };
+      await api.guardarBorrador({
+        datos: snapshot as unknown as Record<string, unknown>,
+        total_facturas: facturas.length,
+        total_verificadas: Object.values(verificadas).filter(Boolean).length,
+        tipo_comp: tipoComp || null,
+      });
+      setBorradorEstado("guardado");
+    } catch {
+      setBorradorEstado("error");
+    }
+  }, [facturas, tipoComp, centroCosto, facturasYaCausadas, facturasOmitidas, suggestions, buildPaso2Snapshot, verificadas]);
+
+  // Autoguardado de respaldo: 4s tras el último cambio de configuración.
+  const paso2Sig = JSON.stringify(buildPaso2Snapshot());
+  useEffect(() => {
+    if (tutorialActivo || facturas.length === 0) return;
+    const t = setTimeout(() => { void guardarBorrador(); }, 4000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paso2Sig]);
 
   const handleValidar = () => {
     const mapeos: MapeoItem[] = [];
@@ -452,6 +494,7 @@ export function Paso2() {
       cuentaPago, tipoProveedor, nitEdit, cuentaGastoGlobal,
       rfGlobal, riGlobal, codImpuestoGlobal, cuentaIvaGlobal,
       cuentaGastoItem, rfItem, riItem, codImpuestoItem, cuentaIvaItem, verificadas,
+      baseOverride,
     });
     setFacturasParaCausar(facturasVerificadas);
     setMapeos(mapeos);
@@ -501,6 +544,26 @@ export function Paso2() {
                 <History className="h-3.5 w-3.5" />
                 Ya causadas ({facturasYaCausadas.length})
               </button>
+            )}
+            {!tutorialActivo && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { void guardarBorrador(); }}
+                disabled={facturas.length === 0 || borradorEstado === "guardando"}
+                title="Guarda un borrador para retomar más tarde desde donde quedaste"
+                className="gap-1.5"
+              >
+                {borradorEstado === "guardando" ? (
+                  <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Guardando…</>
+                ) : borradorEstado === "guardado" ? (
+                  <><CheckCircle2 className="h-3.5 w-3.5" style={{ color: "var(--success)" }} /> Borrador guardado</>
+                ) : borradorEstado === "error" ? (
+                  <><AlertTriangle className="h-3.5 w-3.5" style={{ color: "var(--warning-text)" }} /> Reintentar guardar</>
+                ) : (
+                  <><Save className="h-3.5 w-3.5" /> Guardar borrador</>
+                )}
+              </Button>
             )}
             <Button variant="outline" size="sm" onClick={() => { setPaso2Cache(null); setPaso(1); }}>← Volver</Button>
             <Button
