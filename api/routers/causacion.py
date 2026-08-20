@@ -329,6 +329,7 @@ class ValidacionComprobante(BaseModel):
     total_credito: float
     diferencia: float
     cuadra: bool
+    filas: int = 0  # nº de movimientos que esta factura aporta al archivo SIIGO
 
 
 class BatchValidacionResponse(BaseModel):
@@ -346,6 +347,7 @@ def batch_validar(body: BatchRequest, db: DB, empresa: EmpresaActiva):
     """
     ultimo = consecutivos_service.get_ultimo(db, body.tipo_comprobante, empresa_id=empresa.id)
     todos_movs: list[dict] = []
+    filas_por_consecutivo: dict[int, int] = {}
 
     for idx, item in enumerate(body.items):
         consecutivo = ultimo + 1 + idx
@@ -356,6 +358,7 @@ def batch_validar(body: BatchRequest, db: DB, empresa: EmpresaActiva):
             tipo_comprobante=body.tipo_comprobante,
             centro_costo=body.centro_costo,
         )
+        filas_por_consecutivo[consecutivo] = len(movs)
         todos_movs.extend(movs)
 
     reporte = validator.validar_movimientos(todos_movs)
@@ -373,6 +376,7 @@ def batch_validar(body: BatchRequest, db: DB, empresa: EmpresaActiva):
             total_credito=c.total_credito,
             diferencia=c.diferencia,
             cuadra=c.cuadra,
+            filas=filas_por_consecutivo.get(c.consecutivo, 0),
         )
         for c in reporte.comprobantes
     ]
@@ -407,6 +411,15 @@ def batch_generar(body: BatchRequest, db: DB, empresa: EmpresaActiva, current_us
             centro_costo=body.centro_costo,
         )
         todos_movs.extend(movs)
+
+    # SIIGO rechaza archivos con más de MAX_FILAS_ARCHIVO filas de datos. El
+    # frontend ya corta en tandas; esto es la defensa en el backend.
+    if len(todos_movs) > exporter.MAX_FILAS_ARCHIVO:
+        raise HTTPException(
+            400,
+            f"El archivo tendría {len(todos_movs)} filas y SIIGO acepta máximo "
+            f"{exporter.MAX_FILAS_ARCHIVO}. Divide la causación en tandas más pequeñas.",
+        )
 
     xlsx_buf = exporter.generar_xlsx(todos_movs)
 

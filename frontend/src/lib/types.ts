@@ -131,6 +131,7 @@ export interface ValidacionComprobante {
   total_credito: number;
   diferencia: number;
   cuadra: boolean;
+  filas: number;  // nº de movimientos que esta factura aporta al archivo SIIGO
 }
 
 export interface BatchValidacionResponse {

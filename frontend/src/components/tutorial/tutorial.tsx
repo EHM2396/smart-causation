@@ -61,9 +61,9 @@ const MOCK_TIPO_COMP = "DEMO";
 
 const TUTORIAL_REPORTE: BatchValidacionResponse = {
   comprobantes: [
-    { consecutivo: 1, numero_dian: "FERM44825", total_debito: 2750000, total_credito: 2750000, diferencia: 0, cuadra: true },
-    { consecutivo: 2, numero_dian: "SE-241001",  total_debito: 1190000, total_credito: 1190000, diferencia: 0, cuadra: true },
-    { consecutivo: 3, numero_dian: "FE-2026001", total_debito: 580000,  total_credito: 580000,  diferencia: 0, cuadra: true },
+    { consecutivo: 1, numero_dian: "FERM44825", total_debito: 2750000, total_credito: 2750000, diferencia: 0, cuadra: true, filas: 3 },
+    { consecutivo: 2, numero_dian: "SE-241001",  total_debito: 1190000, total_credito: 1190000, diferencia: 0, cuadra: true, filas: 3 },
+    { consecutivo: 3, numero_dian: "FE-2026001", total_debito: 580000,  total_credito: 580000,  diferencia: 0, cuadra: true, filas: 3 },
   ],
   global_cuadra: true,
   gran_total_debitos: 4520000,

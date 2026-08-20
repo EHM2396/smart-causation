@@ -5,7 +5,7 @@ import { useWizardStore } from "@/stores/wizard";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { fmt } from "@/lib/utils";
-import { Download, CheckCircle2, PartyPopper, AlertTriangle, Plus, ArrowLeft, WifiOff } from "lucide-react";
+import { Download, CheckCircle2, PartyPopper, AlertTriangle, Plus, ArrowLeft, WifiOff, Layers } from "lucide-react";
 
 function _parseApiError(raw: string): string {
   if (!raw || raw === "Failed to fetch") return "__network__";
@@ -18,12 +18,14 @@ function _parseApiError(raw: string): string {
 }
 
 export function Paso4() {
-  const { facturas, mapeos, tipoComp, centroCosto, reporte, xlsxBlob, reset, setPaso, tutorialActivo } = useWizardStore();
+  const { facturas, facturasParaCausar, facturasYaCausadas, mapeos, tipoComp, centroCosto, reporte, xlsxBlob, reset, setPaso, tutorialActivo, setFacturasYaCausadas } = useWizardStore();
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [downloaded, setDownloaded] = useState(false);
+  // Facturas que quedan por causar tras confirmar esta tanda (0 = todas listas)
+  const [restantes, setRestantes] = useState<number | null>(null);
 
   const handleDownload = () => {
     if (tutorialActivo) return;
@@ -38,20 +40,56 @@ export function Paso4() {
   };
 
   const handleConfirmar = async () => {
-    if (tutorialActivo) { setConfirmed(true); return; }
+    if (tutorialActivo) { setConfirmed(true); setRestantes(0); return; }
     setConfirming(true);
     setConfirmError(null);
     try {
-      const items = facturas.map((f, idx) => ({
+      // Confirmar SOLO la tanda actual (facturasParaCausar, alineado con mapeos).
+      const items = facturasParaCausar.map((f, idx) => ({
         factura: f,
         mapeos_confirmados: mapeos.filter((m) => m.idx_factura === idx),
       }));
       await api.batchGenerar({ items, tipo_comprobante: tipoComp, centro_costo: centroCosto, confirmar: true });
+
+      // Refrescar causadas de toda la carga: alimenta el modal y el filtro de paso2.
+      const prev = useWizardStore.getState().facturasYaCausadas;
+      let causadasInfo = prev;
+      try {
+        const numeros = facturas.map((f) => f.numero_dian).filter(Boolean);
+        const { ya_causadas } = await api.verificarCausadas(numeros);
+        causadasInfo = ya_causadas; // fuente de verdad completa (con consecutivo, detalle…)
+      } catch {
+        // Fallback si falla la verificación: marcar al menos la tanda recién causada
+        // con info mínima, para que no reaparezca en paso2 ni desaparezca del modal.
+        const existentes = new Set(prev.map((c) => c.numero_dian));
+        const nuevas = facturasParaCausar
+          .filter((f) => !existentes.has(f.numero_dian))
+          .map((f) => ({
+            numero_dian: f.numero_dian,
+            nit_proveedor: f.nit ?? null,
+            razon_social: f.razon_social ?? null,
+            fecha_factura: f.fecha ?? null,
+            total: f.total ?? null,
+            consecutivo: null,
+            tipo_comprobante: null,
+            fecha_causacion: null,
+            datos_json: null,
+          }));
+        causadasInfo = [...prev, ...nuevas];
+      }
+      setFacturasYaCausadas(causadasInfo);
+      const causadas = new Set(causadasInfo.map((c) => c.numero_dian));
+
+      const quedan = facturas.filter((f) => !causadas.has(f.numero_dian)).length;
+      setRestantes(quedan);
       setConfirmed(true);
-      // La causación quedó completa: descartar el borrador temporal si existía.
-      api.descartarBorrador()
-        .then(() => queryClient.invalidateQueries({ queryKey: ["borrador"] }))
-        .catch(() => {});
+
+      // Solo descartar el borrador cuando ya no queda nada pendiente.
+      if (quedan === 0) {
+        api.descartarBorrador()
+          .then(() => queryClient.invalidateQueries({ queryKey: ["borrador"] }))
+          .catch(() => {});
+      }
     } catch (e) {
       setConfirmError(_parseApiError((e as Error).message));
     }
@@ -60,6 +98,12 @@ export function Paso4() {
 
   const primerConsec = reporte ? (reporte.comprobantes[0]?.consecutivo ?? "—") : "—";
   const ultimoConsec = reporte ? (reporte.comprobantes.at(-1)?.consecutivo ?? "—") : "—";
+
+  // Vista previa de cuántas facturas quedan por causar tras esta tanda (antes de confirmar).
+  const tandaNums = new Set(facturasParaCausar.map((f) => f.numero_dian));
+  const causadasNums = new Set(facturasYaCausadas.map((c) => c.numero_dian));
+  const quedanPreview = facturas.filter((f) => !tandaNums.has(f.numero_dian) && !causadasNums.has(f.numero_dian)).length;
+  const esTandaParcial = quedanPreview > 0;
 
   return (
     <div className="space-y-6">
@@ -77,20 +121,35 @@ export function Paso4() {
       </div>
 
       {confirmed ? (
-        <div className="flex flex-col items-center gap-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 py-12 text-center">
-          <PartyPopper className="h-12 w-12 text-emerald-400" />
-          <p className="text-lg font-semibold text-[var(--text-primary)]">¡Importación confirmada!</p>
-          <p className="text-sm text-[var(--text-secondary)]">El aprendizaje fue guardado. Próximo consecutivo: <strong className="text-[var(--text-primary)]">{Number(ultimoConsec) + 1}</strong></p>
-          <Button variant="outline" onClick={reset} className="gap-2">
-            <Plus className="h-4 w-4" /> Procesar nuevas facturas
-          </Button>
-        </div>
+        restantes && restantes > 0 ? (
+          /* Tanda importada, aún quedan facturas por causar */
+          <div className="flex flex-col items-center gap-4 rounded-xl border py-12 text-center" style={{ borderColor: "var(--brand)", backgroundColor: "var(--brand-muted)" }}>
+            <CheckCircle2 className="h-12 w-12" style={{ color: "var(--brand)" }} />
+            <p className="text-lg font-semibold text-[var(--text-primary)]">Tanda importada ✓</p>
+            <p className="text-sm text-[var(--text-secondary)] max-w-md">
+              Estas facturas quedaron causadas (las verás en <strong>“Ya causadas”</strong>). Quedan <strong className="text-[var(--text-primary)]">{restantes}</strong> factura{restantes !== 1 ? "s" : ""} por causar — vuelve a configurarlas y verifícalas para continuar con la siguiente tanda.
+            </p>
+            <Button onClick={() => setPaso(2)} className="gap-2">
+              <ArrowLeft className="h-4 w-4" /> Volver a configurar las {restantes} factura{restantes !== 1 ? "s" : ""} restantes
+            </Button>
+          </div>
+        ) : (
+          /* Todo causado */
+          <div className="flex flex-col items-center gap-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 py-12 text-center">
+            <PartyPopper className="h-12 w-12 text-emerald-400" />
+            <p className="text-lg font-semibold text-[var(--text-primary)]">¡Importación confirmada!</p>
+            <p className="text-sm text-[var(--text-secondary)]">El aprendizaje fue guardado. Próximo consecutivo: <strong className="text-[var(--text-primary)]">{Number(ultimoConsec) + 1}</strong></p>
+            <Button variant="outline" onClick={reset} className="gap-2">
+              <Plus className="h-4 w-4" /> Procesar nuevas facturas
+            </Button>
+          </div>
+        )
       ) : (
         <>
-          {/* Resumen */}
+          {/* Resumen — refleja SOLO esta tanda (lo que lleva el archivo generado) */}
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             {[
-              { label: "Facturas", value: facturas.length },
+              { label: esTandaParcial ? "Facturas (esta tanda)" : "Facturas", value: facturasParaCausar.length },
               { label: "Primer consecutivo", value: primerConsec },
               { label: "Último consecutivo", value: ultimoConsec },
               { label: "Total débitos", value: fmt(reporte?.gran_total_debitos ?? 0) },
@@ -101,6 +160,16 @@ export function Paso4() {
               </div>
             ))}
           </div>
+
+          {/* Tanda parcial: explicar cómo continuar con las restantes */}
+          {esTandaParcial && (
+            <div className="flex items-start gap-2.5 rounded-lg px-3 py-2.5 text-sm" style={{ backgroundColor: "var(--brand-muted)", border: "1px solid var(--brand)", color: "var(--text-primary)" }}>
+              <Layers className="h-4 w-4 shrink-0 mt-0.5" style={{ color: "var(--brand)" }} />
+              <span>
+                Este archivo es una <strong>tanda de {facturasParaCausar.length} facturas</strong> (quedan <strong>{quedanPreview}</strong> por causar). Descárgalo e impórtalo en SIIGO; al pulsar <strong>“Confirmar y guardar aprendizaje”</strong> se marcarán como causadas y podrás <strong>volver al paso 2</strong> a configurar y causar las restantes.
+              </span>
+            </div>
+          )}
 
           {/* Recomendación de orden */}
           {!downloaded && (

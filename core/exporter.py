@@ -14,6 +14,11 @@ import pandas as pd
 BASE_DIR = os.path.join(os.path.dirname(__file__), "..")
 _RUTA_MODELO = os.path.join(BASE_DIR, "modelo_importacion.xlsx")
 
+# SIIGO acepta como máximo 500 líneas por archivo de importación, incluyendo el
+# encabezado → 499 filas de datos (movimientos contables). Un archivo con más
+# filas es rechazado por SIIGO, por eso la causación se divide en tandas.
+MAX_FILAS_ARCHIVO = 499
+
 # Columnas exactas del modelo SIIGO (mismo orden que modelo_importacion.xlsx)
 _COLUMNAS_MODELO = [
     "Tipo de comprobante",

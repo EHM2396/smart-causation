@@ -239,9 +239,9 @@ export function CausadasModal({ facturas, onClose }: Props) {
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
-        className="flex w-full max-w-5xl flex-col rounded-2xl border shadow-2xl"
+        className="flex w-full max-w-7xl flex-col rounded-2xl border shadow-2xl"
         style={{
-          maxHeight: "90vh",
+          maxHeight: "92vh",
           borderColor: "var(--border-soft)",
           backgroundColor: "var(--bg-surface)",
         }}
@@ -273,10 +273,10 @@ export function CausadasModal({ facturas, onClose }: Props) {
           {selectedIdx === null ? (
             /* ── LIST VIEW ── */
             <div
-              className="overflow-hidden rounded-xl border"
+              className="overflow-x-auto rounded-xl border"
               style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}
             >
-              <table className="w-full min-w-[640px] text-sm">
+              <table className="w-full min-w-[820px] text-sm">
                 <thead>
                   <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
                     {["#", "N° Factura", "Proveedor / NIT", "Fecha", "Subtotal", "Total", "Consecutivo", "Causada el", ""].map((h) => (
@@ -322,10 +322,10 @@ export function CausadasModal({ facturas, onClose }: Props) {
                       </td>
                       <td className="px-4 py-3 font-mono text-xs" style={{ color: "var(--brand)" }}>{fc.consecutivo ?? "—"}</td>
                       <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>{fc.fecha_causacion ?? "—"}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 whitespace-nowrap">
                         <button
                           onClick={() => setSelectedIdx(idx)}
-                          className="flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-opacity hover:opacity-80"
+                          className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg border px-2.5 py-1 text-xs font-medium transition-opacity hover:opacity-80"
                           style={{ borderColor: "var(--border-soft)", color: "var(--text-muted)", backgroundColor: "var(--bg-elevated)" }}
                         >
                           Ver detalle <ChevronRight className="h-3 w-3" />

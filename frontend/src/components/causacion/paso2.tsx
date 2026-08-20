@@ -1,5 +1,5 @@
 ﻿"use client";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { Fragment, useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useWizardStore } from "@/stores/wizard";
@@ -13,9 +13,13 @@ import { OmitidasModal } from "@/components/causacion/omitidas-modal";
 import { fmt } from "@/lib/utils";
 import {
   AlertTriangle, Plus, Sparkles, Loader2,
-  ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search, History, X, Trash2, Save,
+  ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search, History, X, Trash2, Save, Scissors, Layers,
 } from "lucide-react";
 import type { MapeoItem, CuentaOpcion, ImpuestoOut, FuenteMapeo, Sugerencia, ItemFactura, Paso2Snapshot, BorradorSnapshot } from "@/lib/types";
+
+// SIIGO acepta máx. 500 líneas por archivo, incluyendo el encabezado → 499 de
+// datos. Debe coincidir con core/exporter.MAX_FILAS_ARCHIVO en el backend.
+const MAX_FILAS = 499;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -120,6 +124,11 @@ export function Paso2() {
     if (cuentaGastoGlobal[idx]) return true;
     return facturas[idx]?.items.every((_, jdx) => !!cuentaGastoItem[`${idx}_${jdx}`]) ?? false;
   };
+
+  // Facturas ya causadas (tandas previas o sesiones anteriores): se ocultan de la
+  // lista y se excluyen de la validación; quedan visibles en el modal "Ya causadas".
+  const causadasSet = new Set(facturasYaCausadas.map((c) => c.numero_dian));
+  const estaCausada = (idx: number) => causadasSet.has(facturas[idx]?.numero_dian);
 
   // Volver a lista y restaurar posición del scroll
   const goBackToList = () => {
@@ -383,109 +392,171 @@ export function Paso2() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paso2Sig]);
 
+  // Construye los mapeos contables de UNA factura (misma lógica de la partida
+  // doble). Extraído para poder contar filas en vivo sin duplicar la lógica.
+  const construirMapeosFactura = (idx: number, newIdx: number): MapeoItem[] => {
+    const mapeos: MapeoItem[] = [];
+    const factura = facturas[idx];
+    if (!factura) return mapeos;
+
+    const cgGlobal = cuentaGastoGlobal[idx] ?? "";
+    const globalRetActiva = !!(rfGlobal[idx] || riGlobal[idx]);
+    const pago = cuentaPago[idx] ?? "";
+    const pagoNombre = cuentasPago.find((c) => c.codigo === pago)?.nombre ?? "";
+
+    for (let jdx = 0; jdx < factura.items.length; jdx++) {
+      const item = factura.items[jdx];
+      const key = `${idx}_${jdx}`;
+      const cgFinal = cgGlobal || cuentaGastoItem[key] || "";
+      // IVA override: global > item > original de la factura
+      const ivaGlobal = codImpuestoGlobal[idx];
+      const ivaItem = codImpuestoItem[key];
+      const codIva = (ivaGlobal !== undefined && ivaGlobal !== "") ? ivaGlobal
+                   : (ivaItem !== undefined && ivaItem !== "") ? ivaItem
+                   : item.cod_impuesto ?? "";
+      const impInfo = codIva ? getImpInfo(codIva) : null;
+      const sug = suggestions[key];
+      const fuente: FuenteMapeo = sug?.cuenta && cgFinal === sug.cuenta
+        ? origenToFuente(sug.origen)
+        : "manual";
+
+      // Cuenta contable IVA: override manual > cuenta del catálogo de impuesto
+      const cuentaIvaGlobalVal = cuentaIvaGlobal[idx];
+      const cuentaIvaItemVal = cuentaIvaItem[key];
+      const cuentaIvaFinal = (cuentaIvaGlobalVal && cuentaIvaGlobalVal !== "") ? cuentaIvaGlobalVal
+                           : (cuentaIvaItemVal && cuentaIvaItemVal !== "") ? cuentaIvaItemVal
+                           : impInfo?.cta_compras ?? "";
+
+      const effBase = getEffBase(key, item);
+      const tarifa = impInfo?.tarifa ?? item.porcentaje ?? 0;
+      const valorIva = tarifa > 0 ? Math.round(effBase * tarifa / 100) : item.valor_impuesto;
+
+      mapeos.push({
+        idx_factura: newIdx, descripcion: item.descripcion, base: effBase,
+        cod_impuesto: impInfo?.codigo ?? codIva,
+        porcentaje: tarifa,
+        valor_impuesto: valorIva,
+        cuenta_gasto: cgFinal, fuente,
+        cuenta_impuesto_deb: cuentaIvaFinal,
+        cuenta_impuesto_cre: "", es_retencion: false,
+        cuenta_pago: pago, cuenta_pago_nombre: pagoNombre,
+      });
+
+      if (!globalRetActiva) {
+        if (rfItem[key]) {
+          const rf = getImpInfo(rfItem[key]);
+          if (rf) mapeos.push({
+            idx_factura: newIdx, descripcion: `Retefuente ${rf.tarifa}%`,
+            base: effBase, cod_impuesto: rf.codigo, porcentaje: rf.tarifa ?? 0,
+            valor_impuesto: Math.round((effBase * (rf.tarifa ?? 0)) / 100),
+            cuenta_gasto: "", fuente: "manual",
+            cuenta_impuesto_deb: "", cuenta_impuesto_cre: rf.cta_compras ?? "",
+            es_retencion: true, cuenta_pago: pago, cuenta_pago_nombre: pagoNombre,
+          });
+        }
+        if (riItem[key]) {
+          const ri = getImpInfo(riItem[key]);
+          if (ri) mapeos.push({
+            idx_factura: newIdx, descripcion: `ReteICA ${ri.tarifa}%`,
+            base: effBase, cod_impuesto: ri.codigo, porcentaje: ri.tarifa ?? 0,
+            valor_impuesto: Math.round((effBase * (ri.tarifa ?? 0)) / 100),
+            cuenta_gasto: "", fuente: "manual",
+            cuenta_impuesto_deb: "", cuenta_impuesto_cre: ri.cta_compras ?? "",
+            es_retencion: true, cuenta_pago: pago, cuenta_pago_nombre: pagoNombre,
+          });
+        }
+      }
+    }
+
+    const totalBase = factura.items.reduce((s, it, j) => s + getEffBase(`${idx}_${j}`, it), 0);
+    if (rfGlobal[idx]) {
+      const rf = getImpInfo(rfGlobal[idx]);
+      if (rf) mapeos.push({
+        idx_factura: newIdx, descripcion: `Retefuente ${rf.tarifa}%`,
+        base: totalBase, cod_impuesto: rf.codigo, porcentaje: rf.tarifa ?? 0,
+        valor_impuesto: Math.round((totalBase * (rf.tarifa ?? 0)) / 100),
+        cuenta_gasto: "", fuente: "manual",
+        cuenta_impuesto_deb: "", cuenta_impuesto_cre: rf.cta_compras ?? "",
+        es_retencion: true, cuenta_pago: cuentaPago[idx] ?? "", cuenta_pago_nombre: "",
+      });
+    }
+    if (riGlobal[idx]) {
+      const ri = getImpInfo(riGlobal[idx]);
+      if (ri) mapeos.push({
+        idx_factura: newIdx, descripcion: `ReteICA ${ri.tarifa}%`,
+        base: totalBase, cod_impuesto: ri.codigo, porcentaje: ri.tarifa ?? 0,
+        valor_impuesto: Math.round((totalBase * (ri.tarifa ?? 0)) / 100),
+        cuenta_gasto: "", fuente: "manual",
+        cuenta_impuesto_deb: "", cuenta_impuesto_cre: ri.cta_compras ?? "",
+        es_retencion: true, cuenta_pago: cuentaPago[idx] ?? "", cuenta_pago_nombre: "",
+      });
+    }
+    return mapeos;
+  };
+
+  // Cuenta las filas que estos mapeos producen en el archivo SIIGO. Espejo de
+  // core/exporter.construir_movimientos (dedup + gasto/IVA/retención + pago).
+  const contarFilas = (ms: MapeoItem[]): number => {
+    const seen = new Set<string>();
+    const unicos: MapeoItem[] = [];
+    for (const m of ms) {
+      const k = [
+        String(m.descripcion ?? ""),
+        Math.round((m.base || 0) * 100) / 100,
+        Math.round((m.valor_impuesto || 0) * 100) / 100,
+        String(m.cuenta_gasto ?? ""),
+        !!m.es_retencion,
+      ].join("|");
+      if (!seen.has(k)) { seen.add(k); unicos.push(m); }
+    }
+    let filas = 0, deb = 0, cred = 0;
+    for (const m of unicos) {
+      const base = m.base || 0;
+      const val = m.valor_impuesto || 0;
+      const esRet = !!m.es_retencion;
+      if (base && m.cuenta_gasto) { filas++; deb += base; }
+      if (val && m.cuenta_impuesto_deb && !esRet) { filas++; deb += val; }
+      if (val && m.cuenta_impuesto_cre && esRet) { filas++; cred += val; }
+    }
+    if (Math.round((deb - cred) * 100) / 100 !== 0) filas++; // fila de pago
+    return filas;
+  };
+
+  // Límite de filas EN VIVO sobre las verificadas-no-causadas, en orden. Marca
+  // hasta qué factura cabe una tanda (≤ MAX_FILAS) con la configuración actual.
+  const limiteFilas = useMemo(() => {
+    let acum = 0, total = 0, count = 0, filasHasta = 0, cutoffIdx = -1;
+    let excede = false, verificadasCount = 0;
+    for (let idx = 0; idx < facturas.length; idx++) {
+      if (!verificadas[idx] || estaCausada(idx)) continue;
+      const filas = contarFilas(construirMapeosFactura(idx, verificadasCount));
+      verificadasCount++;
+      total += filas;
+      if (acum + filas <= MAX_FILAS) {
+        acum += filas; count++; filasHasta = acum; cutoffIdx = idx;
+      } else {
+        excede = true;
+      }
+    }
+    return { total, count, filasHasta, cutoffIdx, excede, verificadasCount };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paso2Sig, facturasYaCausadas, suggestions, impuestosRaw]);
+
   const handleValidar = () => {
     const mapeos: MapeoItem[] = [];
     const facturasVerificadas: typeof facturas = [];
+    let filasAcum = 0;
 
     for (let idx = 0; idx < facturas.length; idx++) {
-      if (!verificadas[idx]) continue;
-
+      if (!verificadas[idx] || estaCausada(idx)) continue;
       const newIdx = facturasVerificadas.length;
+      const mFactura = construirMapeosFactura(idx, newIdx);
+      const filas = contarFilas(mFactura);
+      // Tope SIIGO: no pasar de MAX_FILAS en un archivo. Siempre entra ≥1.
+      if (facturasVerificadas.length > 0 && filasAcum + filas > MAX_FILAS) break;
+      filasAcum += filas;
       facturasVerificadas.push(facturas[idx]);
-
-      const factura = facturas[idx];
-      const cgGlobal = cuentaGastoGlobal[idx] ?? "";
-      const globalRetActiva = !!(rfGlobal[idx] || riGlobal[idx]);
-      const pago = cuentaPago[idx] ?? "";
-      const pagoNombre = cuentasPago.find((c) => c.codigo === pago)?.nombre ?? "";
-
-      for (let jdx = 0; jdx < factura.items.length; jdx++) {
-        const item = factura.items[jdx];
-        const key = `${idx}_${jdx}`;
-        const cgFinal = cgGlobal || cuentaGastoItem[key] || "";
-        // IVA override: global > item > original de la factura
-        const ivaGlobal = codImpuestoGlobal[idx];
-        const ivaItem = codImpuestoItem[key];
-        const codIva = (ivaGlobal !== undefined && ivaGlobal !== "") ? ivaGlobal
-                     : (ivaItem !== undefined && ivaItem !== "") ? ivaItem
-                     : item.cod_impuesto ?? "";
-        const impInfo = codIva ? getImpInfo(codIva) : null;
-        const sug = suggestions[key];
-        const fuente: FuenteMapeo = sug?.cuenta && cgFinal === sug.cuenta
-          ? origenToFuente(sug.origen)
-          : "manual";
-
-        // Cuenta contable IVA: override manual > cuenta del catálogo de impuesto
-        const cuentaIvaGlobalVal = cuentaIvaGlobal[idx];
-        const cuentaIvaItemVal = cuentaIvaItem[key];
-        const cuentaIvaFinal = (cuentaIvaGlobalVal && cuentaIvaGlobalVal !== "") ? cuentaIvaGlobalVal
-                             : (cuentaIvaItemVal && cuentaIvaItemVal !== "") ? cuentaIvaItemVal
-                             : impInfo?.cta_compras ?? "";
-
-        const effBase = getEffBase(key, item);
-        const tarifa = impInfo?.tarifa ?? item.porcentaje ?? 0;
-        const valorIva = tarifa > 0 ? Math.round(effBase * tarifa / 100) : item.valor_impuesto;
-
-        mapeos.push({
-          idx_factura: newIdx, descripcion: item.descripcion, base: effBase,
-          cod_impuesto: impInfo?.codigo ?? codIva,
-          porcentaje: tarifa,
-          valor_impuesto: valorIva,
-          cuenta_gasto: cgFinal, fuente,
-          cuenta_impuesto_deb: cuentaIvaFinal,
-          cuenta_impuesto_cre: "", es_retencion: false,
-          cuenta_pago: pago, cuenta_pago_nombre: pagoNombre,
-        });
-
-        if (!globalRetActiva) {
-          if (rfItem[key]) {
-            const rf = getImpInfo(rfItem[key]);
-            if (rf) mapeos.push({
-              idx_factura: newIdx, descripcion: `Retefuente ${rf.tarifa}%`,
-              base: effBase, cod_impuesto: rf.codigo, porcentaje: rf.tarifa ?? 0,
-              valor_impuesto: Math.round((effBase * (rf.tarifa ?? 0)) / 100),
-              cuenta_gasto: "", fuente: "manual",
-              cuenta_impuesto_deb: "", cuenta_impuesto_cre: rf.cta_compras ?? "",
-              es_retencion: true, cuenta_pago: pago, cuenta_pago_nombre: pagoNombre,
-            });
-          }
-          if (riItem[key]) {
-            const ri = getImpInfo(riItem[key]);
-            if (ri) mapeos.push({
-              idx_factura: newIdx, descripcion: `ReteICA ${ri.tarifa}%`,
-              base: effBase, cod_impuesto: ri.codigo, porcentaje: ri.tarifa ?? 0,
-              valor_impuesto: Math.round((effBase * (ri.tarifa ?? 0)) / 100),
-              cuenta_gasto: "", fuente: "manual",
-              cuenta_impuesto_deb: "", cuenta_impuesto_cre: ri.cta_compras ?? "",
-              es_retencion: true, cuenta_pago: pago, cuenta_pago_nombre: pagoNombre,
-            });
-          }
-        }
-      }
-
-      const totalBase = factura.items.reduce((s, it, j) => s + getEffBase(`${idx}_${j}`, it), 0);
-      if (rfGlobal[idx]) {
-        const rf = getImpInfo(rfGlobal[idx]);
-        if (rf) mapeos.push({
-          idx_factura: newIdx, descripcion: `Retefuente ${rf.tarifa}%`,
-          base: totalBase, cod_impuesto: rf.codigo, porcentaje: rf.tarifa ?? 0,
-          valor_impuesto: Math.round((totalBase * (rf.tarifa ?? 0)) / 100),
-          cuenta_gasto: "", fuente: "manual",
-          cuenta_impuesto_deb: "", cuenta_impuesto_cre: rf.cta_compras ?? "",
-          es_retencion: true, cuenta_pago: cuentaPago[idx] ?? "", cuenta_pago_nombre: "",
-        });
-      }
-      if (riGlobal[idx]) {
-        const ri = getImpInfo(riGlobal[idx]);
-        if (ri) mapeos.push({
-          idx_factura: newIdx, descripcion: `ReteICA ${ri.tarifa}%`,
-          base: totalBase, cod_impuesto: ri.codigo, porcentaje: ri.tarifa ?? 0,
-          valor_impuesto: Math.round((totalBase * (ri.tarifa ?? 0)) / 100),
-          cuenta_gasto: "", fuente: "manual",
-          cuenta_impuesto_deb: "", cuenta_impuesto_cre: ri.cta_compras ?? "",
-          es_retencion: true, cuenta_pago: cuentaPago[idx] ?? "", cuenta_pago_nombre: "",
-        });
-      }
+      mapeos.push(...mFactura);
     }
 
     if (facturasVerificadas.length === 0) return;
@@ -513,7 +584,8 @@ export function Paso2() {
 
   // ── LIST VIEW ────────────────────────────────────────────────────────────────
   if (selectedIdx === null) {
-    const listos = facturas.filter((_, i) => estaCompleta(i)).length;
+    const pendientesTotal = facturas.filter((_, i) => !estaCausada(i)).length;
+    const listos = facturas.filter((_, i) => !estaCausada(i) && estaCompleta(i)).length;
 
     return (
       <>
@@ -525,7 +597,7 @@ export function Paso2() {
               Mapear cuentas contables
             </h2>
             <p className="mt-1 text-sm" style={{ color: "var(--text-secondary)" }}>
-              {facturas.length} factura{facturas.length !== 1 ? "s" : ""} parseadas · selecciona una para configurarla
+              {pendientesTotal} factura{pendientesTotal !== 1 ? "s" : ""} por causar · selecciona una para configurarla
               {sugsLoading && (
                 <span className="ml-2 inline-flex items-center gap-1" style={{ color: "var(--brand)" }}>
                   <Loader2 className="h-3 w-3 animate-spin" />
@@ -570,12 +642,35 @@ export function Paso2() {
               data-tutorial="validar-partida-btn"
               size="sm"
               onClick={handleValidar}
-              disabled={!Object.values(verificadas).some(Boolean)}
+              disabled={!facturas.some((_, i) => !!verificadas[i] && !estaCausada(i))}
             >
               Validar partida doble →
             </Button>
           </div>
         </div>
+
+        {/* Banner — límite de filas por archivo SIIGO (en vivo) */}
+        {limiteFilas.verificadasCount > 0 && (
+          limiteFilas.excede ? (
+            <div className="flex items-start gap-3 rounded-xl border px-4 py-3" style={{ borderColor: "var(--warning-border)", backgroundColor: "var(--warning-bg)" }}>
+              <Scissors className="h-4 w-4 shrink-0 mt-0.5" style={{ color: "var(--warning-text)" }} />
+              <div className="text-sm" style={{ color: "var(--warning-text)" }}>
+                <p className="font-semibold">
+                  El archivo llega al límite de {MAX_FILAS} filas en la factura{" "}
+                  <span className="font-mono">{limiteFilas.cutoffIdx >= 0 ? (facturas[limiteFilas.cutoffIdx]?.numero_dian || `#${limiteFilas.cutoffIdx + 1}`) : "—"}</span>.
+                </p>
+                <p className="mt-0.5" style={{ opacity: 0.85 }}>
+                  Se causarán <strong>{limiteFilas.count}</strong> de {limiteFilas.verificadasCount} verificadas en esta tanda (<strong>{limiteFilas.filasHasta}</strong> filas); las demás quedan para la siguiente. Agregar IVA, retefuente o reteICA sube las filas y puede bajar este número.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2.5 rounded-xl border px-4 py-2.5 text-sm" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)", color: "var(--text-secondary)" }}>
+              <Layers className="h-4 w-4 shrink-0" style={{ color: "var(--brand)" }} />
+              <span>Archivo SIIGO: <strong style={{ color: "var(--text-primary)" }}>{limiteFilas.total}</strong> de {MAX_FILAS} filas · {limiteFilas.verificadasCount} factura{limiteFilas.verificadasCount !== 1 ? "s" : ""} verificada{limiteFilas.verificadasCount !== 1 ? "s" : ""}.</span>
+            </div>
+          )
+        )}
 
         {/* Banner — facturas omitidas (ventas + ya causadas) */}
         {facturasOmitidas.length > 0 && (
@@ -699,9 +794,9 @@ export function Paso2() {
 
         {/* Search + state filters */}
         {(() => {
-          const cntPendiente = facturas.filter((_, i) => !estaCompleta(i) && !verificadas[i]).length;
-          const cntConfigurada = facturas.filter((_, i) => estaCompleta(i) && !verificadas[i]).length;
-          const cntVerificada = facturas.filter((_, i) => !!verificadas[i]).length;
+          const cntPendiente = facturas.filter((_, i) => !estaCausada(i) && !estaCompleta(i) && !verificadas[i]).length;
+          const cntConfigurada = facturas.filter((_, i) => !estaCausada(i) && estaCompleta(i) && !verificadas[i]).length;
+          const cntVerificada = facturas.filter((_, i) => !estaCausada(i) && !!verificadas[i]).length;
           const ESTADOS = [
             { key: "todos",       label: "Todos",       count: facturas.length },
             { key: "pendiente",   label: "Pendiente",   count: cntPendiente },
@@ -790,6 +885,7 @@ export function Paso2() {
             const facturasFiltradas = facturas
               .map((f, idx) => ({ f, idx }))
               .filter(({ f, idx }) => {
+                if (estaCausada(idx)) return false; // ocultar causadas (están en el modal)
                 if (q && !f.numero_dian.toLowerCase().includes(q) && !(f.razon_social ?? "").toLowerCase().includes(q) && !(f.nit ?? "").toLowerCase().includes(q)) return false;
                 if (filtroEstado !== "todos") {
                   const isV = !!verificadas[idx];
@@ -828,8 +924,8 @@ export function Paso2() {
                 const numSugs = f.items.filter((_, jdx) => suggestions[`${idx}_${jdx}`]?.cuenta).length;
                 const subtotal = f.items.reduce((s, it) => s + it.base, 0);
                 return (
+                  <Fragment key={idx}>
                   <tr
-                    key={idx}
                     id={`invoice-row-${idx}`}
                     data-tutorial={idx === 0 ? "invoice-row-0" : undefined}
                     className="cursor-pointer transition-colors tr-row"
@@ -917,6 +1013,18 @@ export function Paso2() {
                       </div>
                     </td>
                   </tr>
+                  {limiteFilas.excede && idx === limiteFilas.cutoffIdx && (
+                    <tr>
+                      <td colSpan={8} className="px-4 py-1.5" style={{ backgroundColor: "var(--warning-bg)" }}>
+                        <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--warning-text)" }}>
+                          <Scissors className="h-3 w-3" />
+                          Fin de la tanda · {limiteFilas.filasHasta} filas · las verificadas siguientes van en otra tanda
+                          <span className="flex-1 border-t border-dashed" style={{ borderColor: "var(--warning-text)" }} />
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>
