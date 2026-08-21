@@ -6,10 +6,12 @@ Se invoca desde batch/generar cuando confirmar=True.
 from __future__ import annotations
 
 import re
-from sqlalchemy import func, select
+import unicodedata
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.dv import calcular_dv, inferir_tipo_identificacion
+from core.parser import _limpiar_telefono
 from db.models.contabilidad import Proveedor
 from db.models.geo import Ciudad, Departamento
 
@@ -122,36 +124,85 @@ def upsert_tercero(db: Session, empresa_id: int, factura: dict) -> Proveedor | N
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
+def _norm_geo(s: str | None) -> str:
+    """Normaliza un nombre geográfico: sin acentos, sin puntuación, minúsculas."""
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFKD", str(s))
+    s = "".join(c for c in s if not unicodedata.combining(c))  # quitar acentos
+    return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+
+
+def _norm_depto(s: str | None) -> str:
+    """Como _norm_geo pero quitando adornos comunes de departamento
+    (D.C., 'distrito capital', 'departamento de'…) para que 'Bogotá, D.C.',
+    'Bogotá D.C.' y 'Bogotá' colapsen al mismo valor."""
+    n = _norm_geo(s)
+    n = re.sub(r"\b(distrito capital|departamento del|departamento de|dpto del|dpto de|dpto|d c|dc)\b", " ", n)
+    return re.sub(r"\s+", " ", n).strip()
+
+
+# Caché en memoria de la geografía (datos estáticos sembrados por scripts/seed_geo).
+_GEO_CACHE: dict | None = None
+
+
+def _build_geo_cache(db: Session) -> dict:
+    deptos = db.scalars(select(Departamento)).all()
+    ciudades = db.scalars(select(Ciudad)).all()
+    depto_by_norm: dict[str, str] = {}
+    for d in deptos:
+        key = _norm_depto(d.nombre)
+        if key:
+            depto_by_norm.setdefault(key, d.codigo)
+    ciudad_by_depto: dict[tuple[str, str], str] = {}
+    ciudad_by_norm: dict[str, list[tuple[str, str]]] = {}
+    for c in ciudades:
+        ck = _norm_geo(c.nombre)
+        if not ck:
+            continue
+        ciudad_by_depto[(c.departamento_codigo, ck)] = c.codigo
+        ciudad_by_norm.setdefault(ck, []).append((c.codigo, c.departamento_codigo))
+    return {"depto": depto_by_norm, "ciudad_depto": ciudad_by_depto, "ciudad": ciudad_by_norm}
+
+
+def _get_geo_cache(db: Session) -> dict:
+    global _GEO_CACHE
+    if _GEO_CACHE is None:
+        cache = _build_geo_cache(db)
+        if cache["depto"]:  # solo cachear si la geo está sembrada
+            _GEO_CACHE = cache
+        return cache
+    return _GEO_CACHE
+
+
 def _resolver_geo(
     db: Session,
     ciudad: str | None,
     departamento: str | None,
     pais_codigo: str = "Col",
 ) -> tuple[str | None, str | None]:
-    """Devuelve (codigo_departamento, codigo_ciudad_siigo) buscando por nombre."""
-    codigo_depto = None
-    codigo_ciudad = None
+    """Devuelve (codigo_departamento, codigo_ciudad_siigo) buscando por nombre,
+    tolerante a acentos, puntuación y variantes ('BOGOTÁ' / 'Bogotá, D.C.')."""
+    cache = _get_geo_cache(db)
+    codigo_depto: str | None = None
+    codigo_ciudad: str | None = None
 
-    if departamento:
-        depto = db.scalar(
-            select(Departamento).where(
-                func.lower(Departamento.nombre) == departamento.strip().lower(),
-                Departamento.pais_codigo == pais_codigo,
-            )
-        )
-        if depto:
-            codigo_depto = depto.codigo
+    ndepto = _norm_depto(departamento)
+    if ndepto:
+        codigo_depto = cache["depto"].get(ndepto)
 
-    if ciudad and codigo_depto:
-        ciu = db.scalar(
-            select(Ciudad).where(
-                func.lower(Ciudad.nombre) == ciudad.strip().lower(),
-                Ciudad.departamento_codigo == codigo_depto,
-                Ciudad.pais_codigo == pais_codigo,
-            )
-        )
-        if ciu:
-            codigo_ciudad = ciu.codigo
+    nciudad = _norm_geo(ciudad)
+    if nciudad:
+        if codigo_depto:
+            codigo_ciudad = cache["ciudad_depto"].get((codigo_depto, nciudad))
+        if codigo_ciudad is None:
+            # Fallback: ciudad por nombre en todo el país; si es única, se usa
+            # (y de paso resuelve el departamento si venía vacío o no coincidía).
+            matches = cache["ciudad"].get(nciudad, [])
+            if len(matches) == 1:
+                codigo_ciudad, depto_de_ciudad = matches[0]
+                if codigo_depto is None:
+                    codigo_depto = depto_de_ciudad
 
     return codigo_depto, codigo_ciudad
 
@@ -188,8 +239,9 @@ def _val(v) -> str | None:
 
 
 def _phone(v) -> str | None:
-    """Retorna None si el valor parece un email o está vacío."""
+    """Normaliza el teléfono (quita pipes, indicativos y código de país) y retorna
+    None si el valor parece un email o está vacío."""
     s = _val(v)
     if s is None or "@" in s:
         return None
-    return s[:50]
+    return (_limpiar_telefono(s) or s)[:50]

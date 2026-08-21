@@ -90,20 +90,34 @@ _COLS_TOKEN: dict[str, list[str]] = {
 
 
 def _limpiar_telefono(raw: str) -> str:
-    """Limpia teléfonos extraídos de PDF que vienen con pipes, ej. '602|3008473688|'.
-    Descarta indicativos sueltos (< 7 dígitos), prefiere celular colombiano (10 dígitos,
-    empieza con 3); si no, usa el segmento más largo (ej. fijo local 7 dígitos)."""
-    if "|" not in raw:
-        return raw.strip()
-    partes = [re.sub(r"\D", "", p) for p in raw.split("|") if p.strip()]
-    # Ignorar indicativos sueltos (602, 601…) — un número válido tiene mínimo 7 dígitos
-    validas = [p for p in partes if len(p) >= 7]
+    """Normaliza teléfonos extraídos de facturas (PDF/XML) que vienen sucios:
+      - con pipes:          '602|3008473688|' -> '3008473688', '602|4384601|' -> '4384601'
+      - con código país:    '(+57) 3172647555' -> '3172647555', '+57 3172647555' -> '3172647555'
+      - indicativos sueltos ('602') se descartan por tener < 7 dígitos.
+    Prefiere el celular colombiano (10 dígitos que empieza en 3); si no, el segmento
+    numérico más largo (ej. fijo local de 7 dígitos)."""
+    if not raw:
+        return ""
+    s = raw.strip()
+    # Candidatos: separados por pipe, o el texto completo si no hay pipes.
+    partes = s.split("|") if "|" in s else [s]
+    candidatos: list[str] = []
+    for p in partes:
+        d = re.sub(r"\D", "", p)  # dejar solo dígitos
+        if not d:
+            continue
+        # Quitar código de país Colombia (57) si el resto queda como número válido.
+        if d.startswith("57") and len(d) - 2 in (7, 10):
+            d = d[2:]
+        candidatos.append(d)
+    # Un número válido tiene mínimo 7 dígitos (descarta indicativos sueltos: 602, 601…).
+    validas = [c for c in candidatos if len(c) >= 7]
     if not validas:
-        return raw.strip()
-    # Preferir celular colombiano (10 dígitos, empieza con 3)
-    for p in validas:
-        if len(p) == 10 and p.startswith("3"):
-            return p
+        return s
+    # Preferir celular colombiano (10 dígitos, empieza con 3).
+    for c in validas:
+        if len(c) == 10 and c.startswith("3"):
+            return c
     return max(validas, key=len)
 
 
@@ -835,7 +849,7 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
         # Contacto
         contact = supplier.find("cac:Contact", _NS)
         if contact is not None:
-            telefono = _xml_text(contact.find("cbc:Telephone", _NS))
+            telefono = _limpiar_telefono(_xml_text(contact.find("cbc:Telephone", _NS)))
             email = _xml_text(contact.find("cbc:ElectronicMail", _NS))
 
         # Nombres/apellidos para personas naturales
