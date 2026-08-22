@@ -116,17 +116,25 @@ def construir_movimientos(
         pct          = float(m.get("porcentaje", 0) or 0)
         desc         = str(m.get("descripcion", ""))
 
-        # Fila de gasto/costo (débito)
+        # ¿El ítem está gravado con IVA? Se decide por la TARIFA (porcentaje), no
+        # por el valor: un código 0% (exento) puede arrastrar un valor de IVA viejo
+        # extraído del PDF, pero sigue siendo exento.
+        tiene_iva = (pct > 0) and (not es_ret)
+
+        # Fila de gasto/costo (débito). La base va a "Base gravable" si el ítem
+        # tiene IVA (tarifa > 0), o a "Base exenta" si es exento/0%.
         if base and cuenta_gasto:
             movimientos.append(_fila(
                 tipo_comprobante, consecutivo, fecha, nit,
                 cuenta_gasto, base, None,
                 desc, centro_costo, observaciones, "",
+                base_gravable=base if tiene_iva else "",
+                base_exenta="" if tiene_iva else base,
             ))
             total_debitos += base
 
-        # Fila de IVA descontable (débito)
-        if val_imp and cuenta_imp_d and not es_ret:
+        # Fila de IVA descontable (débito) — solo si realmente hay tarifa > 0.
+        if val_imp and cuenta_imp_d and not es_ret and pct > 0:
             movimientos.append(_fila(
                 tipo_comprobante, consecutivo, fecha, nit,
                 cuenta_imp_d, val_imp, None,
@@ -179,6 +187,8 @@ def _fila(
     centro_costo: str,
     observaciones: str,
     cod_imp: str,
+    base_gravable: float | str = "",
+    base_exenta: float | str = "",
 ) -> dict:
     return {
         "Tipo de comprobante":               tipo_comp,
@@ -205,8 +215,8 @@ def _fila(
         "Débito":                            round(debito, 2) if debito else "",
         "Crédito":                           round(credito, 2) if credito else "",
         "Observaciones":                     observaciones,
-        "Base gravable libro compras/ventas  ": "",
-        "Base exenta libro compras/ventas":  "",
+        "Base gravable libro compras/ventas  ": round(base_gravable, 2) if base_gravable else "",
+        "Base exenta libro compras/ventas":  round(base_exenta, 2) if base_exenta else "",
         "Mes de cierre":                     "",
     }
 
