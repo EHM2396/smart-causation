@@ -49,11 +49,11 @@ services:
       - ./data:/app/data
     ports:
       - "8000:8000"
-    # Monta el código fuente, aplica migraciones y arranca la API.
-    # Scripts de setup inicial ya ejecutados en prod — descomentar solo si es necesario re-correr:
-    #   && python scripts/migrate_xlsx.py
-    #   && python scripts/seed_geo.py
-    command: sh -c "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload"
+    # Monta el código fuente, aplica migraciones, siembra la geo (idempotente y
+    # best-effort: si algo falla no bloquea el arranque) y levanta la API.
+    # Las migraciones ya crean el esquema y siembran catálogos base + usuarios demo
+    # (admin@smartcausacion.com / Admin2024!). Así un clon nuevo queda listo.
+    command: sh -c "alembic upgrade head && (python scripts/seed_geo.py || echo 'seed_geo omitido') && uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload"
 
   # ── Next.js Frontend (pruebas) ─────────────────────────────────────────────
   frontend:
