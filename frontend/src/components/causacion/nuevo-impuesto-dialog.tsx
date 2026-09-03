@@ -76,7 +76,7 @@ export function NuevoImpuestoDialog({ open, tipo, onClose, onCreated, cuentasPag
           </div>
           <div className="space-y-1.5">
             <Label>Cuenta crédito (PUC) *</Label>
-            <Combobox options={allCuentas} value={cuentaCre} onChange={setCuentaCre} placeholder="Buscar por código o nombre..." />
+            <Combobox options={allCuentas} value={cuentaCre} onChange={setCuentaCre} placeholder="Buscar por código o nombre..." portal={false} />
           </div>
           {error && <p className="text-sm text-red-400">{error}</p>}
           <div className="flex justify-end gap-2 pt-2">

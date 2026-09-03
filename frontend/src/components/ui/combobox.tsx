@@ -17,6 +17,18 @@ interface ComboboxProps {
   disabled?: boolean;
   className?: string;
   clearable?: boolean;
+  /**
+   * Cómo se renderiza el dropdown:
+   *  - true  (por defecto): se porta a document.body con position:fixed. Necesario
+   *    cuando el Combobox vive dentro de contenedores con overflow oculto (p.ej. el
+   *    sidebar de configuración) para que el menú no quede recortado.
+   *  - false: se renderiza en línea (position:absolute) dentro del propio wrapper.
+   *    OBLIGATORIO cuando el Combobox está dentro de un diálogo modal de Radix: un
+   *    dropdown portado al body queda FUERA del contenido del diálogo, y Radix
+   *    (focus-trap + pointer-events:none en el resto del documento) impide escribir
+   *    en el buscador y hacer clic en las opciones.
+   */
+  portal?: boolean;
 }
 
 export function Combobox({
@@ -27,6 +39,7 @@ export function Combobox({
   disabled,
   className,
   clearable,
+  portal = true,
 }: ComboboxProps) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
@@ -59,8 +72,8 @@ export function Combobox({
   }, []);
 
   React.useEffect(() => {
-    if (open) updateCoords();
-  }, [open, updateCoords]);
+    if (open && portal) updateCoords();
+  }, [open, portal, updateCoords]);
 
   // Cerrar al hacer click fuera
   React.useEffect(() => {
@@ -74,20 +87,8 @@ export function Combobox({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const dropdown = open ? (
-    <div
-      ref={dropdownRef}
-      style={{
-        position: "fixed",
-        top: coords.top,
-        left: coords.left,
-        width: coords.width,
-        zIndex: 9999,
-        borderColor: "var(--border-soft)",
-        backgroundColor: "var(--bg-surface)",
-      }}
-      className="rounded-lg border shadow-xl"
-    >
+  const dropdownInner = (
+    <>
       <div className="flex items-center gap-2 border-b px-3 py-2" style={{ borderColor: "var(--border-soft)" }}>
         <Search className="h-4 w-4 shrink-0" style={{ color: "var(--text-muted)" }} />
         <input
@@ -131,6 +132,46 @@ export function Combobox({
           ))
         )}
       </div>
+    </>
+  );
+
+  // Dropdown portado al body (por defecto): position:fixed calculado sobre el trigger.
+  const portalDropdown = open ? (
+    <div
+      ref={dropdownRef}
+      style={{
+        position: "fixed",
+        top: coords.top,
+        left: coords.left,
+        width: coords.width,
+        zIndex: 9999,
+        pointerEvents: "auto",
+        borderColor: "var(--border-soft)",
+        backgroundColor: "var(--bg-surface)",
+      }}
+      className="rounded-lg border shadow-xl"
+    >
+      {dropdownInner}
+    </div>
+  ) : null;
+
+  // Dropdown en línea: vive dentro del wrapper (y por tanto dentro del diálogo Radix).
+  const inlineDropdown = open ? (
+    <div
+      ref={dropdownRef}
+      style={{
+        position: "absolute",
+        top: "calc(100% + 4px)",
+        left: 0,
+        width: "100%",
+        minWidth: 240,
+        zIndex: 9999,
+        borderColor: "var(--border-soft)",
+        backgroundColor: "var(--bg-surface)",
+      }}
+      className="rounded-lg border shadow-xl"
+    >
+      {dropdownInner}
     </div>
   ) : null;
 
@@ -171,7 +212,9 @@ export function Combobox({
         </div>
       </button>
 
-      {mounted && dropdown ? createPortal(dropdown, document.body) : null}
+      {portal
+        ? (mounted && portalDropdown ? createPortal(portalDropdown, document.body) : null)
+        : inlineDropdown}
     </div>
   );
 }

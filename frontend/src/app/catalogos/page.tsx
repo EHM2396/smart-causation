@@ -19,6 +19,17 @@ import {
 import { AlertCircle, AlertTriangle, Database, Receipt, BookOpen, Brain, Upload, Download, CheckCircle2, Trash2, Loader2, FileSpreadsheet } from "lucide-react";
 import type { CuentaOpcion, ImpuestoOut, TipoComprobanteOpcion, IARegla, IADecision } from "@/lib/types";
 
+/** Extrae el mensaje legible de un error del API (formato `API 400: {"detail":"..."}`). */
+function msgError(raw: string): string {
+  const jsonPart = raw.replace(/^API\s+\d+:\s*/, "");
+  try {
+    const parsed = JSON.parse(jsonPart);
+    if (typeof parsed?.detail === "string") return parsed.detail;
+    if (Array.isArray(parsed?.detail)) return parsed.detail.map((d: { msg?: string }) => d?.msg).filter(Boolean).join(" · ") || jsonPart;
+  } catch { /* no era JSON */ }
+  return jsonPart || raw;
+}
+
 // ─── Confirmación de eliminación ──────────────────────────────────────────────
 
 function ConfirmDeleteDialog({
@@ -779,6 +790,7 @@ function ImpuestosTab({
                 value={cuentaCre}
                 onChange={setCuentaCre}
                 placeholder="Buscar por código o nombre..."
+                portal={false}
               />
             </div>
             {err && <ErrBanner msg={err} />}
@@ -860,21 +872,26 @@ function PlanCuentasTab({
   });
 
   const handleAdd = async () => {
-    if (!codigo.trim() || !nombre.trim()) {
+    const cod = codigo.trim();
+    if (!cod || !nombre.trim()) {
       setErr("Código y nombre son obligatorios.");
+      return;
+    }
+    if (!/^\d{8}$/.test(cod)) {
+      setErr("El código PUC debe tener exactamente 8 dígitos, sin puntos ni espacios.");
       return;
     }
     setSaving(true);
     setErr("");
     try {
-      await api.crearCuenta({ codigo: codigo.trim(), nombre: nombre.trim(), fiscal });
+      await api.crearCuenta({ codigo: cod, nombre: nombre.trim(), fiscal });
       qc.invalidateQueries({ queryKey: ["cuentas-pago"] });
       qc.invalidateQueries({ queryKey: ["cuentas-gasto"] });
       setCodigo(""); setNombre(""); setFiscal(false);
       setModalOpen(false);
       setToast("Cuenta guardada correctamente");
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(msgError((e as Error).message));
     }
     setSaving(false);
   };
@@ -987,13 +1004,27 @@ function PlanCuentasTab({
               <Label>Código PUC *</Label>
               <Input
                 value={codigo}
-                onChange={(e) => setCodigo(e.target.value)}
+                onChange={(e) => { setCodigo(e.target.value.replace(/\D/g, "").slice(0, 8)); if (err) setErr(""); }}
                 placeholder="ej. 51050505"
-                maxLength={10}
+                inputMode="numeric"
+                maxLength={8}
+                style={codigo.length > 0 && codigo.length < 8 ? { borderColor: "var(--warning-border)" } : undefined}
               />
-              <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-                Máximo 10 caracteres, sin puntos ni espacios.
-              </p>
+              {codigo.length > 0 && codigo.length < 8 ? (
+                <p className="text-xs flex items-center gap-1.5 font-medium" style={{ color: "var(--warning-text)" }}>
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  Faltan {8 - codigo.length} dígito{8 - codigo.length === 1 ? "" : "s"}: el código PUC debe tener exactamente 8 dígitos ({codigo.length}/8).
+                </p>
+              ) : codigo.length === 8 ? (
+                <p className="text-xs flex items-center gap-1.5 font-medium" style={{ color: "var(--success-text)" }}>
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                  Código válido (8 dígitos).
+                </p>
+              ) : (
+                <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  Solo se permiten códigos de exactamente 8 dígitos, sin puntos ni espacios.
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label>Nombre / Descripción *</Label>

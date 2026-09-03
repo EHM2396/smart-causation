@@ -264,11 +264,24 @@ def get_cuenta(codigo: str, db: DB, empresa: EmpresaActiva):
 
 @router.post("/", response_model=CuentaOut, status_code=201)
 def post_cuenta(body: CuentaCreate, db: DB, empresa: EmpresaActiva):
-    if cuentas_service.buscar_por_codigo(db, body.codigo, empresa_id=empresa.id):
-        raise HTTPException(409, f"El código {body.codigo!r} ya existe")
+    codigo = body.codigo.strip()
+    # El plan de cuentas transaccional (nivel 8) exige código de EXACTAMENTE 8
+    # dígitos: así lo filtra la carga masiva y todos los selectores de la UI
+    # (gasto/pago/sugerencias filtran nivel == 8). Sin esta validación se creaba
+    # la cuenta con nivel != 8 y quedaba invisible en todos lados → parecía que
+    # "no se guardaba" aunque el endpoint respondía 201.
+    if not (codigo.isdigit() and len(codigo) == 8):
+        raise HTTPException(
+            400,
+            "El código PUC debe tener exactamente 8 dígitos numéricos, sin puntos "
+            "ni espacios. Las cuentas con otra longitud no se pueden usar en la "
+            "causación.",
+        )
+    if cuentas_service.buscar_por_codigo(db, codigo, empresa_id=empresa.id):
+        raise HTTPException(409, f"El código {codigo!r} ya existe")
     cuenta = cuentas_service.crear_cuenta(
         db,
-        codigo=body.codigo,
+        codigo=codigo,
         nombre=body.nombre,
         fiscal=body.fiscal,
         empresa_id=empresa.id,
