@@ -407,12 +407,14 @@ export function Paso2() {
     for (let jdx = 0; jdx < factura.items.length; jdx++) {
       const item = factura.items[jdx];
       const key = `${idx}_${jdx}`;
-      const cgFinal = cgGlobal || cuentaGastoItem[key] || "";
-      // IVA override: global > item > original de la factura
+      // Override por ítem gana sobre el global (permite desbloquear un ítem
+      // puntual aunque haya un valor global aplicado a todos los demás).
+      const cgFinal = cuentaGastoItem[key] || cgGlobal || "";
+      // IVA: override por ítem > global > original de la factura
       const ivaGlobal = codImpuestoGlobal[idx];
       const ivaItem = codImpuestoItem[key];
-      const codIva = (ivaGlobal !== undefined && ivaGlobal !== "") ? ivaGlobal
-                   : (ivaItem !== undefined && ivaItem !== "") ? ivaItem
+      const codIva = (ivaItem !== undefined && ivaItem !== "") ? ivaItem
+                   : (ivaGlobal !== undefined && ivaGlobal !== "") ? ivaGlobal
                    : item.cod_impuesto ?? "";
       const impInfo = codIva ? getImpInfo(codIva) : null;
       const sug = suggestions[key];
@@ -423,8 +425,8 @@ export function Paso2() {
       // Cuenta contable IVA: override manual > cuenta del catálogo de impuesto
       const cuentaIvaGlobalVal = cuentaIvaGlobal[idx];
       const cuentaIvaItemVal = cuentaIvaItem[key];
-      const cuentaIvaFinal = (cuentaIvaGlobalVal && cuentaIvaGlobalVal !== "") ? cuentaIvaGlobalVal
-                           : (cuentaIvaItemVal && cuentaIvaItemVal !== "") ? cuentaIvaItemVal
+      const cuentaIvaFinal = (cuentaIvaItemVal && cuentaIvaItemVal !== "") ? cuentaIvaItemVal
+                           : (cuentaIvaGlobalVal && cuentaIvaGlobalVal !== "") ? cuentaIvaGlobalVal
                            : impInfo?.cta_compras ?? "";
 
       const effBase = getEffBase(key, item);
@@ -1485,7 +1487,28 @@ export function Paso2() {
                 const key = `${selectedIdx}_${jdx}`;
                 const impInfo = item.cod_impuesto ? getImpInfo(item.cod_impuesto) : null;
                 const sug = suggestions[key];
-                const currentVal = cuentaGastoGlobal[selectedIdx] || cuentaGastoItem[key];
+                // El override por ítem gana sobre el global; si no hay override, se
+                // muestra el valor global heredado (editable).
+                const currentVal = cuentaGastoItem[key] || cuentaGastoGlobal[selectedIdx];
+
+                // Aviso "heredado del global / personalizado" con opción de volver al
+                // global. Se muestra solo cuando hay un valor global aplicado.
+                const hint = (globalVal: string | undefined, itemVal: string | undefined, reset: () => void) =>
+                  !globalVal ? null : (itemVal && itemVal !== globalVal) ? (
+                    <button
+                      type="button"
+                      disabled={isVerificada}
+                      onClick={reset}
+                      className="text-left text-[11px] underline hover:opacity-80 disabled:no-underline disabled:opacity-40"
+                      style={{ color: "var(--brand)" }}
+                    >
+                      Personalizado para este ítem · volver al global
+                    </button>
+                  ) : (
+                    <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                      Heredado del global · editable solo para este ítem
+                    </p>
+                  );
                 // Badge solo cuando hay cuenta seleccionada por el usuario (o por regla/aprendizaje)
                 const origenEfectivo = currentVal
                   ? (sug?.cuenta && currentVal === sug.cuenta && !esOrigenIA(sug.origen)
@@ -1502,8 +1525,9 @@ export function Paso2() {
                 const itemSinCuenta = !currentVal && !cuentaGastoGlobal[selectedIdx];
 
                 const ivaGlobalActivo = !!(codImpuestoGlobal[selectedIdx] && codImpuestoGlobal[selectedIdx] !== "");
-                const ivaEfectivoCod = ivaGlobalActivo ? codImpuestoGlobal[selectedIdx]
-                  : (codImpuestoItem[key] && codImpuestoItem[key] !== "" ? codImpuestoItem[key] : item.cod_impuesto ?? "");
+                const ivaEfectivoCod = (codImpuestoItem[key] && codImpuestoItem[key] !== "") ? codImpuestoItem[key]
+                  : ivaGlobalActivo ? codImpuestoGlobal[selectedIdx]
+                  : item.cod_impuesto ?? "";
                 const ivaEfectivoInfo = ivaEfectivoCod ? getImpInfo(ivaEfectivoCod) : null;
 
                 return (
@@ -1551,23 +1575,30 @@ export function Paso2() {
                         options={ivaOpts}
                         value={ivaEfectivoCod}
                         onChange={(v) => setCodImpuestoItem(p => ({ ...p, [key]: v }))}
-                        disabled={isVerificada || ivaGlobalActivo}
-                        placeholder={ivaGlobalActivo ? "← Global" : "Sin IVA"}
-                        clearable={!ivaGlobalActivo}
+                        disabled={isVerificada}
+                        placeholder={ivaGlobalActivo ? "Global (editable)" : "Sin IVA"}
+                        clearable
                       />
+                      {hint(codImpuestoGlobal[selectedIdx], codImpuestoItem[key],
+                        () => setCodImpuestoItem(p => { const n = { ...p }; delete n[key]; return n; }))}
                       {(() => {
                         const cuentaIvaGlobalActiva = !!(cuentaIvaGlobal[selectedIdx] && cuentaIvaGlobal[selectedIdx] !== "");
-                        const cuentaIvaEfectiva = cuentaIvaGlobalActiva ? cuentaIvaGlobal[selectedIdx]
-                          : (cuentaIvaItem[key] && cuentaIvaItem[key] !== "" ? cuentaIvaItem[key] : ivaEfectivoInfo?.cta_compras ?? "");
+                        const cuentaIvaEfectiva = (cuentaIvaItem[key] && cuentaIvaItem[key] !== "") ? cuentaIvaItem[key]
+                          : cuentaIvaGlobalActiva ? cuentaIvaGlobal[selectedIdx]
+                          : ivaEfectivoInfo?.cta_compras ?? "";
                         return (
-                          <Combobox
-                            options={todasCuentasOpts}
-                            value={cuentaIvaEfectiva}
-                            onChange={(v) => setCuentaIvaItem(p => ({ ...p, [key]: v }))}
-                            disabled={isVerificada || cuentaIvaGlobalActiva}
-                            placeholder={cuentaIvaGlobalActiva ? "← Global" : "Cuenta contable IVA…"}
-                            clearable={!cuentaIvaGlobalActiva}
-                          />
+                          <>
+                            <Combobox
+                              options={todasCuentasOpts}
+                              value={cuentaIvaEfectiva}
+                              onChange={(v) => setCuentaIvaItem(p => ({ ...p, [key]: v }))}
+                              disabled={isVerificada}
+                              placeholder={cuentaIvaGlobalActiva ? "Global (editable)" : "Cuenta contable IVA…"}
+                              clearable
+                            />
+                            {hint(cuentaIvaGlobal[selectedIdx], cuentaIvaItem[key],
+                              () => setCuentaIvaItem(p => { const n = { ...p }; delete n[key]; return n; }))}
+                          </>
                         );
                       })()}
                       {/* Valor IVA calculado: base × tarifa% */}
@@ -1635,10 +1666,12 @@ export function Paso2() {
                           options={gastoOpts}
                           value={currentVal ?? ""}
                           onChange={(v) => setCuentaGastoItem((p) => ({ ...p, [key]: v }))}
-                          disabled={isVerificada || !!cuentaGastoGlobal[selectedIdx]}
-                          placeholder={cuentaGastoGlobal[selectedIdx] ? "← Usando cuenta global" : iaSugerencia ? "Acepta sugerencia o busca otra…" : "Buscar cuenta…"}
+                          disabled={isVerificada}
+                          placeholder={cuentaGastoGlobal[selectedIdx] ? "Global (editable)" : iaSugerencia ? "Acepta sugerencia o busca otra…" : "Buscar cuenta…"}
                           clearable
                         />
+                        {hint(cuentaGastoGlobal[selectedIdx], cuentaGastoItem[key],
+                          () => setCuentaGastoItem(p => { const n = { ...p }; delete n[key]; return n; }))}
 
                         {/* Avisos */}
                         {sinCatalogo && (
