@@ -6,6 +6,8 @@ import type {
   CuentaOpcion,
   CiudadOut,
   DepartamentoOut,
+  DianDocumento,
+  Factura,
   FacturaCausadaInfo,
   HistorialItem,
   IADecision,
@@ -225,6 +227,63 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ numeros_dian }),
     }),
+
+  // DIAN — consultar facturas recibidas del rango (sin descargar XML)
+  dianConsultar: (body: { auth_url: string; fecha_desde: string; fecha_hasta: string }) =>
+    req<{ success: boolean; total: number; documents: DianDocumento[] }>("/dian/consultar", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  // DIAN — traer (en memoria) y parsear las facturas seleccionadas.
+  // Lee la respuesta en streaming (NDJSON) e informa el progreso real de descarga
+  // vía onProgress(done, total). Devuelve las facturas ya parseadas.
+  dianImportarStream: async (
+    body: { auth_url: string; ids: string[] },
+    onProgress: (done: number, total: number) => void,
+  ): Promise<Factura[]> => {
+    const { token, empresaId } = useAuthStore.getState();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (empresaId != null) headers["X-Empresa-Id"] = String(empresaId);
+
+    const res = await fetch(`${BASE}/dian/importar`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+    if (res.status === 401) _handleUnauthorized();
+    if (!res.ok || !res.body) {
+      const text = await res.text().catch(() => res.statusText);
+      throw new Error(`API ${res.status}: ${text}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let facturas: Factura[] = [];
+    let errorMsg = "";
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const t = line.trim();
+        if (!t) continue;
+        let msg: { type: string; done?: number; total?: number; facturas?: Factura[]; message?: string };
+        try { msg = JSON.parse(t); } catch { continue; }
+        if (msg.type === "start") onProgress(0, msg.total ?? 0);
+        else if (msg.type === "progress") onProgress(msg.done ?? 0, msg.total ?? 0);
+        else if (msg.type === "done") facturas = msg.facturas ?? [];
+        else if (msg.type === "error") errorMsg = msg.message || "Error al traer de la DIAN.";
+      }
+    }
+    if (errorMsg) throw new Error(errorMsg);
+    return facturas;
+  },
 
   // Sugerencia batch (reemplaza múltiples llamadas a sugerirCuenta)
   sugerirCuentasBatch: (

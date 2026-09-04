@@ -87,6 +87,16 @@ export interface Factura {
   _archivo?: string;
 }
 
+// ─── DIAN (integración por token) ─────────────────────────────────────────────
+
+export interface DianDocumento {
+  id: string | null;
+  numero: string;
+  fecha: string;
+  proveedor: string;
+  tipo: string;
+}
+
 // ─── Sugerencia IA ────────────────────────────────────────────────────────────
 
 export interface Sugerencia {

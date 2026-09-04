@@ -1231,7 +1231,7 @@ export function Paso2() {
           <div className="space-y-1.5">
             <label className="text-xs font-medium flex items-center gap-1.5" style={{ color: cuentaPagoVacia ? "rgb(245,158,11)" : "var(--text-muted)" }}>
               Cuenta de pago
-              {cuentaPagoVacia && <span className="text-[10px] font-semibold uppercase tracking-wide rounded px-1 py-0.5" style={{ backgroundColor: "rgba(245,158,11,0.15)", color: "rgb(245,158,11)" }}>Requerida</span>}
+              {cuentaPagoVacia && <span className="require-badge">Requerida</span>}
             </label>
             {cuentaPagoIASug && (() => {
               const iaBadge = ORIGEN_BADGE[cuentaPagoIASug.cuenta_pago_origen ?? "ia"] ?? ORIGEN_BADGE.ia;

@@ -12,7 +12,11 @@ python-dotenv>=1.0.0
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 
-# Procesamiento de archivos (compartido con Streamlit)
+# Integración DIAN (consulta de facturas recibidas vía token del usuario)
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# Procesamiento de archivos
 pandas>=2.0.0
 openpyxl>=3.1.0
 xlsxwriter>=3.1.0
