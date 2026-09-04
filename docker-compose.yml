@@ -49,11 +49,12 @@ services:
       - ./data:/app/data
     ports:
       - "8000:8000"
-    # Monta el código fuente, aplica migraciones, siembra la geo (idempotente y
-    # best-effort: si algo falla no bloquea el arranque) y levanta la API.
-    # Las migraciones ya crean el esquema y siembran catálogos base + usuarios demo
-    # (admin@smartcausacion.com / Admin2024!). Así un clon nuevo queda listo.
-    command: sh -c "alembic upgrade head && (python scripts/seed_geo.py || echo 'seed_geo omitido') && uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload"
+    # Monta el código fuente, aplica migraciones y levanta la API.
+    # Las migraciones crean el esquema y siembran catálogos base + usuarios demo
+    # (admin@smartcausacion.com / Admin2024!). La geografía (paises/departamentos/
+    # ciudades) NO se siembra aquí: en una BD nueva se carga a mano con
+    # `python scripts/seed_geo.py` (requiere el archivo "0111 paises.xlsx").
+    command: sh -c "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload"
 
   # ── Next.js Frontend (pruebas) ─────────────────────────────────────────────
   frontend:

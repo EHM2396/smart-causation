@@ -62,7 +62,6 @@ services:
         until python -c "import socket; socket.create_connection(('postgres', 5432), 2)" 2>/dev/null;
         do sleep 2; done &&
         alembic upgrade head &&
-        (python scripts/seed_geo.py || echo 'seed_geo omitido') &&
         uvicorn api.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'
     volumes:
       - api_data:/app/data
