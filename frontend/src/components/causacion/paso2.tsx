@@ -1,7 +1,7 @@
 ﻿"use client";
 import { Fragment, useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWizardStore } from "@/stores/wizard";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -107,6 +107,7 @@ export function Paso2() {
 
   // Borrador (guardado temporal): "idle" | "guardando" | "guardado" | "error"
   const [borradorEstado, setBorradorEstado] = useState<"idle" | "guardando" | "guardado" | "error">("idle");
+  const queryClient = useQueryClient();
 
   // Pre-cargar estado de demo cuando el tutorial está activo
   useEffect(() => {
@@ -378,10 +379,13 @@ export function Paso2() {
         tipo_comp: tipoComp || null,
       });
       setBorradorEstado("guardado");
+      // Mantener sincronizada la tarjeta "Tienes un borrador guardado" del paso 1
+      // para que aparezca al volver sin tener que recargar la página.
+      void queryClient.invalidateQueries({ queryKey: ["borrador"] });
     } catch {
       setBorradorEstado("error");
     }
-  }, [facturas, tipoComp, centroCosto, facturasYaCausadas, facturasOmitidas, suggestions, buildPaso2Snapshot, verificadas]);
+  }, [facturas, tipoComp, centroCosto, facturasYaCausadas, facturasOmitidas, suggestions, buildPaso2Snapshot, verificadas, queryClient]);
 
   // Autoguardado de respaldo: 4s tras el último cambio de configuración.
   const paso2Sig = JSON.stringify(buildPaso2Snapshot());
@@ -639,7 +643,7 @@ export function Paso2() {
                 )}
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={() => { setPaso2Cache(null); setPaso(1); }}>← Volver</Button>
+            <Button variant="outline" size="sm" onClick={() => { setPaso2Cache(null); void queryClient.invalidateQueries({ queryKey: ["borrador"] }); setPaso(1); }}>← Volver</Button>
             <Button
               data-tutorial="validar-partida-btn"
               size="sm"
