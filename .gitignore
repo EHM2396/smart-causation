@@ -38,9 +38,6 @@ migrate_log.txt
 .DS_Store
 Thumbs.db
 
-# Streamlit local config/cache
-.streamlit/secrets.toml
-
 # Local data databases
 /data/*.db
 /data/*.sqlite

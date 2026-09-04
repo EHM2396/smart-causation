@@ -78,26 +78,5 @@ services:
     ports:
       - "3000:3000"
 
-  # ── Streamlit Frontend (legacy, opcional) ─────────────────────────────────
-  streamlit:
-    profiles: ["legacy-streamlit"]
-    build:
-      context: .
-      dockerfile: Dockerfile.streamlit
-    container_name: siigo_streamlit
-    restart: unless-stopped
-    networks:
-      - ciolix_net
-    depends_on:
-      api:
-        condition: service_started
-    environment:
-      API_URL: http://api:8000
-      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-siigo}:${POSTGRES_PASSWORD:-siigo_pass}@postgres:5432/${POSTGRES_DB:-siigo_db}
-    volumes:
-      - ./data:/app/data
-    ports:
-      - "8501:8501"
-
 volumes:
   postgres_data:

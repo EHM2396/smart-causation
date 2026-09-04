@@ -46,10 +46,6 @@ _UMBRAL_CONFIANZA_ALTA = 0.80
 # Límite de llamadas IA por sesión de usuario (protección de costo)
 _LIMITE_LLAMADAS_POR_SESION = 60
 
-# Claves de session_state para métricas
-_SS_LLAMADAS = "_ia_llamadas_sesion"
-_SS_TOKENS   = "_ia_tokens_sesion"
-
 # Patrones PII a limpiar antes de enviar al modelo
 _RE_NIT      = re.compile(r"\b\d{6,10}-?\d\b")          # NIT colombiano
 _RE_TELEFONO = re.compile(r"\b(\+57[\s-]?)?\d{3}[\s-]?\d{3}[\s-]?\d{4}\b")
@@ -209,22 +205,7 @@ class SugerenciaIA:
 # ── Lectura de API key ────────────────────────────────────────────────────────
 
 def _get_api_key() -> str | None:
-    """
-    Lee la API key con prioridad:
-      1. st.secrets (Streamlit Cloud / secrets.toml local)
-      2. Variable de entorno OPENAI_API_KEY
-    Retorna None si no está configurada.
-    """
-    # 1. st.secrets
-    try:
-        import streamlit as st
-        key = st.secrets.get("OPENAI_API_KEY", "")
-        if key and key != "sk-...":
-            return key
-    except Exception:
-        pass
-
-    # 2. Variable de entorno
+    """Lee la API key desde la variable de entorno OPENAI_API_KEY. None si no está."""
     key = os.getenv("OPENAI_API_KEY", "")
     return key if key and key != "sk-..." else None
 
@@ -254,48 +235,19 @@ def _detectar_inyeccion(texto: str) -> bool:
 
 
 def _verificar_rate_limit() -> bool:
-    """
-    Comprueba que no se haya superado el límite de llamadas por sesión.
-    Incrementa el contador si aún hay margen. Retorna True si se puede llamar.
-    """
-    try:
-        import streamlit as st
-        count = st.session_state.get(_SS_LLAMADAS, 0)
-        if count >= _LIMITE_LLAMADAS_POR_SESION:
-            logger.warning(
-                "ai_service: rate limit de sesión alcanzado (%d/%d) — llamada omitida",
-                count, _LIMITE_LLAMADAS_POR_SESION,
-            )
-            return False
-        st.session_state[_SS_LLAMADAS] = count + 1
-        return True
-    except Exception:
-        return True  # fuera de Streamlit (tests, scripts): sin límite
+    """El rate limit por sesión era del frontend Streamlit (ya retirado). En la
+    API no aplica: siempre se permite la llamada."""
+    return True
 
 
 def _registrar_tokens(total_tokens: int) -> None:
-    """Acumula tokens usados en la sesión para tracking de costo."""
-    try:
-        import streamlit as st
-        st.session_state[_SS_TOKENS] = st.session_state.get(_SS_TOKENS, 0) + total_tokens
-    except Exception:
-        pass
+    """No-op: el tracking de tokens por sesión era del frontend Streamlit (retirado)."""
+    return None
 
 
 def get_estadisticas_sesion() -> dict:
-    """
-    Retorna métricas de uso IA de la sesión actual.
-    Seguro de llamar fuera de contexto Streamlit (retorna ceros).
-    """
-    try:
-        import streamlit as st
-        return {
-            "llamadas": st.session_state.get(_SS_LLAMADAS, 0),
-            "tokens":   st.session_state.get(_SS_TOKENS, 0),
-            "limite":   _LIMITE_LLAMADAS_POR_SESION,
-        }
-    except Exception:
-        return {"llamadas": 0, "tokens": 0, "limite": _LIMITE_LLAMADAS_POR_SESION}
+    """Métricas de uso IA por sesión (eran del frontend Streamlit, ya retirado)."""
+    return {"llamadas": 0, "tokens": 0, "limite": _LIMITE_LLAMADAS_POR_SESION}
 
 
 # ── API pública ───────────────────────────────────────────────────────────────

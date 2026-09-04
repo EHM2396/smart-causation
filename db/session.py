@@ -26,15 +26,9 @@ from sqlalchemy.orm import sessionmaker, Session
 
 load_dotenv()
 
-# Lee DATABASE_URL desde: 1) variable de entorno, 2) st.secrets (Streamlit Cloud), 3) fallback local
+# Lee DATABASE_URL desde: 1) variable de entorno, 2) fallback local
 def _get_database_url() -> str:
     url = os.getenv("DATABASE_URL", "")
-    if not url:
-        try:
-            import streamlit as st
-            url = st.secrets.get("DATABASE_URL", "")
-        except Exception:
-            pass
     if not url:
         url = "postgresql+psycopg2://postgres:postgres@localhost:5432/siigo_contable"
     # Supabase / psycopg2 requiere el driver explícito en el prefijo
