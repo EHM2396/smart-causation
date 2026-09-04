@@ -1,6 +1,6 @@
 # Stack de Ciolix para VPS con Apache ya en 80/443 (Hostinger).
 #
-# Diferencias vs docker-compose.prod.yml:
+# Características:
 #   - SIN Caddy ni DuckDNS: el reverse proxy + HTTPS los da el Apache del host.
 #   - La API se publica SOLO en 127.0.0.1:8000 para que Apache le haga proxy
 #     (nunca toca 80/443, que son de Apache).
