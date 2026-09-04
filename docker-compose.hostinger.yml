@@ -1,0 +1,72 @@
+# Stack de Ciolix para VPS con Apache ya en 80/443 (Hostinger).
+#
+# Diferencias vs docker-compose.prod.yml:
+#   - SIN Caddy ni DuckDNS: el reverse proxy + HTTPS los da el Apache del host.
+#   - La API se publica SOLO en 127.0.0.1:8000 para que Apache le haga proxy
+#     (nunca toca 80/443, que son de Apache).
+#   - Postgres queda interno (127.0.0.1:5432, solo acceso local).
+#
+# Despliegue: Portainer → Stacks → Add stack → Git repository, apuntando a este
+# archivo. Las migraciones (incluida la baseline 000) corren solas al arrancar.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ciolix_postgres
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"      # solo acceso local (opcional)
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: ciolix_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      ENV: production
+      GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Ciolix}
+      MAIL_SERVER: ${MAIL_SERVER:-smtp.gmail.com}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_TLS: ${MAIL_TLS:-true}
+      MAIL_SSL: ${MAIL_SSL:-false}
+      EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
+      FRONTEND_URL: ${FRONTEND_URL}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+    ports:
+      - "127.0.0.1:8000:8000"      # Apache le hace proxy a este puerto
+    command:
+      - sh
+      - -c
+      - >-
+        until python -c "import socket; socket.create_connection(('postgres', 5432), 2)" 2>/dev/null;
+        do sleep 2; done &&
+        alembic upgrade head &&
+        (python scripts/seed_geo.py || echo 'seed_geo omitido') &&
+        uvicorn api.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'
+    volumes:
+      - api_data:/app/data
+
+volumes:
+  postgres_data:
+  api_data:
