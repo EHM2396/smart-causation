@@ -357,6 +357,7 @@ def batch_validar(body: BatchRequest, db: DB, empresa: EmpresaActiva):
             mapeos_confirmados=item.mapeos_confirmados,
             tipo_comprobante=body.tipo_comprobante,
             centro_costo=body.centro_costo,
+            es_nota_credito=(item.factura or {}).get("tipo_documento") == "nota_credito",
         )
         filas_por_consecutivo[consecutivo] = len(movs)
         todos_movs.extend(movs)
@@ -409,6 +410,7 @@ def batch_generar(body: BatchRequest, db: DB, empresa: EmpresaActiva, current_us
             mapeos_confirmados=item.mapeos_confirmados,
             tipo_comprobante=body.tipo_comprobante,
             centro_costo=body.centro_costo,
+            es_nota_credito=(item.factura or {}).get("tipo_documento") == "nota_credito",
         )
         todos_movs.extend(movs)
 
@@ -520,6 +522,7 @@ def exportar_lote_historial(
             mapeos_confirmados=data["mapeos"],
             tipo_comprobante=fc.tipo_comprobante or data.get("tipo_comprobante", "12"),
             centro_costo=data.get("centro_costo", ""),
+            es_nota_credito=data["factura"].get("tipo_documento") == "nota_credito",
         )
         todos_movs.extend(movs)
 
@@ -623,6 +626,7 @@ def regenerar_historial(registro_id: int, db: DB, empresa: EmpresaActiva):
         mapeos_confirmados=data["mapeos"],
         tipo_comprobante=fc.tipo_comprobante or data.get("tipo_comprobante", "12"),
         centro_costo=data.get("centro_costo", ""),
+        es_nota_credito=data["factura"].get("tipo_documento") == "nota_credito",
     )
     xlsx_buf = exporter.generar_xlsx(movimientos)
     nombre = f"regenerado_SIIGO_{fc.numero_dian}.xlsx"
@@ -662,11 +666,14 @@ def limpiar_historial(
 # Un único borrador por (empresa, usuario). Guardar hace upsert sobre la misma
 # fila. Nunca se borra la fila: "descartar" es un soft-delete (estado).
 
-def _borrador_del_usuario(db: Session, empresa: Empresa, usuario: Usuario) -> BorradorCausacion | None:
+def _borrador_del_usuario(
+    db: Session, empresa: Empresa, usuario: Usuario, tipo: str = "compras"
+) -> BorradorCausacion | None:
     return db.scalar(
         select(BorradorCausacion).where(
             BorradorCausacion.empresa_id == empresa.id,
             BorradorCausacion.usuario_id == usuario.id,
+            BorradorCausacion.tipo == tipo,
         )
     )
 
@@ -677,14 +684,16 @@ def guardar_borrador(
     db: DB,
     empresa: EmpresaActiva,
     current_user: CurrentUser,
+    tipo: str = "compras",
 ):
-    """Crea o reemplaza el borrador del usuario (upsert). Devuelve el resumen."""
+    """Crea o reemplaza el borrador del usuario (upsert) por tipo. Devuelve el resumen."""
     datos_str = json.dumps(body.datos, ensure_ascii=False, default=str)
-    borrador = _borrador_del_usuario(db, empresa, current_user)
+    borrador = _borrador_del_usuario(db, empresa, current_user, tipo)
     if borrador is None:
         borrador = BorradorCausacion(
             empresa_id=empresa.id,
             usuario_id=current_user.id,
+            tipo=tipo,
             datos_json=datos_str,
         )
         db.add(borrador)
@@ -700,18 +709,18 @@ def guardar_borrador(
 
 
 @router.get("/borrador", response_model=BorradorResumen | None)
-def get_borrador(db: DB, empresa: EmpresaActiva, current_user: CurrentUser):
-    """Resumen del borrador activo del usuario, o null si no hay ninguno."""
-    borrador = _borrador_del_usuario(db, empresa, current_user)
+def get_borrador(db: DB, empresa: EmpresaActiva, current_user: CurrentUser, tipo: str = "compras"):
+    """Resumen del borrador activo del usuario (por tipo), o null si no hay ninguno."""
+    borrador = _borrador_del_usuario(db, empresa, current_user, tipo)
     if borrador is None or borrador.estado != "activo":
         return None
     return borrador
 
 
 @router.get("/borrador/completo", response_model=BorradorCompleto | None)
-def get_borrador_completo(db: DB, empresa: EmpresaActiva, current_user: CurrentUser):
+def get_borrador_completo(db: DB, empresa: EmpresaActiva, current_user: CurrentUser, tipo: str = "compras"):
     """Borrador activo con el snapshot completo, para rehidratar el wizard."""
-    borrador = _borrador_del_usuario(db, empresa, current_user)
+    borrador = _borrador_del_usuario(db, empresa, current_user, tipo)
     if borrador is None or borrador.estado != "activo":
         return None
     return BorradorCompleto(
@@ -725,9 +734,9 @@ def get_borrador_completo(db: DB, empresa: EmpresaActiva, current_user: CurrentU
 
 
 @router.post("/borrador/descartar", response_model=dict)
-def descartar_borrador(db: DB, empresa: EmpresaActiva, current_user: CurrentUser):
+def descartar_borrador(db: DB, empresa: EmpresaActiva, current_user: CurrentUser, tipo: str = "compras"):
     """Soft-delete: marca el borrador como descartado. No borra la fila."""
-    borrador = _borrador_del_usuario(db, empresa, current_user)
+    borrador = _borrador_del_usuario(db, empresa, current_user, tipo)
     if borrador is not None and borrador.estado == "activo":
         borrador.estado = "descartado"
         db.commit()

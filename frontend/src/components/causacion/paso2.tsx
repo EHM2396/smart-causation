@@ -69,7 +69,8 @@ function DataField({ label, value, mono = false }: { label: string; value: strin
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function Paso2() {
-  const { facturas, facturasYaCausadas, tipoComp, centroCosto, setPaso, setFacturas, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, pdfUrls, paso2Cache, setPaso2Cache, filesProcesando, setFilesProcesando, tutorialActivo, tutorialMockMapeo, facturasOmitidas, setFacturasOmitidas } = useWizardStore();
+  const { docTipo, facturas, facturasYaCausadas, tipoComp, centroCosto, setPaso, setFacturas, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, pdfUrls, paso2Cache, setPaso2Cache, filesProcesando, setFilesProcesando, tutorialActivo, tutorialMockMapeo, facturasOmitidas, setFacturasOmitidas } = useWizardStore();
+  const esNC = docTipo === "nc";
   const [modalCausadasOpen, setModalCausadasOpen] = useState(false);
   const [modalOmitidasOpen, setModalOmitidasOpen] = useState(false);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
@@ -349,6 +350,22 @@ export function Paso2() {
     .filter(i => (i.tipo_impuesto ?? "").toLowerCase() === "iva")
     .map(i => ({ value: i.codigo, label: `${i.codigo} — ${i.tipo_impuesto ?? ""} ${i.tarifa ?? 0}%` }));
   const todasCuentasOpts = cuentaOpts(todasCuentas);
+
+  // En modo NC, la cuenta de IVA es "IVA devolución en compras" (una por tarifa,
+  // 5% o 19%). Se busca en el PUC por nombre. El usuario puede cambiarla.
+  const recomendarCuentaIvaDevolucion = (tarifa: number): string => {
+    if (!esNC || !tarifa) return "";
+    const norm = (s: string) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+    const pct = String(Math.round(tarifa));
+    const conPct = todasCuentas.find((c) => {
+      const n = norm(c.nombre ?? "");
+      return n.includes("devolucion") && n.includes(pct);
+    });
+    if (conPct) return conPct.codigo;
+    const soloDev = todasCuentas.find((c) => norm(c.nombre ?? "").includes("devolucion"));
+    return soloDev?.codigo ?? "";
+  };
+
   const getImpInfo = (cod: string) => impuestosRaw.find((i) => i.codigo === cod);
   const getEffBase = (key: string, item: ItemFactura): number => {
     const v = Number(baseOverride[key]);
@@ -377,15 +394,15 @@ export function Paso2() {
         total_facturas: facturas.length,
         total_verificadas: Object.values(verificadas).filter(Boolean).length,
         tipo_comp: tipoComp || null,
-      });
+      }, docTipo);
       setBorradorEstado("guardado");
       // Mantener sincronizada la tarjeta "Tienes un borrador guardado" del paso 1
       // para que aparezca al volver sin tener que recargar la página.
-      void queryClient.invalidateQueries({ queryKey: ["borrador"] });
+      void queryClient.invalidateQueries({ queryKey: ["borrador", docTipo] });
     } catch {
       setBorradorEstado("error");
     }
-  }, [facturas, tipoComp, centroCosto, facturasYaCausadas, facturasOmitidas, suggestions, buildPaso2Snapshot, verificadas, queryClient]);
+  }, [facturas, tipoComp, centroCosto, facturasYaCausadas, facturasOmitidas, suggestions, buildPaso2Snapshot, verificadas, queryClient, docTipo]);
 
   // Autoguardado de respaldo: 4s tras el último cambio de configuración.
   const paso2Sig = JSON.stringify(buildPaso2Snapshot());
@@ -426,12 +443,17 @@ export function Paso2() {
         ? origenToFuente(sug.origen)
         : "manual";
 
-      // Cuenta contable IVA: override manual > cuenta del catálogo de impuesto
+      // Cuenta contable IVA: override manual > cuenta por defecto. En NC la cuenta
+      // por defecto es "IVA devolución en compras" (por tarifa); en compras es la
+      // "descontable" del catálogo de impuesto.
       const cuentaIvaGlobalVal = cuentaIvaGlobal[idx];
       const cuentaIvaItemVal = cuentaIvaItem[key];
+      const cuentaIvaPorDefecto = esNC
+        ? recomendarCuentaIvaDevolucion(impInfo?.tarifa ?? 0)
+        : (impInfo?.cta_compras ?? "");
       const cuentaIvaFinal = (cuentaIvaItemVal && cuentaIvaItemVal !== "") ? cuentaIvaItemVal
                            : (cuentaIvaGlobalVal && cuentaIvaGlobalVal !== "") ? cuentaIvaGlobalVal
-                           : impInfo?.cta_compras ?? "";
+                           : cuentaIvaPorDefecto;
 
       const effBase = getEffBase(key, item);
       const tarifa = impInfo?.tarifa ?? item.porcentaje ?? 0;
@@ -643,7 +665,7 @@ export function Paso2() {
                 )}
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={() => { setPaso2Cache(null); void queryClient.invalidateQueries({ queryKey: ["borrador"] }); setPaso(1); }}>← Volver</Button>
+            <Button variant="outline" size="sm" onClick={() => { setPaso2Cache(null); void queryClient.invalidateQueries({ queryKey: ["borrador", docTipo] }); setPaso(1); }}>← Volver</Button>
             <Button
               data-tutorial="validar-partida-btn"
               size="sm"
@@ -1163,8 +1185,20 @@ export function Paso2() {
         className="rounded-xl border p-4"
         style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)", boxShadow: "var(--shadow-card)" }}
       >
+        {esNC && (
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide" style={{ backgroundColor: "var(--brand)", color: "#fff" }}>
+              Nota crédito
+            </span>
+            {(factura as { factura_referencia?: string }).factura_referencia && (
+              <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                corrige la factura <strong style={{ color: "var(--text-secondary)" }}>{(factura as { factura_referencia?: string }).factura_referencia}</strong>
+              </span>
+            )}
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-5">
-          <DataField label="N° Factura DIAN" value={factura.numero_dian} mono />
+          <DataField label={esNC ? "N° Nota crédito" : "N° Factura DIAN"} value={factura.numero_dian} mono />
           <DataField label="Fecha emisión" value={factura.fecha} />
           <div className="col-span-2">
             <DataField label="Proveedor" value={factura.razon_social} />
@@ -1589,6 +1623,7 @@ export function Paso2() {
                         const cuentaIvaGlobalActiva = !!(cuentaIvaGlobal[selectedIdx] && cuentaIvaGlobal[selectedIdx] !== "");
                         const cuentaIvaEfectiva = (cuentaIvaItem[key] && cuentaIvaItem[key] !== "") ? cuentaIvaItem[key]
                           : cuentaIvaGlobalActiva ? cuentaIvaGlobal[selectedIdx]
+                          : esNC ? recomendarCuentaIvaDevolucion(ivaEfectivoInfo?.tarifa ?? 0)
                           : ivaEfectivoInfo?.cta_compras ?? "";
                         return (
                           <>

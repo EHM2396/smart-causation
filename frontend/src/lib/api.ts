@@ -376,19 +376,20 @@ export const api = {
     total_facturas: number;
     total_verificadas: number;
     tipo_comp: string | null;
-  }) =>
-    req<BorradorResumen>("/causacion/borrador", {
+  }, tipo: "compras" | "nc" = "compras") =>
+    req<BorradorResumen>(`/causacion/borrador?tipo=${tipo}`, {
       method: "PUT",
       body: JSON.stringify(payload),
     }),
 
-  getBorrador: () => req<BorradorResumen | null>("/causacion/borrador"),
+  getBorrador: (tipo: "compras" | "nc" = "compras") =>
+    req<BorradorResumen | null>(`/causacion/borrador?tipo=${tipo}`),
 
-  getBorradorCompleto: () =>
-    req<BorradorCompleto | null>("/causacion/borrador/completo"),
+  getBorradorCompleto: (tipo: "compras" | "nc" = "compras") =>
+    req<BorradorCompleto | null>(`/causacion/borrador/completo?tipo=${tipo}`),
 
-  descartarBorrador: () =>
-    req<{ descartado: boolean }>("/causacion/borrador/descartar", { method: "POST" }),
+  descartarBorrador: (tipo: "compras" | "nc" = "compras") =>
+    req<{ descartado: boolean }>(`/causacion/borrador/descartar?tipo=${tipo}`, { method: "POST" }),
 
   // Aprendizaje / IA
   getIAReglas: () => req<IARegla[]>("/aprendizaje/reglas"),

@@ -36,7 +36,11 @@ interface Paso2Cache {
   baseOverride: Record<string, string>;
 }
 
+export type DocTipo = "compras" | "nc";
+
 interface WizardState {
+  docTipo: DocTipo;
+  ncRuteadas: number; // notas crédito detectadas en Compras y enviadas a NC Compras
   paso: PasoWizard;
   tipoComp: string;
   centroCosto: string;
@@ -54,6 +58,8 @@ interface WizardState {
   tutorialActivo: boolean;
   tutorialMockMapeo: TutorialMockMapeo | null;
 
+  setDocTipo: (t: DocTipo) => void;
+  setNcRuteadas: (n: number) => void;
   setPaso: (p: PasoWizard) => void;
   setTipoComp: (t: string) => void;
   setCentroCosto: (c: string) => void;
@@ -75,6 +81,8 @@ interface WizardState {
 }
 
 const initial = {
+  docTipo: "compras" as DocTipo,
+  ncRuteadas: 0,
   paso: 1 as PasoWizard,
   tipoComp: "",
   centroCosto: "",
@@ -95,6 +103,8 @@ const initial = {
 
 export const useWizardStore = create<WizardState>((set) => ({
   ...initial,
+  setDocTipo: (docTipo) => set({ docTipo }),
+  setNcRuteadas: (ncRuteadas) => set({ ncRuteadas }),
   setPaso: (paso) => set({ paso }),
   setTipoComp: (tipoComp) => set({ tipoComp }),
   setCentroCosto: (centroCosto) => set({ centroCosto }),
@@ -116,6 +126,7 @@ export const useWizardStore = create<WizardState>((set) => ({
     Object.values(state.pdfUrls).forEach((url) => { try { URL.revokeObjectURL(url); } catch {} });
     return {
       ...initial,
+      docTipo: state.docTipo,
       facturas: snapshot.facturas,
       tipoComp: snapshot.tipoComp,
       centroCosto: snapshot.centroCosto,
@@ -128,6 +139,6 @@ export const useWizardStore = create<WizardState>((set) => ({
   }),
   reset: () => set((state) => {
     Object.values(state.pdfUrls).forEach((url) => { try { URL.revokeObjectURL(url); } catch {} });
-    return initial;
+    return { ...initial, docTipo: state.docTipo };
   }),
 }));

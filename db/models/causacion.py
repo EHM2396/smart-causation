@@ -53,6 +53,9 @@ class BorradorCausacion(Base):
     total_verificadas: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     tipo_comp: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
+    # 'compras' | 'nc'. Cada usuario tiene un borrador por tipo de causación.
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False, default="compras", server_default="compras")
+
     # 'activo' | 'descartado'. Soft-delete: nunca se borra la fila.
     estado: Mapped[str] = mapped_column(String(20), nullable=False, default="activo")
 
@@ -68,7 +71,7 @@ class BorradorCausacion(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "empresa_id", "usuario_id", name="uq_borrador_empresa_usuario"
+            "empresa_id", "usuario_id", "tipo", name="uq_borrador_empresa_usuario_tipo"
         ),
     )
 

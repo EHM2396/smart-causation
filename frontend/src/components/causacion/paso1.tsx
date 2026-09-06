@@ -30,7 +30,8 @@ function fechaBorrador(iso: string): string {
 }
 
 export function Paso1() {
-  const { setFacturas, setFacturasYaCausadas, setPaso, facturas: stored, setPdfUrls, pdfUrls, setFilesProcesando, setSuggestions, setPaso2Cache, setFacturasOmitidas, hydrateBorrador, tutorialActivo } = useWizardStore();
+  const { docTipo, ncRuteadas, setNcRuteadas, setFacturas, setFacturasYaCausadas, setPaso, facturas: stored, setPdfUrls, pdfUrls, setFilesProcesando, setSuggestions, setPaso2Cache, setFacturasOmitidas, hydrateBorrador, tutorialActivo } = useWizardStore();
+  const esNC = docTipo === "nc";
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -39,13 +40,13 @@ export function Paso1() {
   const [dragging, setDragging] = useState(false);
   const [modo, setModo] = useState<"archivos" | "dian">("archivos");
 
-  // ── Borrador guardado (guardado temporal) ────────────────────────────────────
+  // ── Borrador guardado (guardado temporal, por tipo compras/nc) ───────────────
   const queryClient = useQueryClient();
   const [continuandoBorrador, setContinuandoBorrador] = useState(false);
   const [descartandoBorrador, setDescartandoBorrador] = useState(false);
   const { data: borrador } = useQuery({
-    queryKey: ["borrador"],
-    queryFn: api.getBorrador,
+    queryKey: ["borrador", docTipo],
+    queryFn: () => api.getBorrador(docTipo),
     enabled: !tutorialActivo,
     staleTime: 0,
   });
@@ -53,7 +54,7 @@ export function Paso1() {
   const continuarBorrador = async () => {
     setContinuandoBorrador(true);
     try {
-      const completo = await api.getBorradorCompleto();
+      const completo = await api.getBorradorCompleto(docTipo);
       if (completo?.datos) {
         hydrateBorrador(completo.datos); // setea facturas + config + paso=2
       }
@@ -67,12 +68,43 @@ export function Paso1() {
   const descartarBorrador = async () => {
     setDescartandoBorrador(true);
     try {
-      await api.descartarBorrador();
-      await queryClient.invalidateQueries({ queryKey: ["borrador"] });
+      await api.descartarBorrador(docTipo);
+      await queryClient.invalidateQueries({ queryKey: ["borrador", docTipo] });
     } catch {
       // silencioso: si falla, la tarjeta sigue visible y puede reintentar
     } finally {
       setDescartandoBorrador(false);
+    }
+  };
+
+  // Envía notas crédito detectadas en el módulo de Compras al borrador de NC
+  // (bandeja), para que aparezcan en "NC Compras" sin re-cargarlas.
+  const rutearANC = async (ncs: Factura[]) => {
+    if (!ncs.length) return;
+    try {
+      const completo = await api.getBorradorCompleto("nc");
+      const prev = (completo?.datos ?? {}) as Record<string, unknown>;
+      const existentes = (prev.facturas as Factura[]) ?? [];
+      const nums = new Set(existentes.map((f) => f.numero_dian));
+      const merged = [...existentes, ...ncs.filter((f) => !nums.has(f.numero_dian))];
+      const snapshot = {
+        facturas: merged,
+        tipoComp: (prev.tipoComp as string) ?? "",
+        centroCosto: (prev.centroCosto as string) ?? "",
+        facturasYaCausadas: prev.facturasYaCausadas ?? [],
+        facturasOmitidas: prev.facturasOmitidas ?? [],
+        suggestions: prev.suggestions ?? {},
+        paso2: prev.paso2 ?? null,
+      };
+      await api.guardarBorrador({
+        datos: snapshot as unknown as Record<string, unknown>,
+        total_facturas: merged.length,
+        total_verificadas: 0,
+        tipo_comp: snapshot.tipoComp || null,
+      }, "nc");
+      queryClient.invalidateQueries({ queryKey: ["borrador", "nc"] });
+    } catch {
+      // Si falla el ruteo, igual se avisa al usuario que hay NC.
     }
   };
 
@@ -104,9 +136,33 @@ export function Paso1() {
     ventas: { filename: string; numero: string }[],
     errs: string[],
   ) => {
+    setNcRuteadas(0);
+    // Separar por tipo de documento según el módulo actual (compras vs NC).
+    const esNotaCredito = (f: Factura) => (f as { tipo_documento?: string }).tipo_documento === "nota_credito";
+    const esNotaDebito = (f: Factura) => (f as { tipo_documento?: string }).tipo_documento === "nota_debito";
+    let ncCount = 0;
+
+    if (esNC) {
+      // Módulo NC: solo notas crédito; lo demás se omite.
+      const otras = parsed.filter((f) => !esNotaCredito(f));
+      if (otras.length) errs.push(`${otras.length} documento(s) que no son nota crédito se omitieron (van en Causación Compras).`);
+      parsed = parsed.filter(esNotaCredito);
+    } else {
+      // Módulo Compras: NC se rutean a NC Compras; ND aún no soportadas.
+      const ncs = parsed.filter(esNotaCredito);
+      const nds = parsed.filter(esNotaDebito);
+      if (ncs.length) {
+        await rutearANC(ncs);
+        ncCount = ncs.length;
+        setNcRuteadas(ncs.length);
+      }
+      if (nds.length) errs.push(`${nds.length} nota(s) débito omitidas (aún no soportadas).`);
+      parsed = parsed.filter((f) => !esNotaCredito(f) && !esNotaDebito(f));
+    }
+
     if (!parsed.length) {
       setVentasDetectadas(ventas);
-      if (!ventas.length) errs.push("No se procesó ninguna factura válida.");
+      if (!ventas.length && !ncCount) errs.push("No se procesó ninguna factura válida.");
       setErrors(errs);
       setLoading(false);
       return;
@@ -222,9 +278,11 @@ export function Paso1() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-[var(--text-primary)]">Cargar facturas DIAN</h2>
+        <h2 className="text-xl font-semibold text-[var(--text-primary)]">{esNC ? "Cargar notas crédito DIAN" : "Cargar facturas DIAN"}</h2>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
-          Sube archivos <code className="text-[var(--brand)] font-medium">.xlsx</code> del portal DIAN, archivos <code className="text-[var(--brand)] font-medium">.zip</code>, <code className="text-[var(--brand)] font-medium">.xml</code> o <code className="text-[var(--brand)] font-medium">.pdf</code> de factura electrónica DIAN. Puedes subir varios a la vez.
+          {esNC
+            ? "Módulo exclusivo de notas crédito. También puedes subir XML/ZIP/PDF de notas crédito; las facturas de compra van en el otro módulo."
+            : <>Sube archivos <code className="text-[var(--brand)] font-medium">.xlsx</code> del portal DIAN, archivos <code className="text-[var(--brand)] font-medium">.zip</code>, <code className="text-[var(--brand)] font-medium">.xml</code> o <code className="text-[var(--brand)] font-medium">.pdf</code> de factura electrónica DIAN. Puedes subir varios a la vez.</>}
         </p>
       </div>
 

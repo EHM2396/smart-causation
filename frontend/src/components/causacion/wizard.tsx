@@ -1,12 +1,14 @@
 "use client";
+import { useEffect } from "react";
 import { useWizardStore } from "@/stores/wizard";
+import type { DocTipo } from "@/stores/wizard";
 import { StepIndicator } from "./step-indicator";
 import { Paso1 } from "./paso1";
 import { Paso2 } from "./paso2";
 import { Paso3 } from "./paso3";
 import { Paso4 } from "./paso4";
 import { ConfigPanel } from "./config-panel";
-import { FileText, Layers, CheckCircle2, Tag, AlertTriangle, BookOpen } from "lucide-react";
+import { FileText, Layers, CheckCircle2, Tag, AlertTriangle, BookOpen, FileMinus2, ArrowRight, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import Link from "next/link";
@@ -114,9 +116,66 @@ function CatalogGate() {
   );
 }
 
-export function CausacionWizard() {
-  const { paso, facturas, tipoComp, mapeos } = useWizardStore();
+function NcRuteadasAviso() {
+  const esNC = useWizardStore((s) => s.docTipo === "nc");
+  const ncRuteadas = useWizardStore((s) => s.ncRuteadas);
+  const setNcRuteadas = useWizardStore((s) => s.setNcRuteadas);
 
+  // Solo tiene sentido en el módulo de Compras (en NC no se rutea nada).
+  if (esNC || ncRuteadas <= 0) return null;
+
+  return (
+    <div
+      className="mb-6 flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
+      style={{ borderColor: "var(--info-border)", backgroundColor: "var(--info-bg)" }}
+    >
+      <div className="flex items-start gap-3">
+        <FileMinus2 className="mt-0.5 h-5 w-5 shrink-0" style={{ color: "var(--info-text)" }} />
+        <div>
+          <p className="text-sm font-semibold" style={{ color: "var(--info-text)" }}>
+            {ncRuteadas} nota{ncRuteadas !== 1 ? "s" : ""} crédito detectada{ncRuteadas !== 1 ? "s" : ""} en este lote
+          </p>
+          <p className="mt-0.5 text-xs" style={{ color: "var(--info-text)", opacity: 0.85 }}>
+            Se enviaron a <strong>NC Compras</strong> y quedaron <strong>guardadas en borrador</strong> — entra a ese módulo para causarlas. No necesitas volver a cargarlas.
+          </p>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <Link
+          href="/causacion-nc"
+          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold no-underline"
+          style={{ backgroundColor: "var(--info-text)", color: "#fff" }}
+        >
+          <ArrowRight className="h-4 w-4" /> Ir a NC Compras
+        </Link>
+        <button
+          type="button"
+          onClick={() => setNcRuteadas(0)}
+          className="rounded-md p-1.5 transition-opacity hover:opacity-70"
+          style={{ color: "var(--info-text)" }}
+          aria-label="Cerrar aviso"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function CausacionWizard({ docTipo = "compras" }: { docTipo?: DocTipo }) {
+  const { paso, facturas, tipoComp, mapeos, docTipo: docTipoActual, setDocTipo, reset } = useWizardStore();
+
+  // Al entrar al módulo, si venías del otro (compras <-> nc), fija el modo y
+  // limpia el estado para no mezclar facturas de compra con notas crédito.
+  useEffect(() => {
+    if (docTipoActual !== docTipo) {
+      setDocTipo(docTipo);
+      reset();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docTipo]);
+
+  const esNC = docTipo === "nc";
   const totalItems = facturas.reduce((s, f) => s + f.items.length, 0);
   const mapeados = mapeos.filter((m) => m.cuenta_gasto).length;
 
@@ -132,7 +191,7 @@ export function CausacionWizard() {
       <div className="flex-1 overflow-y-auto px-4 py-6 lg:px-8 lg:py-8">
         {/* KPI bar */}
         <div className="grid grid-cols-2 gap-3 mb-6 sm:grid-cols-4 lg:mb-8">
-          <KpiCard icon={FileText}    label="Facturas"       value={facturas.length} accent="#4F46E5" sublabel={facturas.length ? "archivos cargados" : "Sin cargar aún"} />
+          <KpiCard icon={FileText}    label={esNC ? "Notas crédito" : "Facturas"} value={facturas.length} accent="#4F46E5" sublabel={facturas.length ? (esNC ? "notas cargadas" : "archivos cargados") : "Sin cargar aún"} />
           <KpiCard icon={Layers}      label="Ítems"          value={totalItems}      accent="#7c3aed" sublabel={totalItems ? "líneas de factura" : "Carga archivos primero"} />
           <KpiCard icon={CheckCircle2} label="Mapeadas"      value={mapeados}        accent="#8FB5FF" sublabel={mapeados ? `de ${totalItems} ítems` : "Pendiente mapeo"} />
           <KpiCard icon={Tag}         label="Comprobante"    value={tipoComp || "—"} accent="#d97706" sublabel={tipoComp ? "tipo seleccionado" : "Selecciona en config"} />
@@ -145,6 +204,9 @@ export function CausacionWizard() {
 
         {/* Catalog preflight check */}
         <CatalogGate />
+
+        {/* Aviso: notas crédito detectadas y enviadas a NC Compras */}
+        <NcRuteadasAviso />
 
         {/* Step content */}
         <div>

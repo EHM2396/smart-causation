@@ -67,6 +67,7 @@ def construir_movimientos(
     mapeos_confirmados: list[dict],
     tipo_comprobante: str = "12",
     centro_costo: str = "",
+    es_nota_credito: bool = False,
 ) -> list[dict]:
     """
     Construye la lista de movimientos contables para una factura.
@@ -133,12 +134,14 @@ def construir_movimientos(
             ))
             total_debitos += base
 
-        # Fila de IVA descontable (débito) — solo si realmente hay tarifa > 0.
+        # Fila de IVA (débito) — solo si realmente hay tarifa > 0. En una nota
+        # crédito es "Iva devolución en compras" (luego se invierte a crédito).
         if val_imp and cuenta_imp_d and not es_ret and pct > 0:
+            desc_iva = "Iva devolucion en compras" if es_nota_credito else "Iva descontable"
             movimientos.append(_fila(
                 tipo_comprobante, consecutivo, fecha, nit,
                 cuenta_imp_d, val_imp, None,
-                "Iva descontable",
+                desc_iva,
                 centro_costo, observaciones, cod_imp,
             ))
             total_debitos += val_imp
@@ -171,6 +174,13 @@ def construir_movimientos(
             centro_costo, observaciones, "",
         ))
         total_creditos += neto
+
+    # Nota crédito: reversa la compra → se invierte toda la partida doble
+    # (lo que iba a débito va a crédito y viceversa). Así queda balanceada y
+    # contablemente correcta sin duplicar la lógica.
+    if es_nota_credito:
+        for m in movimientos:
+            m["Débito"], m["Crédito"] = m["Crédito"], m["Débito"]
 
     return movimientos
 

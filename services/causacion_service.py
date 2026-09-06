@@ -546,6 +546,7 @@ def generar_siigo(
         mapeos_confirmados=mapeos_confirmados,
         tipo_comprobante=tipo_comprobante,
         centro_costo=centro_costo,
+        es_nota_credito=factura.get("tipo_documento") == "nota_credito",
     )
 
     validar_movimientos(movimientos)

@@ -763,16 +763,23 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
     except ET.ParseError as e:
         raise ValueError(f"'{nombre_archivo}': XML inválido: {e}") from e
 
-    # El DIAN puede envolver la factura en un AttachedDocument — extraer Invoice interno
+    # El DIAN puede envolver el documento en un AttachedDocument — extraer el
+    # documento interno (Factura, Nota Crédito o Nota Débito).
     tag = root.tag
     if "AttachedDocument" in tag or "ApplicationResponse" in tag:
-        ns_inv = f"{{{_NS['invoice']}}}Invoice"
-        invoice = root.find(f".//{ns_inv}")
-        if invoice is None:
-            invoice = root.find(".//Invoice")
-        if invoice is None:
-            raise ValueError(f"'{nombre_archivo}': No se encontró Invoice dentro del AttachedDocument.")
-        root = invoice
+        inner = None
+        for local in ("Invoice", "CreditNote", "DebitNote"):
+            for el in root.iter():
+                if el.tag.rsplit("}", 1)[-1] == local:
+                    inner = el
+                    break
+            if inner is not None:
+                break
+        if inner is None:
+            raise ValueError(
+                f"'{nombre_archivo}': No se encontró Invoice/CreditNote/DebitNote dentro del AttachedDocument."
+            )
+        root = inner
 
     cbc = _NS["cbc"]
     cac = _NS["cac"]
@@ -790,6 +797,17 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
 
     cufe = _xml_text(find("cbc:UUID"))
     fecha = _to_fecha(_xml_text(find("cbc:IssueDate")))
+
+    # ── Tipo de documento: factura / nota crédito / nota débito ──
+    root_local = root.tag.rsplit("}", 1)[-1]
+    if root_local == "CreditNote" or _xml_text(find("cbc:CreditNoteTypeCode")):
+        tipo_documento = "nota_credito"
+    elif root_local == "DebitNote" or _xml_text(find("cbc:DebitNoteTypeCode")):
+        tipo_documento = "nota_debito"
+    else:
+        tipo_documento = "factura"
+    # Factura original que referencia la nota (si aplica)
+    factura_referencia = _xml_text(find("cac:BillingReference/cac:InvoiceDocumentReference/cbc:ID"))
 
     # ── Proveedor ──
     nit = ""
@@ -914,7 +932,15 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
     # ── Ítems ──
     items: list[dict] = []
 
-    for line in findall("cac:InvoiceLine"):
+    # Una factura usa cac:InvoiceLine; una nota crédito cac:CreditNoteLine y una
+    # nota débito cac:DebitNoteLine. Todas comparten la misma estructura interna
+    # (Item, LineExtensionAmount, TaxTotal), así que se procesan igual.
+    lineas = (
+        findall("cac:InvoiceLine")
+        or findall("cac:CreditNoteLine")
+        or findall("cac:DebitNoteLine")
+    )
+    for line in lineas:
         # Descripción
         desc = ""
         item_el = line.find("cac:Item", _NS)
@@ -995,6 +1021,8 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
         "_fuente":                  "xml",
         "medio_pago":               medio_pago,
         "forma_pago":               forma_pago,
+        "tipo_documento":           tipo_documento,
+        "factura_referencia":       factura_referencia,
         "total":                    total,
         "items":                    items,
         "advertencias":             advertencias,
