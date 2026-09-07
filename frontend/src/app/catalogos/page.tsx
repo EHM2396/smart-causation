@@ -16,7 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { AlertCircle, AlertTriangle, Database, Receipt, BookOpen, Brain, Upload, Download, CheckCircle2, Trash2, Loader2, FileSpreadsheet } from "lucide-react";
+import { AlertCircle, AlertTriangle, Database, Receipt, BookOpen, Brain, Upload, Download, CheckCircle2, Trash2, Loader2, FileSpreadsheet, PlayCircle } from "lucide-react";
 import type { CuentaOpcion, ImpuestoOut, TipoComprobanteOpcion, IARegla, IADecision } from "@/lib/types";
 
 /** Extrae el mensaje legible de un error del API (formato `API 400: {"detail":"..."}`). */
@@ -192,14 +192,17 @@ function UploadExcelPanel({
   onLimpiar,
   onSuccess,
   limpiarLabel = "Limpiar catálogo",
+  videoTutorialId,
 }: {
   onUpload: (file: File) => Promise<UploadResult>;
   onPlantilla: () => Promise<Blob>;
   onLimpiar?: () => Promise<{ desactivados: number }>;
   onSuccess: () => void;
   limpiarLabel?: string;
+  videoTutorialId?: string;
 }) {
   const [uploading, setUploading] = useState(false);
+  const [tutorialOpen, setTutorialOpen] = useState(false);
   const [result, setResult] = useState<UploadResult | null>(null);
   const [err, setErr] = useState("");
 
@@ -315,6 +318,19 @@ function UploadExcelPanel({
           Descargar plantilla
         </button>
 
+        {/* Ver tutorial (solo donde se pasa un video) */}
+        {videoTutorialId && (
+          <button
+            type="button"
+            onClick={() => setTutorialOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-80"
+            style={{ borderColor: "color-mix(in srgb, var(--brand) 45%, transparent)", color: "var(--brand)", backgroundColor: "var(--brand-muted)" }}
+          >
+            <PlayCircle className="h-3.5 w-3.5" />
+            Ver tutorial
+          </button>
+        )}
+
         {/* Limpiar catálogo */}
         {onLimpiar && (
           <button
@@ -375,6 +391,29 @@ function UploadExcelPanel({
           </div>
         )}
       </div>
+
+      {/* Modal: tutorial en video (YouTube no listado) */}
+      {videoTutorialId && (
+        <Dialog open={tutorialOpen} onOpenChange={setTutorialOpen}>
+          <DialogContent className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Cómo cargar el archivo de impuestos</DialogTitle>
+              <DialogDescription>Sigue el paso a paso para cargar tus impuestos al catálogo.</DialogDescription>
+            </DialogHeader>
+            {/* Contenedor 16:9; el iframe se monta solo cuando el modal está abierto,
+                así el video no sigue sonando al cerrar. */}
+            <div className="relative w-full overflow-hidden rounded-lg" style={{ aspectRatio: "16 / 9", backgroundColor: "#000" }}>
+              <iframe
+                className="absolute inset-0 h-full w-full"
+                src={`https://www.youtube.com/embed/${videoTutorialId}?rel=0&modestbranding=1&playsinline=1${typeof window !== "undefined" ? `&origin=${encodeURIComponent(window.location.origin)}` : ""}`}
+                title="Tutorial: cargar impuestos"
+                allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                allowFullScreen
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Modal: confirmar carga */}
       <Dialog open={confirmUploadOpen} onOpenChange={(o) => { if (!o) { setConfirmUploadOpen(false); setPendingFile(null); } }}>
@@ -669,6 +708,7 @@ function ImpuestosTab({
         onPlantilla={api.descargarPlantillaImpuestos}
         onLimpiar={api.limpiarImpuestos}
         limpiarLabel="Limpiar impuestos"
+        videoTutorialId="yiv6G8vXxWE"
         onSuccess={() => qc.invalidateQueries({ queryKey: ["impuestos"] })}
       />
       <DataTableShell
