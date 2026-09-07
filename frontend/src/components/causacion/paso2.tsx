@@ -523,22 +523,13 @@ export function Paso2() {
   };
 
   // Cuenta las filas que estos mapeos producen en el archivo SIIGO. Espejo de
-  // core/exporter.construir_movimientos (dedup + gasto/IVA/retención + pago).
+  // core/exporter.construir_movimientos (gasto/IVA/retención + pago). NO se
+  // deduplican ítems idénticos: cada línea de la factura produce sus propias
+  // filas, así el conteo cuadra con el archivo real y el batching de 500 filas
+  // de SIIGO no se queda corto.
   const contarFilas = (ms: MapeoItem[]): number => {
-    const seen = new Set<string>();
-    const unicos: MapeoItem[] = [];
-    for (const m of ms) {
-      const k = [
-        String(m.descripcion ?? ""),
-        Math.round((m.base || 0) * 100) / 100,
-        Math.round((m.valor_impuesto || 0) * 100) / 100,
-        String(m.cuenta_gasto ?? ""),
-        !!m.es_retencion,
-      ].join("|");
-      if (!seen.has(k)) { seen.add(k); unicos.push(m); }
-    }
     let filas = 0, deb = 0, cred = 0;
-    for (const m of unicos) {
+    for (const m of ms) {
       const base = m.base || 0;
       const val = m.valor_impuesto || 0;
       const esRet = !!m.es_retencion;
@@ -1205,7 +1196,15 @@ export function Paso2() {
           </div>
           <div>
             <p className="text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Total factura</p>
-            <p className="mt-1 text-xl font-bold tabular-nums" style={{ color: "var(--text-primary)" }}>{fmt(totalCalculado)}</p>
+            {/* Total DECLARADO por la factura (consistente con la lista y la partida
+                doble). El "calculado" en vivo solo se muestra como nota cuando difiere
+                más allá del redondeo — así un descuadre real por overrides sigue visible. */}
+            <p className="mt-1 text-xl font-bold tabular-nums" style={{ color: "var(--text-primary)" }}>{fmt(factura.total || totalCalculado)}</p>
+            {factura.total > 0 && Math.abs(totalCalculado - factura.total) > Math.max(2, factura.items.length) && (
+              <p className="mt-0.5 text-[11px] font-medium tabular-nums" style={{ color: "var(--warning-text)" }}>
+                Calculado: {fmt(totalCalculado)}
+              </p>
+            )}
           </div>
         </div>
         {factura.advertencias && factura.advertencias.length > 0 && (

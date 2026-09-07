@@ -90,23 +90,15 @@ def construir_movimientos(
 
     total_debitos  = 0.0
     total_creditos = 0.0
+    lineas_iva: list[dict] = []  # referencias a las filas de IVA (para ajuste de redondeo)
 
-    # Deduplicar mapeos exactos para evitar filas dobles por formatos DIAN con filas de impuesto separadas
-    seen_mapeos: set[tuple] = set()
-    mapeos_unicos: list[dict] = []
+    # NO deduplicar los mapeos: cada ítem de la factura es una línea contable
+    # independiente, aunque dos ítems sean idénticos (mismo producto, base e IVA
+    # repetidos en varias líneas — algo común en facturas reales). Colapsarlos
+    # dejaba IVAs por fuera y descuadraba el comprobante contra el total de la
+    # factura. Las filas de "detalle de IVA" (base=0) de algunos exportes DIAN ya
+    # se descartan en el parser, así que aquí no hay artefactos que filtrar.
     for m in mapeos_confirmados:
-        key = (
-            str(m.get("descripcion", "")),
-            round(float(m.get("base", 0) or 0), 2),
-            round(float(m.get("valor_impuesto", 0) or 0), 2),
-            str(m.get("cuenta_gasto", "")),
-            bool(m.get("es_retencion", False)),
-        )
-        if key not in seen_mapeos:
-            seen_mapeos.add(key)
-            mapeos_unicos.append(m)
-
-    for m in mapeos_unicos:
         base        = float(m.get("base", 0) or 0)
         val_imp     = float(m.get("valor_impuesto", 0) or 0)
         es_ret      = bool(m.get("es_retencion", False))
@@ -138,12 +130,14 @@ def construir_movimientos(
         # crédito es "Iva devolución en compras" (luego se invierte a crédito).
         if val_imp and cuenta_imp_d and not es_ret and pct > 0:
             desc_iva = "Iva devolucion en compras" if es_nota_credito else "Iva descontable"
-            movimientos.append(_fila(
+            fila_iva = _fila(
                 tipo_comprobante, consecutivo, fecha, nit,
                 cuenta_imp_d, val_imp, None,
                 desc_iva,
                 centro_costo, observaciones, cod_imp,
-            ))
+            )
+            movimientos.append(fila_iva)
+            lineas_iva.append(fila_iva)
             total_debitos += val_imp
 
         # Fila de retención practicada (crédito)
@@ -156,9 +150,27 @@ def construir_movimientos(
             ))
             total_creditos += val_imp
 
+    # ── Ajuste de redondeo al total declarado por la factura ──
+    # El IVA renglón por renglón puede diferir en unos pesos del IVA que declara el
+    # encabezado de la factura (el proveedor redondea cada línea por separado). Para
+    # que el comprobante cuadre EXACTO contra el total de la factura —y para no
+    # tomarse más IVA descontable del que declara la DIAN— se absorbe esa diferencia
+    # en la línea de IVA de mayor valor. Solo se aplica si la diferencia es pequeña
+    # (redondeo); una diferencia grande indica otro problema y se deja intacta para
+    # no ocultarlo.
+    objetivo = round(float(factura.get("total", 0) or 0), 2)
+    if objetivo > 0 and lineas_iva:
+        delta = round(total_debitos - objetivo, 2)
+        tolerancia = max(2.0, len(mapeos_confirmados) * 1.0)
+        if 0 < abs(delta) <= tolerancia:
+            fila = max(lineas_iva, key=lambda r: float(r["Débito"] or 0))
+            ajustado = round(float(fila["Débito"] or 0) - delta, 2)
+            fila["Débito"] = ajustado if ajustado else ""
+            total_debitos = round(total_debitos - delta, 2)
+
     # Cuenta de pago seleccionada o aprendida para el proveedor (activo/pasivo)
-    cuenta_pago = str(mapeos_unicos[0].get("cuenta_pago", "")).strip() if mapeos_unicos else ""
-    cuenta_pago_nombre = str(mapeos_unicos[0].get("cuenta_pago_nombre", "")).strip() if mapeos_unicos else ""
+    cuenta_pago = str(mapeos_confirmados[0].get("cuenta_pago", "")).strip() if mapeos_confirmados else ""
+    cuenta_pago_nombre = str(mapeos_confirmados[0].get("cuenta_pago_nombre", "")).strip() if mapeos_confirmados else ""
     if not cuenta_pago:
         cuenta_pago = str(factura.get("cuenta_pago", "")).strip()
         cuenta_pago_nombre = factura.get("razon_social", "")
