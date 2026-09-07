@@ -192,14 +192,14 @@ function UploadExcelPanel({
   onLimpiar,
   onSuccess,
   limpiarLabel = "Limpiar catálogo",
-  videoTutorialId,
+  videoTutorialSrc,
 }: {
   onUpload: (file: File) => Promise<UploadResult>;
   onPlantilla: () => Promise<Blob>;
   onLimpiar?: () => Promise<{ desactivados: number }>;
   onSuccess: () => void;
   limpiarLabel?: string;
-  videoTutorialId?: string;
+  videoTutorialSrc?: string;
 }) {
   const [uploading, setUploading] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
@@ -319,7 +319,7 @@ function UploadExcelPanel({
         </button>
 
         {/* Ver tutorial (solo donde se pasa un video) */}
-        {videoTutorialId && (
+        {videoTutorialSrc && (
           <button
             type="button"
             onClick={() => setTutorialOpen(true)}
@@ -392,24 +392,27 @@ function UploadExcelPanel({
         )}
       </div>
 
-      {/* Modal: tutorial en video (YouTube no listado) */}
-      {videoTutorialId && (
+      {/* Modal: tutorial en video (reproductor propio, auto-alojado — sin YouTube) */}
+      {videoTutorialSrc && (
         <Dialog open={tutorialOpen} onOpenChange={setTutorialOpen}>
           <DialogContent className="max-w-3xl">
             <DialogHeader>
               <DialogTitle>Cómo cargar el archivo de impuestos</DialogTitle>
               <DialogDescription>Sigue el paso a paso para cargar tus impuestos al catálogo.</DialogDescription>
             </DialogHeader>
-            {/* Contenedor 16:9; el iframe se monta solo cuando el modal está abierto,
-                así el video no sigue sonando al cerrar. */}
+            {/* Contenedor 16:9; el <video> se monta solo cuando el modal está abierto,
+                así el video se detiene al cerrar. */}
             <div className="relative w-full overflow-hidden rounded-lg" style={{ aspectRatio: "16 / 9", backgroundColor: "#000" }}>
-              <iframe
+              <video
                 className="absolute inset-0 h-full w-full"
-                src={`https://www.youtube.com/embed/${videoTutorialId}?rel=0&modestbranding=1&playsinline=1${typeof window !== "undefined" ? `&origin=${encodeURIComponent(window.location.origin)}` : ""}`}
-                title="Tutorial: cargar impuestos"
-                allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-                allowFullScreen
-              />
+                src={videoTutorialSrc}
+                controls
+                autoPlay
+                playsInline
+                preload="auto"
+              >
+                Tu navegador no puede reproducir el video.
+              </video>
             </div>
           </DialogContent>
         </Dialog>
@@ -708,7 +711,7 @@ function ImpuestosTab({
         onPlantilla={api.descargarPlantillaImpuestos}
         onLimpiar={api.limpiarImpuestos}
         limpiarLabel="Limpiar impuestos"
-        videoTutorialId="yiv6G8vXxWE"
+        videoTutorialSrc="/tutoriales/impuestos.webm"
         onSuccess={() => qc.invalidateQueries({ queryKey: ["impuestos"] })}
       />
       <DataTableShell
