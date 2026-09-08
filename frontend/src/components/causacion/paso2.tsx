@@ -372,6 +372,12 @@ export function Paso2() {
     return v > 0 ? v : item.base;
   };
 
+  // Divisor de la tarifa: el ICA / ReteICA se expresa POR MIL (ej. 7.7 x 1000 =
+  // 0.77%), no en porcentaje. El resto (IVA, Retefuente, ReteIVA) es porcentaje.
+  const esPorMil = (imp?: { tipo_impuesto: string | null }) =>
+    (imp?.tipo_impuesto ?? "").toLowerCase().includes("ica");
+  const divisorTarifa = (imp?: { tipo_impuesto: string | null }) => (esPorMil(imp) ? 1000 : 100);
+
   // ── Borrador (guardado temporal) ─────────────────────────────────────────────
   const buildPaso2Snapshot = useCallback((): Paso2Snapshot => ({
     facturaCount: facturas.length,
@@ -476,7 +482,7 @@ export function Paso2() {
           if (rf) mapeos.push({
             idx_factura: newIdx, descripcion: `Retefuente ${rf.tarifa}%`,
             base: effBase, cod_impuesto: rf.codigo, porcentaje: rf.tarifa ?? 0,
-            valor_impuesto: Math.round((effBase * (rf.tarifa ?? 0)) / 100),
+            valor_impuesto: Math.round((effBase * (rf.tarifa ?? 0)) / divisorTarifa(rf)),
             cuenta_gasto: "", fuente: "manual",
             cuenta_impuesto_deb: "", cuenta_impuesto_cre: rf.cta_compras ?? "",
             es_retencion: true, cuenta_pago: pago, cuenta_pago_nombre: pagoNombre,
@@ -485,9 +491,9 @@ export function Paso2() {
         if (riItem[key]) {
           const ri = getImpInfo(riItem[key]);
           if (ri) mapeos.push({
-            idx_factura: newIdx, descripcion: `ReteICA ${ri.tarifa}%`,
+            idx_factura: newIdx, descripcion: `ReteICA ${ri.tarifa} x mil`,
             base: effBase, cod_impuesto: ri.codigo, porcentaje: ri.tarifa ?? 0,
-            valor_impuesto: Math.round((effBase * (ri.tarifa ?? 0)) / 100),
+            valor_impuesto: Math.round((effBase * (ri.tarifa ?? 0)) / divisorTarifa(ri)),
             cuenta_gasto: "", fuente: "manual",
             cuenta_impuesto_deb: "", cuenta_impuesto_cre: ri.cta_compras ?? "",
             es_retencion: true, cuenta_pago: pago, cuenta_pago_nombre: pagoNombre,
@@ -502,7 +508,7 @@ export function Paso2() {
       if (rf) mapeos.push({
         idx_factura: newIdx, descripcion: `Retefuente ${rf.tarifa}%`,
         base: totalBase, cod_impuesto: rf.codigo, porcentaje: rf.tarifa ?? 0,
-        valor_impuesto: Math.round((totalBase * (rf.tarifa ?? 0)) / 100),
+        valor_impuesto: Math.round((totalBase * (rf.tarifa ?? 0)) / divisorTarifa(rf)),
         cuenta_gasto: "", fuente: "manual",
         cuenta_impuesto_deb: "", cuenta_impuesto_cre: rf.cta_compras ?? "",
         es_retencion: true, cuenta_pago: cuentaPago[idx] ?? "", cuenta_pago_nombre: "",
@@ -511,9 +517,9 @@ export function Paso2() {
     if (riGlobal[idx]) {
       const ri = getImpInfo(riGlobal[idx]);
       if (ri) mapeos.push({
-        idx_factura: newIdx, descripcion: `ReteICA ${ri.tarifa}%`,
+        idx_factura: newIdx, descripcion: `ReteICA ${ri.tarifa} x mil`,
         base: totalBase, cod_impuesto: ri.codigo, porcentaje: ri.tarifa ?? 0,
-        valor_impuesto: Math.round((totalBase * (ri.tarifa ?? 0)) / 100),
+        valor_impuesto: Math.round((totalBase * (ri.tarifa ?? 0)) / divisorTarifa(ri)),
         cuenta_gasto: "", fuente: "manual",
         cuenta_impuesto_deb: "", cuenta_impuesto_cre: ri.cta_compras ?? "",
         es_retencion: true, cuenta_pago: cuentaPago[idx] ?? "", cuenta_pago_nombre: "",
