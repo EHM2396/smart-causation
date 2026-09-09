@@ -38,6 +38,7 @@ class ConsultarRequest(BaseModel):
     auth_url: str = Field(..., description="URL completa de AuthToken de la DIAN")
     fecha_desde: str = Field(..., description="DD/MM/YYYY")
     fecha_hasta: str = Field(..., description="DD/MM/YYYY")
+    modo: str = Field("compras", description="'compras' (recibidos) | 'ventas' (emitidos)")
 
 
 class DocumentoDian(BaseModel):
@@ -57,6 +58,7 @@ class ConsultarResponse(BaseModel):
 class ImportarRequest(BaseModel):
     auth_url: str
     ids: list[str] = Field(..., description="DT_RowId de las facturas a importar")
+    modo: str = Field("compras", description="'compras' (recibidos) | 'ventas' (emitidos)")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -77,17 +79,28 @@ def _mapear_error(e: DianError) -> HTTPException:
     return HTTPException(status_code=status, detail=e.message)
 
 
-def _filtrar_ventas(facturas: list[dict], empresa: Empresa) -> list[dict]:
-    """Quita facturas de venta (emisor == NIT de la empresa). Mismo criterio que /causacion/parsear."""
+def _filtrar_por_modo(facturas: list[dict], empresa: Empresa, modo: str = "compras") -> list[dict]:
+    """Filtra según el módulo. Mismo criterio que /causacion/parsear:
+      - ``compras``: conserva compras (emisor ≠ NIT empresa) y omite ventas.
+      - ``ventas``: conserva ventas (emisor == NIT empresa) y omite compras.
+    """
     if not empresa.nit:
         return facturas
     nit_empresa = re.sub(r"[^\d]", "", empresa.nit)
     if not nit_empresa:
         return facturas
+    es_venta = (modo or "compras").lower() == "ventas"
     compras, ventas = [], []
     for fac in facturas:
         nit_emisor = re.sub(r"[^\d]", "", fac.get("nit", "") or "")
         (ventas if (nit_emisor and nit_emisor == nit_empresa) else compras).append(fac)
+
+    if es_venta:
+        if compras and ventas:
+            ventas[0].setdefault("advertencias", []).append(
+                f"{len(compras)} factura(s) de compra omitida(s) (no son ventas de tu empresa)."
+            )
+        return ventas
     if ventas and compras:
         compras[0].setdefault("advertencias", []).append(
             f"{len(ventas)} factura(s) de venta omitida(s) (son ventas de tu empresa, no compras)."
@@ -102,7 +115,7 @@ def consultar(body: ConsultarRequest, empresa: EmpresaActiva):
     """Lista las facturas recibidas de la DIAN en el rango de fechas (sin descargar XML)."""
     try:
         return dian_service.consultar_documentos(
-            body.auth_url, body.fecha_desde, body.fecha_hasta
+            body.auth_url, body.fecha_desde, body.fecha_hasta, modo=body.modo
         )
     except DianError as e:
         raise _mapear_error(e)
@@ -129,7 +142,7 @@ def importar(body: ImportarRequest, empresa: EmpresaActiva):
         errores = 0
         emitido_start = False
         try:
-            for done, total, id_, xml in dian_service.descargar_xmls_stream(body.auth_url, body.ids):
+            for done, total, id_, xml in dian_service.descargar_xmls_stream(body.auth_url, body.ids, modo=body.modo):
                 if not emitido_start:
                     yield json.dumps({"type": "start", "total": total}) + "\n"
                     emitido_start = True
@@ -140,7 +153,7 @@ def importar(body: ImportarRequest, empresa: EmpresaActiva):
                     errores += 1
                 yield json.dumps({"type": "progress", "done": done, "total": total}) + "\n"
 
-            facturas = _filtrar_ventas(facturas, empresa)
+            facturas = _filtrar_por_modo(facturas, empresa, modo=body.modo)
             if errores and facturas:
                 facturas[0].setdefault("advertencias", []).append(
                     f"{errores} factura(s) no se pudieron parsear y se omitieron."

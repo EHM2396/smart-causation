@@ -1,6 +1,6 @@
 "use client";
 import { useEffect } from "react";
-import { useWizardStore } from "@/stores/wizard";
+import { useWizardStore, esModoNC, esModoVenta } from "@/stores/wizard";
 import type { DocTipo } from "@/stores/wizard";
 import { StepIndicator } from "./step-indicator";
 import { Paso1 } from "./paso1";
@@ -117,12 +117,16 @@ function CatalogGate() {
 }
 
 function NcRuteadasAviso() {
-  const esNC = useWizardStore((s) => s.docTipo === "nc");
+  const docTipo = useWizardStore((s) => s.docTipo);
   const ncRuteadas = useWizardStore((s) => s.ncRuteadas);
   const setNcRuteadas = useWizardStore((s) => s.setNcRuteadas);
 
-  // Solo tiene sentido en el módulo de Compras (en NC no se rutea nada).
-  if (esNC || ncRuteadas <= 0) return null;
+  // Solo tiene sentido en un módulo base (Compras/Ventas); en NC no se rutea nada.
+  if (esModoNC(docTipo) || ncRuteadas <= 0) return null;
+
+  const esVenta = esModoVenta(docTipo);
+  const ncLabel = esVenta ? "NC Ventas" : "NC Compras";
+  const ncHref = esVenta ? "/causacion-nc-ventas" : "/causacion-nc";
 
   return (
     <div
@@ -136,17 +140,17 @@ function NcRuteadasAviso() {
             {ncRuteadas} nota{ncRuteadas !== 1 ? "s" : ""} crédito detectada{ncRuteadas !== 1 ? "s" : ""} en este lote
           </p>
           <p className="mt-0.5 text-xs" style={{ color: "var(--info-text)", opacity: 0.85 }}>
-            Se enviaron a <strong>NC Compras</strong> y quedaron <strong>guardadas en borrador</strong> — entra a ese módulo para causarlas. No necesitas volver a cargarlas.
+            Se enviaron a <strong>{ncLabel}</strong> y quedaron <strong>guardadas en borrador</strong> — entra a ese módulo para causarlas. No necesitas volver a cargarlas.
           </p>
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <Link
-          href="/causacion-nc"
+          href={ncHref}
           className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold no-underline"
           style={{ backgroundColor: "var(--info-text)", color: "#fff" }}
         >
-          <ArrowRight className="h-4 w-4" /> Ir a NC Compras
+          <ArrowRight className="h-4 w-4" /> Ir a {ncLabel}
         </Link>
         <button
           type="button"
@@ -175,7 +179,7 @@ export function CausacionWizard({ docTipo = "compras" }: { docTipo?: DocTipo }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docTipo]);
 
-  const esNC = docTipo === "nc";
+  const esNC = esModoNC(docTipo);
   const totalItems = facturas.reduce((s, f) => s + f.items.length, 0);
   const mapeados = mapeos.filter((m) => m.cuenta_gasto).length;
 

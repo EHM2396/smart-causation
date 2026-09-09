@@ -3,7 +3,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
-import { FileSpreadsheet, FileMinus2, BookOpen, History, UserCircle, Users } from "lucide-react";
+import { FileSpreadsheet, FileMinus2, BookOpen, History, UserCircle, Users, ReceiptText } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface NavNode {
@@ -14,13 +14,19 @@ interface NavNode {
   children?: NavNode[];
 }
 
-// "Causación Compras" es un módulo con submódulos (por ahora NC; más adelante
-// notas débito). A futuro habrá también "Causación Ventas" con sus submódulos.
+// "Causación Compras" y "Causación Ventas" son módulos con submódulos (por ahora
+// NC; más adelante notas débito).
 const NAV: NavNode[] = [
   {
     href: "/causacion", icon: FileSpreadsheet, label: "Causación Compras", desc: "Facturas de compra DIAN",
     children: [
       { href: "/causacion-nc", icon: FileMinus2, label: "NC Compras", desc: "Notas crédito de compra" },
+    ],
+  },
+  {
+    href: "/causacion-ventas", icon: ReceiptText, label: "Causación Ventas", desc: "Facturas de venta DIAN",
+    children: [
+      { href: "/causacion-nc-ventas", icon: FileMinus2, label: "NC Ventas", desc: "Devoluciones en ventas" },
     ],
   },
   { href: "/historial", icon: History, label: "Historial", desc: "Facturas causadas" },

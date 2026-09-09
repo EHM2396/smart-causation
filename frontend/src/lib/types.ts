@@ -58,7 +58,8 @@ export interface FacturaCausadaInfo {
 export interface FacturaOmitida {
   filename: string;
   numero: string;
-  motivo: "venta" | "ya_causada";
+  // "venta": omitida en un módulo de compras · "compra": omitida en un módulo de ventas
+  motivo: "venta" | "compra" | "ya_causada";
 }
 
 // ─── Facturas / Parseo ────────────────────────────────────────────────────────
@@ -82,6 +83,8 @@ export interface Factura {
   regimen?: string;
   medio_pago?: string;
   forma_pago?: string;
+  // "factura" | "nota_credito" | "nota_debito" — lo emite el parser (solo XML/ZIP/PDF).
+  tipo_documento?: string;
   items: ItemFactura[];
   advertencias?: string[];
   _archivo?: string;

@@ -16,6 +16,13 @@ const MOTIVO_CONFIG = {
     border: "rgba(99,102,241,0.3)",
     Icon: TrendingDown,
   },
+  compra: {
+    label: "Factura de compra",
+    color: "rgb(217,119,6)",
+    bg: "rgba(217,119,6,0.12)",
+    border: "rgba(217,119,6,0.3)",
+    Icon: TrendingDown,
+  },
   ya_causada: {
     label: "Ya causada",
     color: "var(--success)",
@@ -27,6 +34,8 @@ const MOTIVO_CONFIG = {
 
 export function OmitidasModal({ omitidas, onClose }: Props) {
   const ventas = omitidas.filter((o) => o.motivo === "venta");
+  const compras = omitidas.filter((o) => o.motivo === "compra");
+  const excluidas = ventas.length + compras.length; // documentos del tipo opuesto al módulo
   const causadas = omitidas.filter((o) => o.motivo === "ya_causada");
 
   const modal = (
@@ -50,8 +59,8 @@ export function OmitidasModal({ omitidas, onClose }: Props) {
             </h2>
             <p className="mt-0.5 text-xs" style={{ color: "var(--text-primary)" }}>
               {omitidas.length} factura{omitidas.length !== 1 ? "s" : ""} no procesada{omitidas.length !== 1 ? "s" : ""}
-              {ventas.length > 0 && causadas.length > 0 && (
-                <> · {ventas.length} venta{ventas.length !== 1 ? "s" : ""}, {causadas.length} ya causada{causadas.length !== 1 ? "s" : ""}</>
+              {excluidas > 0 && causadas.length > 0 && (
+                <> · {excluidas} de otro tipo, {causadas.length} ya causada{causadas.length !== 1 ? "s" : ""}</>
               )}
             </p>
           </div>
@@ -147,7 +156,7 @@ export function OmitidasModal({ omitidas, onClose }: Props) {
         </div>
 
         {/* Footer fijo — leyenda explicativa */}
-        {(ventas.length > 0 || causadas.length > 0) && (
+        {(excluidas > 0 || causadas.length > 0) && (
           <div
             className="shrink-0 border-t px-6 py-4 space-y-1.5"
             style={{ borderColor: "var(--border-soft)" }}
@@ -155,7 +164,13 @@ export function OmitidasModal({ omitidas, onClose }: Props) {
             {ventas.length > 0 && (
               <p className="text-xs" style={{ color: "var(--text-primary)" }}>
                 <span className="font-semibold" style={{ color: "rgb(99,102,241)" }}>Facturas de venta</span>
-                {" "}— emitidas por tu empresa. Este módulo solo procesa compras; la causación de ventas estará disponible próximamente.
+                {" "}— emitidas por tu empresa. Este módulo procesa compras; usa el módulo de Causación Ventas.
+              </p>
+            )}
+            {compras.length > 0 && (
+              <p className="text-xs" style={{ color: "var(--text-primary)" }}>
+                <span className="font-semibold" style={{ color: "rgb(217,119,6)" }}>Facturas de compra</span>
+                {" "}— emitidas por un proveedor. Este módulo procesa ventas; usa el módulo de Causación Compras.
               </p>
             )}
             {causadas.length > 0 && (

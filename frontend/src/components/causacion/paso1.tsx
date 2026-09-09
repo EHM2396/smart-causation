@@ -1,7 +1,7 @@
 "use client";
 import { useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useWizardStore } from "@/stores/wizard";
+import { useWizardStore, esModoNC, esModoVenta, modoParseo, tipoNCHermano } from "@/stores/wizard";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle2, Loader2, TrendingDown, Clock, History, Trash2, ArrowRight, Building2 } from "lucide-react";
@@ -31,7 +31,12 @@ function fechaBorrador(iso: string): string {
 
 export function Paso1() {
   const { docTipo, ncRuteadas, setNcRuteadas, setFacturas, setFacturasYaCausadas, setPaso, facturas: stored, setPdfUrls, pdfUrls, setFilesProcesando, setSuggestions, setPaso2Cache, setFacturasOmitidas, hydrateBorrador, tutorialActivo } = useWizardStore();
-  const esNC = docTipo === "nc";
+  const esNC = esModoNC(docTipo);
+  const esVenta = esModoVenta(docTipo);
+  // Etiqueta de lo que se EXCLUYE en este módulo: en compras se excluyen ventas y
+  // viceversa. El backend marca esas omisiones con el prefijo [VENTA] o [COMPRA].
+  const tagExcluido = esVenta ? "[COMPRA]" : "[VENTA]";
+  const nombreExcluido = esVenta ? "compra" : "venta";
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -77,12 +82,14 @@ export function Paso1() {
     }
   };
 
-  // Envía notas crédito detectadas en el módulo de Compras al borrador de NC
-  // (bandeja), para que aparezcan en "NC Compras" sin re-cargarlas.
+  // Envía notas crédito detectadas en el módulo base (Compras o Ventas) a la
+  // bandeja de NC hermana (NC Compras o NC Ventas), para que aparezcan allí sin
+  // re-cargarlas.
   const rutearANC = async (ncs: Factura[]) => {
     if (!ncs.length) return;
+    const tipoNC = tipoNCHermano(docTipo);
     try {
-      const completo = await api.getBorradorCompleto("nc");
+      const completo = await api.getBorradorCompleto(tipoNC);
       const prev = (completo?.datos ?? {}) as Record<string, unknown>;
       const existentes = (prev.facturas as Factura[]) ?? [];
       const nums = new Set(existentes.map((f) => f.numero_dian));
@@ -101,8 +108,8 @@ export function Paso1() {
         total_facturas: merged.length,
         total_verificadas: 0,
         tipo_comp: snapshot.tipoComp || null,
-      }, "nc");
-      queryClient.invalidateQueries({ queryKey: ["borrador", "nc"] });
+      }, tipoNC);
+      queryClient.invalidateQueries({ queryKey: ["borrador", tipoNC] });
     } catch {
       // Si falla el ruteo, igual se avisa al usuario que hay NC.
     }
@@ -145,10 +152,10 @@ export function Paso1() {
     if (esNC) {
       // Módulo NC: solo notas crédito; lo demás se omite.
       const otras = parsed.filter((f) => !esNotaCredito(f));
-      if (otras.length) errs.push(`${otras.length} documento(s) que no son nota crédito se omitieron (van en Causación Compras).`);
+      if (otras.length) errs.push(`${otras.length} documento(s) que no son nota crédito se omitieron (van en Causación ${esVenta ? "Ventas" : "Compras"}).`);
       parsed = parsed.filter(esNotaCredito);
     } else {
-      // Módulo Compras: NC se rutean a NC Compras; ND aún no soportadas.
+      // Módulo base (Compras/Ventas): NC se rutean a su bandeja NC; ND aún no soportadas.
       const ncs = parsed.filter(esNotaCredito);
       const nds = parsed.filter(esNotaDebito);
       if (ncs.length) {
@@ -194,7 +201,7 @@ export function Paso1() {
 
     // Hay compras válidas → construir omisiones y avanzar a paso2
     const omisionesParaPaso2: import("@/lib/types").FacturaOmitida[] = [
-      ...ventas.map((v) => ({ filename: v.filename, numero: v.numero, motivo: "venta" as const })),
+      ...ventas.map((v) => ({ filename: v.filename, numero: v.numero, motivo: (esVenta ? "compra" : "venta") as "compra" | "venta" })),
       ...causadasInfo.map((c) => ({
         filename: parsed.find((f) => f.numero_dian === c.numero_dian)?._archivo ?? "",
         numero: c.numero_dian,
@@ -240,15 +247,17 @@ export function Paso1() {
         newPdfUrls[file.name] = URL.createObjectURL(file);
       }
       try {
-        const result: Factura[] = await api.parsearFacturas(file);
+        const result: Factura[] = await api.parsearFacturas(file, modoParseo(docTipo));
         for (const f of result) {
           parsed.push({ ...f, _archivo: file.name });
           for (const adv of f.advertencias ?? []) errs.push(`${file.name}: ${adv}`);
         }
       } catch (e) {
         const msg = (e as Error).message;
-        if (msg.includes("[VENTA]")) {
-          const match = msg.match(/\[VENTA\]\s*([^:]+):/);
+        if (msg.includes(tagExcluido)) {
+          // El backend rechazó un archivo del tipo opuesto ([VENTA] en compras,
+          // [COMPRA] en ventas). Se muestra como documento excluido, no como error.
+          const match = msg.match(/\[(?:VENTA|COMPRA)\]\s*([^:]+):/);
           ventas.push({ filename: file.name, numero: match?.[1]?.trim() ?? file.name });
         } else {
           errs.push(`${file.name}: ${msg}`);
@@ -278,11 +287,15 @@ export function Paso1() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-[var(--text-primary)]">{esNC ? "Cargar notas crédito DIAN" : "Cargar facturas DIAN"}</h2>
+        <h2 className="text-xl font-semibold text-[var(--text-primary)]">
+          {esNC
+            ? `Cargar notas crédito${esVenta ? " de venta" : ""} DIAN`
+            : `Cargar facturas${esVenta ? " de venta" : ""} DIAN`}
+        </h2>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
           {esNC
-            ? "Módulo exclusivo de notas crédito. También puedes subir XML/ZIP/PDF de notas crédito; las facturas de compra van en el otro módulo."
-            : <>Sube archivos <code className="text-[var(--brand)] font-medium">.xlsx</code> del portal DIAN, archivos <code className="text-[var(--brand)] font-medium">.zip</code>, <code className="text-[var(--brand)] font-medium">.xml</code> o <code className="text-[var(--brand)] font-medium">.pdf</code> de factura electrónica DIAN. Puedes subir varios a la vez.</>}
+            ? `Módulo exclusivo de notas crédito${esVenta ? " de venta (devoluciones)" : ""}. También puedes subir XML/ZIP/PDF de notas crédito; las facturas ${esVenta ? "de venta" : "de compra"} van en el otro módulo.`
+            : <>Sube archivos <code className="text-[var(--brand)] font-medium">.xlsx</code> del portal DIAN, archivos <code className="text-[var(--brand)] font-medium">.zip</code>, <code className="text-[var(--brand)] font-medium">.xml</code> o <code className="text-[var(--brand)] font-medium">.pdf</code> de factura electrónica {esVenta ? "de venta " : ""}DIAN. Puedes subir varios a la vez.</>}
         </p>
       </div>
 
@@ -356,7 +369,7 @@ export function Paso1() {
       </div>
 
       {/* ── Traer de la DIAN ── */}
-      {modo === "dian" && <DianPanel onImportadas={importarDeDian} />}
+      {modo === "dian" && <DianPanel onImportadas={importarDeDian} modo={modoParseo(docTipo)} />}
 
       {/* ── Carga manual de archivos ── */}
       {modo === "archivos" && (
@@ -512,21 +525,26 @@ export function Paso1() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-sm font-semibold" style={{ color: "var(--brand-btn)" }}>
                       {ventasDetectadas.length === 1
-                        ? "1 factura de venta excluida"
-                        : `${ventasDetectadas.length} facturas de venta excluidas`}
+                        ? `1 factura de ${nombreExcluido} excluida`
+                        : `${ventasDetectadas.length} facturas de ${nombreExcluido} excluidas`}
                     </p>
-                    <span
-                      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold"
-                      style={{ backgroundColor: "color-mix(in srgb, var(--brand-btn) 15%, transparent)", color: "var(--brand-btn)", border: "1px solid color-mix(in srgb, var(--brand-btn) 35%, transparent)" }}
-                    >
-                      <Clock className="h-3 w-3" /> Próximamente
-                    </span>
+                    {!esVenta && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold"
+                        style={{ backgroundColor: "color-mix(in srgb, var(--brand-btn) 15%, transparent)", color: "var(--brand-btn)", border: "1px solid color-mix(in srgb, var(--brand-btn) 35%, transparent)" }}
+                      >
+                        <Clock className="h-3 w-3" /> Próximamente
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
                     {ventasDetectadas.length === 1
-                      ? "Esta factura corresponde a una venta de tu empresa y no puede causarse en este módulo."
-                      : "Estas facturas corresponden a ventas de tu empresa y no pueden causarse en este módulo."}
-                    {" "}El módulo de causación de ventas estará disponible próximamente.
+                      ? `Esta factura corresponde a una ${nombreExcluido} y no puede causarse en este módulo.`
+                      : `Estas facturas corresponden a ${nombreExcluido}s y no pueden causarse en este módulo.`}
+                    {" "}
+                    {esVenta
+                      ? "Úsalas en el módulo de Causación Compras."
+                      : "El módulo de causación de ventas estará disponible próximamente."}
                   </p>
                 </div>
               </div>
@@ -547,7 +565,7 @@ export function Paso1() {
               {stored.length > 0 && (
                 <div className="pl-12">
                   <Button size="sm" onClick={() => setPaso(2)}>
-                    Continuar con {stored.length} factura{stored.length !== 1 ? "s" : ""} de compra →
+                    Continuar con {stored.length} factura{stored.length !== 1 ? "s" : ""} de {esVenta ? "venta" : "compra"} →
                   </Button>
                 </div>
               )}

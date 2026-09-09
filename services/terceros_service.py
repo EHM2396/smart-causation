@@ -196,13 +196,15 @@ def _resolver_geo(
         if codigo_depto:
             codigo_ciudad = cache["ciudad_depto"].get((codigo_depto, nciudad))
         if codigo_ciudad is None:
-            # Fallback: ciudad por nombre en todo el país; si es única, se usa
-            # (y de paso resuelve el departamento si venía vacío o no coincidía).
+            # Fallback: ciudad por nombre en todo el país; si es única, se usa.
+            # La ciudad encontrada MANDA sobre el departamento: su código de
+            # municipio ya codifica el departamento, así que se alinea siempre
+            # (evita combinaciones inconsistentes como depto 17 + municipio 76001
+            # = Cali, que SIIGO rechaza).
             matches = cache["ciudad"].get(nciudad, [])
             if len(matches) == 1:
                 codigo_ciudad, depto_de_ciudad = matches[0]
-                if codigo_depto is None:
-                    codigo_depto = depto_de_ciudad
+                codigo_depto = depto_de_ciudad
 
     return codigo_depto, codigo_ciudad
 

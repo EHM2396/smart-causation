@@ -36,7 +36,18 @@ interface Paso2Cache {
   baseOverride: Record<string, string>;
 }
 
-export type DocTipo = "compras" | "nc";
+// Los cuatro modos del wizard: compras y sus notas crédito, ventas y sus notas
+// crédito (devoluciones). Cada uno tiene su propia bandeja de borrador.
+export type DocTipo = "compras" | "nc" | "ventas" | "nc_ventas";
+
+/** ¿El módulo es de ventas (factura de venta o devolución en ventas)? */
+export const esModoVenta = (t: DocTipo): boolean => t === "ventas" || t === "nc_ventas";
+/** ¿El módulo procesa notas crédito? (NC compras o NC ventas) */
+export const esModoNC = (t: DocTipo): boolean => t === "nc" || t === "nc_ventas";
+/** Bandeja NC hermana del módulo base (compras→nc, ventas→nc_ventas). */
+export const tipoNCHermano = (t: DocTipo): DocTipo => (esModoVenta(t) ? "nc_ventas" : "nc");
+/** Modo para /causacion/parsear y /dian según el módulo. */
+export const modoParseo = (t: DocTipo): "compras" | "ventas" => (esModoVenta(t) ? "ventas" : "compras");
 
 interface WizardState {
   docTipo: DocTipo;
