@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, CheckCircle2, AlertCircle, User, Building2, Lock, Eye, EyeOff, BookOpen, RotateCcw } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, User, Lock, Eye, EyeOff, BookOpen, RotateCcw } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
 
@@ -95,12 +95,12 @@ function FeedbackMsg({ fb }: { fb: Feedback }) {
 export default function PerfilPage() {
   const router = useRouter();
   const { usuario, setTutorialPendiente } = useAuthStore();
+  // El admin no tiene empresa propia ni tutorial → no se le muestran esas secciones.
+  const esAdmin = usuario?.rol === "org_admin" || usuario?.rol === "admin";
 
   // ── Info personal + empresa ───────────────────────────────────────────────
   const [nombre, setNombre] = useState("");
   const [email, setEmail] = useState("");
-  const [nombreEmpresa, setNombreEmpresa] = useState("");
-  const [nit, setNit] = useState("");
   const [loadingPerfil, setLoadingPerfil] = useState(false);
   const [fbPerfil, setFbPerfil] = useState<Feedback | null>(null);
 
@@ -122,8 +122,6 @@ export default function PerfilPage() {
     api.me().then((data) => {
       setNombre(data.nombre ?? "");
       setEmail(data.email ?? "");
-      setNombreEmpresa(data.empresa_nombre ?? "");
-      setNit(data.empresa_nit ?? "");
     });
   }, []);
 
@@ -132,11 +130,7 @@ export default function PerfilPage() {
     setLoadingPerfil(true);
     setFbPerfil(null);
     try {
-      const res = await api.actualizarPerfil({
-        nombre,
-        nombre_empresa: nombreEmpresa,
-        nit_empresa: nit || undefined,
-      });
+      const res = await api.actualizarPerfil({ nombre });
       setFbPerfil({ type: "success", message: res.message });
     } catch (err) {
       const raw = err instanceof Error ? err.message : "Error al guardar";
@@ -176,7 +170,7 @@ export default function PerfilPage() {
       <div>
         <h1 className="text-xl font-bold" style={{ color: "var(--text-primary)" }}>Mi perfil</h1>
         <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-          Administra tu información personal y de empresa
+          Administra tu información personal y tu contraseña
         </p>
       </div>
 
@@ -220,39 +214,6 @@ export default function PerfilPage() {
           <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
             El correo no puede modificarse
           </p>
-        </div>
-
-        <div className="pt-1" style={{ borderTop: "1px solid var(--border-soft)" }}>
-          <div className="flex items-center gap-2 pb-4 pt-3">
-            <Building2 className="h-4 w-4" style={{ color: "var(--brand)" }} />
-            <h2 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Empresa</h2>
-          </div>
-          <div className="space-y-4">
-            <div>
-              <label className={labelCls} style={labelStyle}>Nombre de la empresa</label>
-              <input
-                type="text"
-                required
-                value={nombreEmpresa}
-                onChange={(e) => setNombreEmpresa(e.target.value)}
-                className={inputCls}
-                style={inputStyle}
-              />
-            </div>
-            <div>
-              <label className={labelCls} style={labelStyle}>
-                NIT <span style={{ color: "var(--text-muted)" }}>(opcional)</span>
-              </label>
-              <input
-                type="text"
-                value={nit}
-                onChange={(e) => setNit(e.target.value)}
-                placeholder="900123456-1"
-                className={inputCls}
-                style={inputStyle}
-              />
-            </div>
-          </div>
         </div>
 
         {fbPerfil && <FeedbackMsg fb={fbPerfil} />}
@@ -360,32 +321,34 @@ export default function PerfilPage() {
         </button>
       </form>
 
-      {/* ── Tutorial ────────────────────────────────────────────────────────── */}
-      <div
-        className="rounded-2xl border p-6 space-y-4"
-        style={{ backgroundColor: "var(--bg-surface)", borderColor: "var(--border-soft)" }}
-      >
-        <div className="flex items-center gap-2 pb-1" style={{ borderBottom: "1px solid var(--border-soft)" }}>
-          <BookOpen className="h-4 w-4" style={{ color: "var(--brand)" }} />
-          <h2 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Tutorial</h2>
-        </div>
-        <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-          Reinicia el tutorial paso a paso para volver a ver cómo funciona la plataforma desde el principio.
-        </p>
-        <button
-          type="button"
-          onClick={async () => {
-            await api.actualizarTutorial(true).catch(() => {});
-            setTutorialPendiente(true);
-            router.push("/causacion");
-          }}
-          className="flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-opacity hover:opacity-80"
-          style={{ backgroundColor: "var(--brand)", color: "#fff", border: "none", cursor: "pointer" }}
+      {/* ── Tutorial (solo causadores) ──────────────────────────────────────── */}
+      {!esAdmin && (
+        <div
+          className="rounded-2xl border p-6 space-y-4"
+          style={{ backgroundColor: "var(--bg-surface)", borderColor: "var(--border-soft)" }}
         >
-          <RotateCcw className="h-4 w-4" />
-          Reiniciar tutorial
-        </button>
-      </div>
+          <div className="flex items-center gap-2 pb-1" style={{ borderBottom: "1px solid var(--border-soft)" }}>
+            <BookOpen className="h-4 w-4" style={{ color: "var(--brand)" }} />
+            <h2 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Tutorial</h2>
+          </div>
+          <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+            Reinicia el tutorial paso a paso para volver a ver cómo funciona la plataforma desde el principio.
+          </p>
+          <button
+            type="button"
+            onClick={async () => {
+              await api.actualizarTutorial(true).catch(() => {});
+              setTutorialPendiente(true);
+              router.push("/causacion");
+            }}
+            className="flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-opacity hover:opacity-80"
+            style={{ backgroundColor: "var(--brand)", color: "#fff", border: "none", cursor: "pointer" }}
+          >
+            <RotateCcw className="h-4 w-4" />
+            Reiniciar tutorial
+          </button>
+        </div>
+      )}
     </div>
   );
 }

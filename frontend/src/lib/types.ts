@@ -300,6 +300,79 @@ export interface LoginResponse {
   tutorial_pendiente: boolean;
 }
 
+// ─── Admin (panel de cuenta) ──────────────────────────────────────────────────
+
+export interface AdminConsumo {
+  plan: string | null;
+  ilimitado: boolean;
+  cupo_mes: number | null;
+  usadas_mes: number;
+  restantes: number | null;
+  periodo: string;
+  // Solo en cuentas de prueba (Free):
+  prueba?: boolean;
+  dias_restantes?: number | null;
+  vencida?: boolean;
+  prueba_expira?: string | null;
+}
+
+export interface AdminLimite {
+  ilimitado?: boolean;
+  max?: number;
+  actuales?: number;
+}
+
+export interface AdminCuenta {
+  id: number;
+  nombre: string;
+  estado: string;
+  consumo: AdminConsumo;
+  limite_usuarios: AdminLimite;
+  limite_empresas: AdminLimite;
+}
+
+export interface AdminUsuario {
+  id: number;
+  email: string;
+  nombre: string;
+  activo: boolean;
+  cupo_mes: number | null;       // tope de causaciones/mes (null = sin tope propio)
+  max_empresas: number | null;   // cuántas empresas puede crear (null = sin tope propio)
+  empresas_creadas: number;      // cuántas ha creado
+}
+
+export interface AdminEmpresa {
+  id: number;
+  nombre: string;
+  nit: string | null;
+  activa: boolean;
+  creada_por?: string | null;    // nombre del causador que la creó
+}
+
+export interface AdminDashboardFila {
+  nombre: string;
+  causaciones: number;
+  monto: number;
+}
+
+export interface AdminDashboard {
+  periodo: { desde: string; hasta: string };
+  total_causaciones: number;
+  monto_total: number;
+  por_usuario: (AdminDashboardFila & { usuario_id: number | null })[];
+  por_empresa: (AdminDashboardFila & { empresa_id: number | null })[];
+  consumo_mes: AdminConsumo;
+}
+
+export interface AdminUsuarioDetalle {
+  usuario: { id: number; nombre: string; email: string };
+  periodo: { desde: string; hasta: string };
+  total: number;
+  monto: number;
+  por_empresa: AdminDashboardFila[];
+  detalle: { fecha: string; empresa: string; numero: string; proveedor: string; total: number }[];
+}
+
 // ─── Wizard state ─────────────────────────────────────────────────────────────
 
 export type PasoWizard = 1 | 2 | 3 | 4;

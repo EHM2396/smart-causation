@@ -10,6 +10,9 @@ from db.models.auth import (                               # noqa: F401
     Usuario,
     Empresa,
     UsuarioEmpresa,
+    CuentaCliente,
+    CausacionAdicional,
+    CupoCausacion,
 )
 from db.models.legal import (                              # noqa: F401
     Consentimiento,
@@ -48,6 +51,9 @@ __all__ = [
     "Usuario",
     "Empresa",
     "UsuarioEmpresa",
+    "CuentaCliente",
+    "CausacionAdicional",
+    "CupoCausacion",
     "Consentimiento",
     "CuentaContable",
     "CodigoImpuesto",

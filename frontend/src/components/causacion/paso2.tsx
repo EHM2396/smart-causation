@@ -3,6 +3,7 @@ import { Fragment, useState, useEffect, useRef, useCallback, useMemo } from "rea
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWizardStore } from "@/stores/wizard";
+import { useAuthStore } from "@/stores/auth";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
@@ -109,6 +110,7 @@ export function Paso2() {
   // Borrador (guardado temporal): "idle" | "guardando" | "guardado" | "error"
   const [borradorEstado, setBorradorEstado] = useState<"idle" | "guardando" | "guardado" | "error">("idle");
   const queryClient = useQueryClient();
+  const empresaId = useAuthStore((s) => s.empresaId);   // el borrador se aísla por empresa
 
   // Pre-cargar estado de demo cuando el tutorial está activo
   useEffect(() => {
@@ -404,11 +406,11 @@ export function Paso2() {
       setBorradorEstado("guardado");
       // Mantener sincronizada la tarjeta "Tienes un borrador guardado" del paso 1
       // para que aparezca al volver sin tener que recargar la página.
-      void queryClient.invalidateQueries({ queryKey: ["borrador", docTipo] });
+      void queryClient.invalidateQueries({ queryKey: ["borrador", docTipo, empresaId] });
     } catch {
       setBorradorEstado("error");
     }
-  }, [facturas, tipoComp, centroCosto, facturasYaCausadas, facturasOmitidas, suggestions, buildPaso2Snapshot, verificadas, queryClient, docTipo]);
+  }, [facturas, tipoComp, centroCosto, facturasYaCausadas, facturasOmitidas, suggestions, buildPaso2Snapshot, verificadas, queryClient, docTipo, empresaId]);
 
   // Autoguardado de respaldo: 4s tras el último cambio de configuración.
   const paso2Sig = JSON.stringify(buildPaso2Snapshot());
@@ -662,7 +664,7 @@ export function Paso2() {
                 )}
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={() => { setPaso2Cache(null); void queryClient.invalidateQueries({ queryKey: ["borrador", docTipo] }); setPaso(1); }}>← Volver</Button>
+            <Button variant="outline" size="sm" onClick={() => { setPaso2Cache(null); void queryClient.invalidateQueries({ queryKey: ["borrador", docTipo, empresaId] }); setPaso(1); }}>← Volver</Button>
             <Button
               data-tutorial="validar-partida-btn"
               size="sm"

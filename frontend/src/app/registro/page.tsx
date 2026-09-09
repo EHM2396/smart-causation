@@ -44,7 +44,7 @@ export default function RegistroPage() {
         password: form.password,
         nombre: form.nombre,
         nombre_empresa: form.nombre_empresa,
-        nit_empresa: form.nit_empresa || undefined,
+        nit_empresa: form.nit_empresa,
         acepta_legal: true,
         version_legal: VERSION_LEGAL,
       });
@@ -180,11 +180,12 @@ export default function RegistroPage() {
                   </div>
                   <div>
                     <label className="mb-1.5 block text-sm font-medium" style={{ color: "var(--text-secondary)" }}>
-                      NIT <span style={{ color: "var(--text-muted)" }}>(opcional)</span>
+                      NIT
                     </label>
                     <input
                       name="nit_empresa"
                       type="text"
+                      required
                       value={form.nit_empresa}
                       onChange={handleChange}
                       placeholder="900123456-1"

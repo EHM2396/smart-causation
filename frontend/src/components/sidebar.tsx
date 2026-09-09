@@ -3,8 +3,10 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
-import { FileSpreadsheet, FileMinus2, BookOpen, History, UserCircle, Users } from "lucide-react";
+import { FileSpreadsheet, FileMinus2, BookOpen, History, UserCircle, Users, ShieldCheck, Building2, LayoutDashboard } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/stores/auth";
+import { EmpresaSwitcher } from "@/components/empresa-switcher";
 
 interface NavNode {
   href: string;
@@ -28,10 +30,21 @@ const NAV: NavNode[] = [
   { href: "/catalogos", icon: BookOpen, label: "Catálogos", desc: "Impuestos, PUC, comprobantes" },
 ];
 
+// "Empresas" se muestra siempre (aunque aún no se elija una): ahí el causador crea
+// y elige las empresas con las que va a trabajar.
+const NAV_EMPRESAS: NavNode = { href: "/empresas", icon: Building2, label: "Empresas", desc: "Crear y editar tus empresas" };
+
 // Activo exacto: evita que "/causacion" quede activo estando en "/causacion-nc".
 function esActivo(path: string, href: string): boolean {
   return path === href || path.startsWith(href + "/");
 }
+
+// Sección solo para administradores de la cuenta (org_admin) y superadmin.
+const NAV_ADMIN: NavNode[] = [
+  { href: "/admin/dashboard", icon: LayoutDashboard, label: "Dashboard", desc: "Informes y control" },
+  { href: "/admin/usuarios", icon: Users, label: "Usuarios", desc: "Gestiona los usuarios" },
+  { href: "/admin/empresas", icon: Building2, label: "Empresas", desc: "Empresas de la cuenta" },
+];
 
 const NAV_BOTTOM: NavNode[] = [
   { href: "/perfil", icon: UserCircle, label: "Mi perfil", desc: "Cuenta y contraseña" },
@@ -99,6 +112,9 @@ function NavLink({
 
 export function Sidebar({ onNavigate, className }: SidebarProps) {
   const path = usePathname();
+  const rol = useAuthStore((s) => s.usuario?.rol);
+  const empresaConfirmada = useAuthStore((s) => s.empresaConfirmada);
+  const esAdmin = rol === "org_admin" || rol === "admin";
 
   return (
     <aside
@@ -135,28 +151,57 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-1">
-        <p
-          className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-widest"
-          style={{ color: "var(--sidebar-label)" }}
-        >
-          Principal
-        </p>
-
-        {NAV.map((node) => (
-          <div key={node.href} className="space-y-1">
-            <NavLink node={node} active={esActivo(path, node.href)} onNavigate={onNavigate} />
-            {node.children && node.children.length > 0 && (
-              <div
-                className="ml-4 space-y-1 border-l pl-2"
-                style={{ borderColor: "var(--sidebar-border)" }}
-              >
-                {node.children.map((child) => (
-                  <NavLink key={child.href} node={child} active={esActivo(path, child.href)} onNavigate={onNavigate} isChild />
+        {/* Causadores: selector de empresa + módulos de causación.
+            El admin NO causa → no ve esta sección ni el selector de empresa. */}
+        {!esAdmin && (
+          <>
+            <EmpresaSwitcher onNavigate={onNavigate} />
+            {/* Empresas: siempre disponible, incluso antes de elegir una. */}
+            <NavLink node={NAV_EMPRESAS} active={esActivo(path, NAV_EMPRESAS.href)} onNavigate={onNavigate} />
+            {/* Los módulos de trabajo solo aparecen cuando el causador ya eligió empresa. */}
+            {empresaConfirmada ? (
+              <>
+                <p
+                  className="mb-3 mt-2 px-3 text-[10px] font-semibold uppercase tracking-widest"
+                  style={{ color: "var(--sidebar-label)" }}
+                >
+                  Principal
+                </p>
+                {NAV.map((node) => (
+                  <div key={node.href} className="space-y-1">
+                    <NavLink node={node} active={esActivo(path, node.href)} onNavigate={onNavigate} />
+                    {node.children && node.children.length > 0 && (
+                      <div className="ml-4 space-y-1 border-l pl-2" style={{ borderColor: "var(--sidebar-border)" }}>
+                        {node.children.map((child) => (
+                          <NavLink key={child.href} node={child} active={esActivo(path, child.href)} onNavigate={onNavigate} isChild />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 ))}
-              </div>
+              </>
+            ) : (
+              <p className="px-3 py-2 text-xs" style={{ color: "var(--sidebar-label)" }}>
+                Elige una empresa para empezar.
+              </p>
             )}
-          </div>
-        ))}
+          </>
+        )}
+
+        {/* Administración — solo org_admin / superadmin */}
+        {esAdmin && (
+          <>
+            <p
+              className="mb-3 flex items-center gap-1.5 px-3 text-[10px] font-semibold uppercase tracking-widest"
+              style={{ color: "var(--sidebar-label)" }}
+            >
+              <ShieldCheck className="h-3 w-3" /> Administración
+            </p>
+            {NAV_ADMIN.map((node) => (
+              <NavLink key={node.href} node={node} active={esActivo(path, node.href)} onNavigate={onNavigate} />
+            ))}
+          </>
+        )}
       </nav>
 
       {/* Nav bottom */}

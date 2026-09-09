@@ -122,7 +122,49 @@ export const api = {
   }) => req<LoginResponse>("/auth/registro", { method: "POST", body: JSON.stringify(body) }),
   me: () => req<{ id: number; email: string; nombre: string; rol: string; email_verificado: boolean; empresa_id: number | null; empresa_nombre: string | null; empresa_nit: string | null }>("/auth/me"),
 
-  actualizarPerfil: (body: { nombre: string; nombre_empresa: string; nit_empresa?: string }) =>
+  misEmpresas: () => req<{ id: number; nombre: string; nit: string | null }[]>("/auth/mis-empresas"),
+  consumoCausacion: () => req<import("@/lib/types").AdminConsumo>("/causacion/consumo"),
+
+  // ── Admin (panel de cuenta) ──
+  adminCuenta: () => req<import("@/lib/types").AdminCuenta>("/admin/cuenta"),
+  adminUsuarios: () => req<import("@/lib/types").AdminUsuario[]>("/admin/usuarios"),
+  adminCrearUsuario: (body: { email: string; nombre: string; password: string; cupo_mes?: number | null; max_empresas?: number | null }) =>
+    req<import("@/lib/types").AdminUsuario>("/admin/usuarios", { method: "POST", body: JSON.stringify(body) }),
+  adminActualizarUsuario: (id: number, body: { activo?: boolean; cupo_mes?: number | null; max_empresas?: number | null }) =>
+    req<import("@/lib/types").AdminUsuario>(`/admin/usuarios/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  adminEmpresas: () => req<import("@/lib/types").AdminEmpresa[]>("/admin/empresas"),
+  adminDashboard: (desde?: string, hasta?: string) => {
+    const qs = new URLSearchParams();
+    if (desde) qs.set("desde", desde);
+    if (hasta) qs.set("hasta", hasta);
+    const q = qs.toString();
+    return req<import("@/lib/types").AdminDashboard>(`/admin/dashboard${q ? `?${q}` : ""}`);
+  },
+  adminUsuarioDetalle: (id: number, desde?: string, hasta?: string) => {
+    const qs = new URLSearchParams();
+    if (desde) qs.set("desde", desde);
+    if (hasta) qs.set("hasta", hasta);
+    const q = qs.toString();
+    return req<import("@/lib/types").AdminUsuarioDetalle>(`/admin/usuario/${id}/detalle${q ? `?${q}` : ""}`);
+  },
+  adminInformeXlsx: (desde?: string, hasta?: string) => {
+    const qs = new URLSearchParams();
+    if (desde) qs.set("desde", desde);
+    if (hasta) qs.set("hasta", hasta);
+    const q = qs.toString();
+    return reqBlob(`/admin/informe.xlsx${q ? `?${q}` : ""}`);
+  },
+
+  // ── Empresas propias del causador ──
+  empresasEstado: () => req<{ empresas: import("@/lib/types").AdminEmpresa[]; puede_crear: boolean; limite: Record<string, unknown> }>("/empresas"),
+  crearEmpresaPropia: (body: { nombre: string; nit: string }) =>
+    req<import("@/lib/types").AdminEmpresa>("/empresas", { method: "POST", body: JSON.stringify(body) }),
+  editarEmpresaPropia: (id: number, body: { nombre: string; nit: string }) =>
+    req<import("@/lib/types").AdminEmpresa>(`/empresas/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  eliminarEmpresaPropia: (id: number) =>
+    req<{ ok: boolean }>(`/empresas/${id}`, { method: "DELETE" }),
+
+  actualizarPerfil: (body: { nombre: string }) =>
     req<{ message: string }>("/auth/perfil", { method: "PUT", body: JSON.stringify(body) }),
 
   cambiarPassword: (body: { password_actual: string; nueva_password: string }) =>

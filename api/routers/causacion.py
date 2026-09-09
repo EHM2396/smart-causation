@@ -35,14 +35,48 @@ from db.models.causacion import BorradorCausacion
 from db.models.contabilidad import FacturaCausada
 from db.session import get_db
 from services import causacion_service, consecutivos_service, cuentas_service
-from services import terceros_service
+from services import terceros_service, planes_service
 from core import exporter, validator
+
+
+def _exigir_cupo(db: Session, empresa: Empresa, usuario: Usuario, n: int = 1) -> None:
+    """Bloquea la causación si se superó (a) el cupo mensual del plan de la Cuenta, o
+    (b) el cupo mensual que el admin asignó a este usuario. Sin Cuenta (ej. superadmin)
+    o plan ilimitado y sin cupo de usuario → no limita."""
+    cuenta = planes_service.get_cuenta_de_empresa(db, empresa)
+    if cuenta is None:
+        return
+    ok, info = planes_service.puede_causar(db, cuenta, n)
+    if not ok:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"Alcanzaste el límite de causaciones de tu plan este mes "
+                f"({info['usadas']}/{info['cupo']}). "
+                f"Espera al próximo mes o adquiere causaciones adicionales."
+            ),
+        )
+    ok_u, info_u = planes_service.puede_causar_usuario(db, cuenta, usuario.id, n)
+    if not ok_u:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"Alcanzaste tu cupo de causaciones asignado este mes "
+                f"({info_u['usadas']}/{info_u['cupo']}). Pídele más a tu administrador."
+            ),
+        )
 
 router = APIRouter(prefix="/causacion", tags=["Causación"])
 
 DB = Annotated[Session, Depends(get_db)]
 EmpresaActiva = Annotated[Empresa, Depends(get_empresa_activa)]
 CurrentUser = Annotated[Usuario, Depends(get_current_user)]
+
+
+@router.get("/consumo")
+def consumo_causacion(db: DB, empresa: EmpresaActiva):
+    """Consumo de causaciones del mes (plan, cupo, usadas, restantes) de la Cuenta."""
+    return planes_service.consumo(db, empresa)
 
 
 @router.post("/parsear", response_model=list[dict])
@@ -199,6 +233,8 @@ def generar_causacion(body: CausacionRequest, db: DB, empresa: EmpresaActiva, cu
     if causacion_service.esta_causada(db, numero_dian, empresa_id=empresa.id):
         raise HTTPException(409, f"La factura {numero_dian!r} ya fue causada")
 
+    _exigir_cupo(db, empresa, current_user, 1)
+
     mapeos = [m.model_dump() for m in body.mapeos_confirmados]
 
     try:
@@ -234,6 +270,7 @@ def generar_causacion(body: CausacionRequest, db: DB, empresa: EmpresaActiva, cu
         consecutivo=consecutivo,
         tipo_comprobante=body.tipo_comprobante,
         empresa_id=empresa.id,
+        usuario_id=current_user.id,
     )
 
     db.commit()
@@ -256,6 +293,8 @@ def generar_y_descargar(body: CausacionRequest, db: DB, empresa: EmpresaActiva, 
 
     if causacion_service.esta_causada(db, numero_dian, empresa_id=empresa.id):
         raise HTTPException(409, f"La factura {numero_dian!r} ya fue causada")
+
+    _exigir_cupo(db, empresa, current_user, 1)
 
     mapeos = [m.model_dump() for m in body.mapeos_confirmados]
 
@@ -291,6 +330,7 @@ def generar_y_descargar(body: CausacionRequest, db: DB, empresa: EmpresaActiva, 
         consecutivo=consecutivo,
         tipo_comprobante=body.tipo_comprobante,
         empresa_id=empresa.id,
+        usuario_id=current_user.id,
     )
 
     db.commit()
@@ -426,6 +466,7 @@ def batch_generar(body: BatchRequest, db: DB, empresa: EmpresaActiva, current_us
     xlsx_buf = exporter.generar_xlsx(todos_movs)
 
     if body.confirmar:
+        _exigir_cupo(db, empresa, current_user, len(body.items))
         for idx, item in enumerate(body.items):
             consecutivo = ultimo + 1 + idx
             for m in item.mapeos_confirmados:
@@ -449,6 +490,7 @@ def batch_generar(body: BatchRequest, db: DB, empresa: EmpresaActiva, current_us
                 tipo_comprobante=body.tipo_comprobante,
                 archivo_origen=item.factura.get("_archivo", ""),
                 empresa_id=empresa.id,
+                usuario_id=current_user.id,
                 datos_json=json.dumps(
                     {
                         "factura": item.factura,
