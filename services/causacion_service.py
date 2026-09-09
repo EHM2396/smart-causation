@@ -64,13 +64,19 @@ def _cuenta_pago_por_forma_pago(
     forma_pago: str | None,
     medio_pago: str | None,
     cuentas_pago: list[dict] | None,
+    es_venta: bool = False,
 ) -> tuple[str | None, str | None]:
     """
-    Determina cuenta de pago y su origen basado en la forma/medio de pago.
+    Determina cuenta de contrapartida y su origen según la forma/medio de pago.
     Retorna (codigo_cuenta | None, origen | None).
 
-    Reglas (orden de prioridad):
+    COMPRAS (lo que debes / cómo pagaste):
       CRÉDITO de cualquier medio            → 2205x (proveedores nacionales)
+      CONTADO + efectivo                    → 1105x (caja general)
+      CONTADO + transferencia/débito/tarjeta→ 1110x (bancos)
+
+    VENTAS (lo que te deben / cómo cobraste):
+      CRÉDITO de cualquier medio            → 1305x (clientes nacionales)
       CONTADO + efectivo                    → 1105x (caja general)
       CONTADO + transferencia/débito/tarjeta→ 1110x (bancos)
     """
@@ -78,7 +84,7 @@ def _cuenta_pago_por_forma_pago(
     mp = (medio_pago or "").lower()
 
     if "crédit" in fp or "credit" in fp:
-        prefix = "2205"
+        prefix = "1305" if es_venta else "2205"
     elif "efect" in mp:
         prefix = "1105"
     elif any(kw in mp for kw in ("transfer", "débit", "debit", "tarjeta")):
@@ -332,6 +338,7 @@ def sugerir_cuentas_batch(
     empresa_id: int | None = None,
     usuario_id: int | None = None,
     cuentas_pago: list[dict] | None = None,
+    es_venta: bool = False,
 ) -> dict[str, ResultadoSugerencia]:
     """
     Sugiere cuentas para múltiples ítems en una sola operación.
@@ -378,7 +385,7 @@ def sugerir_cuentas_batch(
     for item in items:
         k = item["key"]
         codigo, origen = _cuenta_pago_por_forma_pago(
-            item.get("forma_pago"), item.get("medio_pago"), cuentas_pago
+            item.get("forma_pago"), item.get("medio_pago"), cuentas_pago, es_venta=es_venta
         )
         if codigo:
             cp_por_key[k] = (codigo, origen)

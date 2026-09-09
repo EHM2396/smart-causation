@@ -68,6 +68,7 @@ class SugerenciaBatchItem(BaseModel):
 
 class SugerenciaBatchRequest(BaseModel):
     items: list[SugerenciaBatchItem]
+    es_venta: bool = False  # True = módulo de ventas (contrapartida = clientes)
 
 
 class SugerenciaBatchResponse(BaseModel):

@@ -68,6 +68,7 @@ def construir_movimientos(
     tipo_comprobante: str = "12",
     centro_costo: str = "",
     es_nota_credito: bool = False,
+    es_venta: bool = False,
 ) -> list[dict]:
     """
     Construye la lista de movimientos contables para una factura.
@@ -78,9 +79,20 @@ def construir_movimientos(
         mapeos_confirmados: lista de MapeoItem serializados
         tipo_comprobante: código numérico SIIGO del tipo de comprobante (ej. "12")
         centro_costo: código de centro de costo (vacío si no aplica)
+        es_nota_credito: la factura es una nota crédito (reversa la operación).
+        es_venta: la operación es una VENTA (no una compra). Una venta es la
+            partida de compra invertida (ingreso e IVA generado al crédito, cliente
+            al débito), así que se construye igual que una compra y luego se decide
+            la inversión con ``flip = es_venta XOR es_nota_credito``:
+              - Compra          (F,F) → no invierte  (gasto/IVA débito, pago crédito)
+              - NC compra        (F,T) → invierte
+              - Venta            (T,F) → invierte     (ingreso/IVA crédito, cliente débito)
+              - NC venta / devol.(T,T) → no invierte
 
     Retorna lista de filas listas para el DataFrame de exportación.
     """
+    # Una venta es la imagen espejo de una compra; la nota crédito invierte de nuevo.
+    flip = bool(es_venta) ^ bool(es_nota_credito)
     movimientos: list[dict] = []
     fecha = factura.get("fecha", "")
     nit   = str(factura.get("nit", "")).strip()
@@ -129,7 +141,10 @@ def construir_movimientos(
         # Fila de IVA (débito) — solo si realmente hay tarifa > 0. En una nota
         # crédito es "Iva devolución en compras" (luego se invierte a crédito).
         if val_imp and cuenta_imp_d and not es_ret and pct > 0:
-            desc_iva = "Iva devolucion en compras" if es_nota_credito else "Iva descontable"
+            if es_venta:
+                desc_iva = "Iva devolucion en ventas" if es_nota_credito else "Iva generado"
+            else:
+                desc_iva = "Iva devolucion en compras" if es_nota_credito else "Iva descontable"
             fila_iva = _fila(
                 tipo_comprobante, consecutivo, fecha, nit,
                 cuenta_imp_d, val_imp, None,
@@ -175,7 +190,12 @@ def construir_movimientos(
         cuenta_pago = str(factura.get("cuenta_pago", "")).strip()
         cuenta_pago_nombre = factura.get("razon_social", "")
     if not cuenta_pago:
-        cuenta_pago = "220510" if factura.get("tipo_proveedor") == "natural" else "220505"
+        if es_venta:
+            # Contrapartida de la venta: por defecto Clientes nacionales (venta a
+            # crédito). El contador la ajusta a Caja/Banco cuando es de contado.
+            cuenta_pago = "130505"
+        else:
+            cuenta_pago = "220510" if factura.get("tipo_proveedor") == "natural" else "220505"
         cuenta_pago_nombre = factura.get("razon_social", "")
     neto = round(total_debitos - total_creditos, 2)
     if neto != 0:
@@ -187,10 +207,14 @@ def construir_movimientos(
         ))
         total_creditos += neto
 
-    # Nota crédito: reversa la compra → se invierte toda la partida doble
-    # (lo que iba a débito va a crédito y viceversa). Así queda balanceada y
-    # contablemente correcta sin duplicar la lógica.
-    if es_nota_credito:
+    # Inversión de la partida doble. Se invierte cuando ``flip`` es verdadero:
+    #   - Nota crédito de compra (reversa la compra).
+    #   - Venta (imagen espejo de la compra: ingreso e IVA generado al crédito,
+    #     cliente/contrapartida al débito).
+    # Una NC de venta (devolución) vuelve a invertir, quedando como una compra en
+    # cuanto a lados (débito el ingreso/devolución, crédito el cliente). Así una
+    # sola lógica cubre los cuatro casos sin duplicar código.
+    if flip:
         for m in movimientos:
             m["Débito"], m["Crédito"] = m["Crédito"], m["Débito"]
 

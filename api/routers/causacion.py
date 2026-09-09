@@ -48,45 +48,73 @@ CurrentUser = Annotated[Usuario, Depends(get_current_user)]
 @router.post("/parsear", response_model=list[dict])
 async def parsear_facturas(
     archivo: UploadFile = File(..., description="Archivo XLSX de facturas DIAN"),
+    modo: str = "compras",
     empresa: Empresa = Depends(get_empresa_activa),
 ):
     """
-    Paso 1: Recibe el archivo XLSX de facturas electrónicas DIAN y retorna
-    la lista de facturas parseadas en formato dict.
+    Paso 1: Recibe el archivo de facturas electrónicas DIAN y retorna la lista
+    de facturas parseadas en formato dict.
+
+    ``modo``:
+      - ``compras`` (por defecto): conserva las facturas de COMPRA (emisor ≠ tu
+        empresa) y omite las de venta.
+      - ``ventas``: conserva las facturas de VENTA (emisor = tu empresa) y omite
+        las de compra.
+    Una factura es "de venta" cuando el NIT emisor coincide con el NIT de la
+    empresa activa.
     """
+    modo = (modo or "compras").lower()
+    es_modo_ventas = modo == "ventas"
+
     contenido = await archivo.read()
     try:
         facturas = causacion_service.parsear_archivo(contenido, archivo.filename or "")
     except Exception as exc:
         raise HTTPException(400, f"Error al parsear el archivo: {exc}") from exc
 
-    # Detectar facturas de venta: el NIT emisor coincide con el NIT de la empresa.
-    if empresa.nit:
-        nit_empresa = re.sub(r"[^\d]", "", empresa.nit)
-        if nit_empresa:
-            compras, ventas_nums = [], []
-            for fac in facturas:
-                nit_emisor = re.sub(r"[^\d]", "", fac.get("nit", "") or "")
-                if nit_emisor and nit_empresa == nit_emisor:
-                    ventas_nums.append(fac.get("numero_dian") or archivo.filename or "desconocida")
-                else:
-                    compras.append(fac)
+    # Separar compras vs ventas por NIT emisor. Sin NIT de empresa no se puede
+    # distinguir → se devuelve tal cual (mejor esfuerzo).
+    nit_empresa = re.sub(r"[^\d]", "", empresa.nit or "") if empresa.nit else ""
+    if nit_empresa:
+        compras, ventas = [], []
+        for fac in facturas:
+            nit_emisor = re.sub(r"[^\d]", "", fac.get("nit", "") or "")
+            if nit_emisor and nit_empresa == nit_emisor:
+                ventas.append(fac)
+            else:
+                compras.append(fac)
 
-            if ventas_nums and not compras:
-                # Archivo es 100% ventas → error para que el frontend lo registre como venta
+        if es_modo_ventas:
+            # Módulo de ventas: conservar ventas, omitir compras.
+            nums_omitidas = [f.get("numero_dian") or archivo.filename or "desconocida" for f in compras]
+            if nums_omitidas and not ventas:
                 raise HTTPException(
                     status_code=400,
                     detail=(
-                        f"[VENTA] {ventas_nums[0]}: Esta factura electrónica es una VENTA de tu empresa, "
-                        "no una compra. El módulo actual solo procesa facturas de compra. "
-                        "La causación de ventas estará disponible próximamente."
+                        f"[COMPRA] {nums_omitidas[0]}: Esta factura electrónica es una COMPRA "
+                        "(otro proveedor te la emitió), no una venta de tu empresa. "
+                        "Úsala en el módulo de Causación Compras."
                     ),
                 )
-
-            if ventas_nums:
-                # Mezcla: retornar solo las compras; agregar advertencia en la primera
+            if nums_omitidas:
+                ventas[0].setdefault("advertencias", []).append(
+                    f"[COMPRA] {nums_omitidas[0]}: {len(nums_omitidas)} factura(s) de compra omitida(s) de este archivo."
+                )
+            facturas = ventas
+        else:
+            # Módulo de compras: conservar compras, omitir ventas.
+            nums_omitidas = [f.get("numero_dian") or archivo.filename or "desconocida" for f in ventas]
+            if nums_omitidas and not compras:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"[VENTA] {nums_omitidas[0]}: Esta factura electrónica es una VENTA de tu empresa, "
+                        "no una compra. Úsala en el módulo de Causación Ventas."
+                    ),
+                )
+            if nums_omitidas:
                 compras[0].setdefault("advertencias", []).append(
-                    f"[VENTA] {ventas_nums[0]}: {len(ventas_nums)} factura(s) de venta omitida(s) de este archivo."
+                    f"[VENTA] {nums_omitidas[0]}: {len(nums_omitidas)} factura(s) de venta omitida(s) de este archivo."
                 )
             facturas = compras
 
@@ -172,6 +200,7 @@ def sugerir_cuentas_batch(body: SugerenciaBatchRequest, db: DB, empresa: Empresa
         empresa_id=empresa.id,
         usuario_id=current_user.id,
         cuentas_pago=cuentas_pago,
+        es_venta=body.es_venta,
     )
     return SugerenciaBatchResponse(
         resultados={
@@ -320,6 +349,7 @@ class BatchRequest(BaseModel):
     tipo_comprobante: str = "12"
     centro_costo: str = ""
     confirmar: bool = False  # True = persistir aprendizaje + consecutivos
+    es_venta: bool = False   # True = módulo de ventas (partida invertida)
 
 
 class ValidacionComprobante(BaseModel):
@@ -358,6 +388,7 @@ def batch_validar(body: BatchRequest, db: DB, empresa: EmpresaActiva):
             tipo_comprobante=body.tipo_comprobante,
             centro_costo=body.centro_costo,
             es_nota_credito=(item.factura or {}).get("tipo_documento") == "nota_credito",
+            es_venta=body.es_venta,
         )
         filas_por_consecutivo[consecutivo] = len(movs)
         todos_movs.extend(movs)
@@ -411,6 +442,7 @@ def batch_generar(body: BatchRequest, db: DB, empresa: EmpresaActiva, current_us
             tipo_comprobante=body.tipo_comprobante,
             centro_costo=body.centro_costo,
             es_nota_credito=(item.factura or {}).get("tipo_documento") == "nota_credito",
+            es_venta=body.es_venta,
         )
         todos_movs.extend(movs)
 
@@ -455,6 +487,7 @@ def batch_generar(body: BatchRequest, db: DB, empresa: EmpresaActiva, current_us
                         "mapeos": item.mapeos_confirmados,
                         "tipo_comprobante": body.tipo_comprobante,
                         "centro_costo": body.centro_costo,
+                        "es_venta": body.es_venta,
                     },
                     ensure_ascii=False,
                     default=str,
@@ -523,6 +556,7 @@ def exportar_lote_historial(
             tipo_comprobante=fc.tipo_comprobante or data.get("tipo_comprobante", "12"),
             centro_costo=data.get("centro_costo", ""),
             es_nota_credito=data["factura"].get("tipo_documento") == "nota_credito",
+            es_venta=bool(data.get("es_venta", False)),
         )
         todos_movs.extend(movs)
 
@@ -627,6 +661,7 @@ def regenerar_historial(registro_id: int, db: DB, empresa: EmpresaActiva):
         tipo_comprobante=fc.tipo_comprobante or data.get("tipo_comprobante", "12"),
         centro_costo=data.get("centro_costo", ""),
         es_nota_credito=data["factura"].get("tipo_documento") == "nota_credito",
+        es_venta=bool(data.get("es_venta", False)),
     )
     xlsx_buf = exporter.generar_xlsx(movimientos)
     nombre = f"regenerado_SIIGO_{fc.numero_dian}.xlsx"

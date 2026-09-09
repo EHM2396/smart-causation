@@ -240,20 +240,84 @@ def _get_received(session: requests.Session, account_id: str, desde: str, hasta:
         raise DianError("SESSION_EXPIRED", "La sesión con la DIAN expiró. Autentícate nuevamente.")
 
 
+def _get_issued(session: requests.Session, account_id: str, desde: str, hasta: str) -> dict:
+    """Aplica el rango de fechas y pide la lista JSON de documentos EMITIDOS (ventas).
+
+    Espejo de ``_get_received`` pero contra ``/Document/Sent`` +
+    ``GetIssuedDocuments`` (con alias ``GetSentDocuments`` si la DIAN responde 404),
+    usando ``ReceiverName`` (cliente) en las columnas.
+    """
+    sent_url = f"{BILLER_BASE}/Document/Sent"
+
+    # 1) POST que aplica los filtros de fecha en la vista de emitidos
+    session.post(
+        sent_url,
+        data={
+            "CurrentAccountId": account_id,
+            "DocumentTypeId": "", "ReceiverName": "", "ReceiverCode": "",
+            "StatusId": "", "Serie": "",
+            "From": desde, "To": hasta,
+        },
+        headers={**_HEADERS, "Referer": sent_url},
+        timeout=_TIMEOUT,
+    )
+
+    # 2) POST DataTables → JSON
+    data = {
+        "draw": "1", "start": "0", "length": "150",
+        "search[value]": "", "search[regex]": "false",
+        "order[0][column]": "3", "order[0][dir]": "desc",
+        "blockIndex": "0", "inBlockStart": "0",
+        "IsNextPage": "true", "PageCurrentCosmos": "0",
+        "CurrentAccountId": account_id,
+        "columns[0][data]": "DocumentType",
+        "columns[1][data]": "DocumentNumber",
+        "columns[2][data]": "ReceiverName",
+        "columns[3][data]": "DocumentDate",
+    }
+    resp = session.post(
+        f"{BILLER_BASE}/Document/GetIssuedDocuments",
+        data=data,
+        headers={**_HEADERS, "Referer": sent_url, "X-Requested-With": "XMLHttpRequest"},
+        timeout=_TIMEOUT,
+    )
+    if resp.status_code == 404:
+        resp = session.post(
+            f"{BILLER_BASE}/Document/GetSentDocuments",
+            data=data,
+            headers={**_HEADERS, "Referer": sent_url, "X-Requested-With": "XMLHttpRequest"},
+            timeout=_TIMEOUT,
+        )
+    resp.raise_for_status()
+    try:
+        return resp.json()
+    except ValueError:
+        raise DianError("SESSION_EXPIRED", "La sesión con la DIAN expiró. Autentícate nuevamente.")
+
+
 def _limpiar_html(valor) -> str:
     """La DIAN a veces envuelve valores en HTML (p.ej. la fecha en un <span>).
     Quita etiquetas y espacios sobrantes."""
     return re.sub(r"<[^>]+>", "", str(valor or "")).strip()
 
 
-def _normalizar_documentos(resultado: dict) -> list[dict]:
+def _normalizar_documentos(resultado: dict, modo: str = "compras") -> list[dict]:
+    """Normaliza la respuesta DataTables de la DIAN. En ``compras`` la contraparte
+    es el emisor (SenderName / proveedor); en ``ventas`` es el receptor
+    (ReceiverName / cliente). El campo ``proveedor`` guarda la contraparte que
+    corresponda para no romper el frontend existente."""
+    es_venta = (modo or "compras").lower() == "ventas"
     docs = []
     for d in resultado.get("data", []) or []:
+        if es_venta:
+            contraparte = d.get("receiverName") or d.get("ReceiverName") or ""
+        else:
+            contraparte = d.get("senderName") or d.get("SenderName") or ""
         docs.append({
             "id": d.get("DT_RowId"),
             "numero": _limpiar_html(d.get("docNumber") or d.get("DocumentNumber") or ""),
             "fecha": _limpiar_html(d.get("docDate") or d.get("DocumentDate") or ""),
-            "proveedor": _limpiar_html(d.get("senderName") or d.get("SenderName") or ""),
+            "proveedor": _limpiar_html(contraparte),
             "tipo": _limpiar_html(d.get("documentType") or d.get("DocumentType") or ""),
         })
     return docs
@@ -261,31 +325,39 @@ def _normalizar_documentos(resultado: dict) -> list[dict]:
 
 # ── API pública del servicio ──────────────────────────────────────────────────
 
-def consultar_documentos(auth_url: str, fecha_desde: str, fecha_hasta: str) -> dict:
+def consultar_documentos(auth_url: str, fecha_desde: str, fecha_hasta: str, modo: str = "compras") -> dict:
     """
-    Consulta las facturas recibidas en el rango [desde, hasta] (formato DD/MM/YYYY).
+    Consulta las facturas del rango [desde, hasta] (formato DD/MM/YYYY).
+      - ``modo='compras'`` → documentos RECIBIDOS (proveedores → tu NIT).
+      - ``modo='ventas'``  → documentos EMITIDOS (tu empresa → clientes).
     Retorna {'success', 'total', 'documents': [{id, numero, fecha, proveedor, tipo}]}.
     Lanza DianError en caso de token/sesión/conexión.
     """
+    es_venta = (modo or "compras").lower() == "ventas"
     session, account_id = _sesion_para(auth_url)
     try:
-        resultado = _get_received(session, account_id, fecha_desde, fecha_hasta)
+        if es_venta:
+            resultado = _get_issued(session, account_id, fecha_desde, fecha_hasta)
+        else:
+            resultado = _get_received(session, account_id, fecha_desde, fecha_hasta)
     except DianError as e:
         if e.code == "SESSION_EXPIRED":
             _evict(auth_url)  # sesión cacheada muerta → re-autenticar en el próximo intento
         raise
     except requests.RequestException:
         raise DianError("CONNECTION_ERROR", "No se pudo conectar con la DIAN (problema de red temporal).")
-    docs = _normalizar_documentos(resultado)
+    docs = _normalizar_documentos(resultado, modo=modo)
     return {"success": True, "total": len(docs), "documents": docs}
 
 
-def descargar_xmls(auth_url: str, ids: list[str]) -> list[dict]:
+def descargar_xmls(auth_url: str, ids: list[str], modo: str = "compras") -> list[dict]:
     """
     Descarga EN MEMORIA los XML de los `ids` indicados (DT_RowId/transactionId).
     Retorna [{'id': str, 'xml': bytes}]. No escribe nada en disco.
+    ``type`` de descarga: '2' compras (recibidos), '1' ventas (emitidos).
     Lanza DianError en caso de token/sesión/conexión.
     """
+    tipo_descarga = "1" if (modo or "compras").lower() == "ventas" else "2"
     session, _account_id = _sesion_para(auth_url)
     salida: list[dict] = []
     try:
@@ -294,7 +366,7 @@ def descargar_xmls(auth_url: str, ids: list[str]) -> list[dict]:
                 continue
             resp = session.get(
                 f"{BILLER_BASE}/Document/DownloadXml",
-                params={"transactionId": transaction_id, "type": "2"},
+                params={"transactionId": transaction_id, "type": tipo_descarga},
                 headers=_HEADERS,
                 timeout=_TIMEOUT,
             )
@@ -311,12 +383,15 @@ def descargar_xmls(auth_url: str, ids: list[str]) -> list[dict]:
     return salida
 
 
-def descargar_xmls_stream(auth_url: str, ids: list[str]):
+def descargar_xmls_stream(auth_url: str, ids: list[str], modo: str = "compras"):
     """
     Igual que descargar_xmls pero es un GENERADOR: autentica una vez y va
     entregando cada XML a medida que lo descarga, para poder informar progreso
     real al frontend. Cada yield es (done, total, id, xml_bytes).
+
+    ``type`` de descarga: '2' para compras (recibidos), '1' para ventas (emitidos).
     """
+    tipo_descarga = "1" if (modo or "compras").lower() == "ventas" else "2"
     session, _account_id = _sesion_para(auth_url)
     limpios = [x for x in ids if x]
     total = len(limpios)
@@ -324,7 +399,7 @@ def descargar_xmls_stream(auth_url: str, ids: list[str]):
         try:
             resp = session.get(
                 f"{BILLER_BASE}/Document/DownloadXml",
-                params={"transactionId": transaction_id, "type": "2"},
+                params={"transactionId": transaction_id, "type": tipo_descarga},
                 headers=_HEADERS,
                 timeout=_TIMEOUT,
             )

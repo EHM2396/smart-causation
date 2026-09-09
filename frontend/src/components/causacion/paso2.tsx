@@ -2,7 +2,7 @@
 import { Fragment, useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useWizardStore } from "@/stores/wizard";
+import { useWizardStore, esModoNC, esModoVenta } from "@/stores/wizard";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
@@ -70,7 +70,10 @@ function DataField({ label, value, mono = false }: { label: string; value: strin
 
 export function Paso2() {
   const { docTipo, facturas, facturasYaCausadas, tipoComp, centroCosto, setPaso, setFacturas, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, pdfUrls, paso2Cache, setPaso2Cache, filesProcesando, setFilesProcesando, tutorialActivo, tutorialMockMapeo, facturasOmitidas, setFacturasOmitidas } = useWizardStore();
-  const esNC = docTipo === "nc";
+  const esNC = esModoNC(docTipo);
+  const esVenta = esModoVenta(docTipo);
+  // En ventas el tercero es el cliente; en compras, el proveedor.
+  const terceroLabel = esVenta ? "Cliente" : "Proveedor";
   const [modalCausadasOpen, setModalCausadasOpen] = useState(false);
   const [modalOmitidasOpen, setModalOmitidasOpen] = useState(false);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
@@ -308,7 +311,7 @@ export function Paso2() {
       return () => clearTimeout(t);
     }
 
-    api.sugerirCuentasBatch(pendientes)
+    api.sugerirCuentasBatch(pendientes, esVenta)
       .then(({ resultados }) => {
         const nuevas: Record<string, Sugerencia> = {};
         Object.entries(resultados).forEach(([key, r]) => {
@@ -366,6 +369,29 @@ export function Paso2() {
     return soloDev?.codigo ?? "";
   };
 
+  // Cuenta de IVA (u otro impuesto sobre ventas/compras) por defecto para un
+  // impuesto, según el módulo actual:
+  //   compras factura → cta_compras         · compras NC → devolución en compras (PUC)
+  //   ventas  factura → cta_ventas          · ventas  NC → cta_dev_ventas (o devolución PUC)
+  const cuentaIvaDeImpuesto = (
+    impInfo?: { tarifa: number | null; cta_compras: string | null; cta_ventas: string | null; cta_dev_ventas: string | null } | null,
+  ): string => {
+    if (!impInfo) return "";
+    if (esVenta) {
+      if (esNC) return impInfo.cta_dev_ventas || recomendarCuentaIvaDevolucion(impInfo.tarifa ?? 0) || impInfo.cta_ventas || "";
+      return impInfo.cta_ventas ?? "";
+    }
+    if (esNC) return recomendarCuentaIvaDevolucion(impInfo.tarifa ?? 0);
+    return impInfo.cta_compras ?? "";
+  };
+
+  // Cuenta de la retención según el módulo: en compras es la "retención por pagar"
+  // (cta_compras del impuesto de retención); en ventas es la "retención que te
+  // practican / anticipo" (cta_ventas). El signo (débito/crédito) lo ajusta el
+  // backend al invertir la partida de la venta.
+  const ctaRetencion = (imp?: { cta_compras: string | null; cta_ventas: string | null } | null): string =>
+    esVenta ? (imp?.cta_ventas ?? "") : (imp?.cta_compras ?? "");
+
   const getImpInfo = (cod: string) => impuestosRaw.find((i) => i.codigo === cod);
   const getEffBase = (key: string, item: ItemFactura): number => {
     const v = Number(baseOverride[key]);
@@ -410,14 +436,36 @@ export function Paso2() {
     }
   }, [facturas, tipoComp, centroCosto, facturasYaCausadas, facturasOmitidas, suggestions, buildPaso2Snapshot, verificadas, queryClient, docTipo]);
 
-  // Autoguardado de respaldo: 4s tras el último cambio de configuración.
+  // Autoguardado de respaldo: 2s tras el último cambio de configuración.
   const paso2Sig = JSON.stringify(buildPaso2Snapshot());
   useEffect(() => {
     if (tutorialActivo || facturas.length === 0) return;
-    const t = setTimeout(() => { void guardarBorrador(); }, 4000);
+    const t = setTimeout(() => { void guardarBorrador(); }, 2000);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paso2Sig]);
+
+  // Respaldo adicional: guarda el borrador al SALIR del paso 2 (ir a validación o
+  // navegar a otra página) y cuando la pestaña pasa a segundo plano o se cierra.
+  // Cierra la ventana en la que la última configuración podría perderse si la
+  // sesión se interrumpe (el navegador congela la pestaña, cierre inesperado…).
+  const guardarRef = useRef(guardarBorrador);
+  guardarRef.current = guardarBorrador;
+  useEffect(() => {
+    const flush = () => {
+      const s = useWizardStore.getState();
+      if (!s.tutorialActivo && s.facturas.length > 0) void guardarRef.current();
+    };
+    const onVisibility = () => { if (document.visibilityState === "hidden") flush(); };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", flush);
+      flush(); // al desmontar el paso 2 (navegar, cambiar de módulo…)
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Construye los mapeos contables de UNA factura (misma lógica de la partida
   // doble). Extraído para poder contar filas en vivo sin duplicar la lógica.
@@ -454,9 +502,7 @@ export function Paso2() {
       // "descontable" del catálogo de impuesto.
       const cuentaIvaGlobalVal = cuentaIvaGlobal[idx];
       const cuentaIvaItemVal = cuentaIvaItem[key];
-      const cuentaIvaPorDefecto = esNC
-        ? recomendarCuentaIvaDevolucion(impInfo?.tarifa ?? 0)
-        : (impInfo?.cta_compras ?? "");
+      const cuentaIvaPorDefecto = cuentaIvaDeImpuesto(impInfo);
       const cuentaIvaFinal = (cuentaIvaItemVal && cuentaIvaItemVal !== "") ? cuentaIvaItemVal
                            : (cuentaIvaGlobalVal && cuentaIvaGlobalVal !== "") ? cuentaIvaGlobalVal
                            : cuentaIvaPorDefecto;
@@ -484,7 +530,7 @@ export function Paso2() {
             base: effBase, cod_impuesto: rf.codigo, porcentaje: rf.tarifa ?? 0,
             valor_impuesto: Math.round((effBase * (rf.tarifa ?? 0)) / divisorTarifa(rf)),
             cuenta_gasto: "", fuente: "manual",
-            cuenta_impuesto_deb: "", cuenta_impuesto_cre: rf.cta_compras ?? "",
+            cuenta_impuesto_deb: "", cuenta_impuesto_cre: ctaRetencion(rf),
             es_retencion: true, cuenta_pago: pago, cuenta_pago_nombre: pagoNombre,
           });
         }
@@ -495,7 +541,7 @@ export function Paso2() {
             base: effBase, cod_impuesto: ri.codigo, porcentaje: ri.tarifa ?? 0,
             valor_impuesto: Math.round((effBase * (ri.tarifa ?? 0)) / divisorTarifa(ri)),
             cuenta_gasto: "", fuente: "manual",
-            cuenta_impuesto_deb: "", cuenta_impuesto_cre: ri.cta_compras ?? "",
+            cuenta_impuesto_deb: "", cuenta_impuesto_cre: ctaRetencion(ri),
             es_retencion: true, cuenta_pago: pago, cuenta_pago_nombre: pagoNombre,
           });
         }
@@ -510,7 +556,7 @@ export function Paso2() {
         base: totalBase, cod_impuesto: rf.codigo, porcentaje: rf.tarifa ?? 0,
         valor_impuesto: Math.round((totalBase * (rf.tarifa ?? 0)) / divisorTarifa(rf)),
         cuenta_gasto: "", fuente: "manual",
-        cuenta_impuesto_deb: "", cuenta_impuesto_cre: rf.cta_compras ?? "",
+        cuenta_impuesto_deb: "", cuenta_impuesto_cre: ctaRetencion(rf),
         es_retencion: true, cuenta_pago: cuentaPago[idx] ?? "", cuenta_pago_nombre: "",
       });
     }
@@ -521,7 +567,7 @@ export function Paso2() {
         base: totalBase, cod_impuesto: ri.codigo, porcentaje: ri.tarifa ?? 0,
         valor_impuesto: Math.round((totalBase * (ri.tarifa ?? 0)) / divisorTarifa(ri)),
         cuenta_gasto: "", fuente: "manual",
-        cuenta_impuesto_deb: "", cuenta_impuesto_cre: ri.cta_compras ?? "",
+        cuenta_impuesto_deb: "", cuenta_impuesto_cre: ctaRetencion(ri),
         es_retencion: true, cuenta_pago: cuentaPago[idx] ?? "", cuenta_pago_nombre: "",
       });
     }
@@ -925,7 +971,7 @@ export function Paso2() {
           <table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
-                {["#", "N° Factura", "Proveedor / NIT", "Fecha", "Subtotal", "Total", "Estado", ""].map((h) => (
+                {["#", "N° Factura", `${terceroLabel} / NIT`, "Fecha", "Subtotal", "Total", "Estado", ""].map((h) => (
                   <th
                     key={h}
                     className={`px-4 py-3 text-xs font-semibold uppercase tracking-wide${h === "Total" ? " text-right" : " text-left"}`}
@@ -1198,7 +1244,7 @@ export function Paso2() {
           <DataField label={esNC ? "N° Nota crédito" : "N° Factura DIAN"} value={factura.numero_dian} mono />
           <DataField label="Fecha emisión" value={factura.fecha} />
           <div className="col-span-2">
-            <DataField label="Proveedor" value={factura.razon_social} />
+            <DataField label={terceroLabel} value={factura.razon_social} />
           </div>
           <div>
             <p className="text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Total factura</p>
@@ -1628,8 +1674,7 @@ export function Paso2() {
                         const cuentaIvaGlobalActiva = !!(cuentaIvaGlobal[selectedIdx] && cuentaIvaGlobal[selectedIdx] !== "");
                         const cuentaIvaEfectiva = (cuentaIvaItem[key] && cuentaIvaItem[key] !== "") ? cuentaIvaItem[key]
                           : cuentaIvaGlobalActiva ? cuentaIvaGlobal[selectedIdx]
-                          : esNC ? recomendarCuentaIvaDevolucion(ivaEfectivoInfo?.tarifa ?? 0)
-                          : ivaEfectivoInfo?.cta_compras ?? "";
+                          : cuentaIvaDeImpuesto(ivaEfectivoInfo);
                         return (
                           <>
                             <Combobox

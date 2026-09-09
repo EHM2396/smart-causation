@@ -21,6 +21,9 @@ import type {
 } from "./types";
 import { useAuthStore } from "@/stores/auth";
 
+// Tipo de borrador/causación: cada módulo del wizard tiene su propia bandeja.
+type BorradorTipo = "compras" | "nc" | "ventas" | "nc_ventas";
+
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 function _handleUnauthorized(): never {
@@ -200,15 +203,15 @@ export const api = {
       body: JSON.stringify({ nuevo_valor: nuevoValor }),
     }),
 
-  // Parseo de facturas
-  parsearFacturas: async (file: File) => {
+  // Parseo de facturas. `modo`: "compras" (default) | "ventas".
+  parsearFacturas: async (file: File, modo: "compras" | "ventas" = "compras") => {
     const { token, empresaId } = useAuthStore.getState();
     const form = new FormData();
     form.append("archivo", file);
     const headers: Record<string, string> = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
     if (empresaId != null) headers["X-Empresa-Id"] = String(empresaId);
-    const res = await fetch(`${BASE}/causacion/parsear`, {
+    const res = await fetch(`${BASE}/causacion/parsear?modo=${modo}`, {
       method: "POST",
       headers,
       body: form,
@@ -228,8 +231,9 @@ export const api = {
       body: JSON.stringify({ numeros_dian }),
     }),
 
-  // DIAN — consultar facturas recibidas del rango (sin descargar XML)
-  dianConsultar: (body: { auth_url: string; fecha_desde: string; fecha_hasta: string }) =>
+  // DIAN — consultar facturas del rango (sin descargar XML).
+  // `modo`: "compras" (recibidas) | "ventas" (emitidas).
+  dianConsultar: (body: { auth_url: string; fecha_desde: string; fecha_hasta: string; modo?: "compras" | "ventas" }) =>
     req<{ success: boolean; total: number; documents: DianDocumento[] }>("/dian/consultar", {
       method: "POST",
       body: JSON.stringify(body),
@@ -239,7 +243,7 @@ export const api = {
   // Lee la respuesta en streaming (NDJSON) e informa el progreso real de descarga
   // vía onProgress(done, total). Devuelve las facturas ya parseadas.
   dianImportarStream: async (
-    body: { auth_url: string; ids: string[] },
+    body: { auth_url: string; ids: string[]; modo?: "compras" | "ventas" },
     onProgress: (done: number, total: number) => void,
   ): Promise<Factura[]> => {
     const { token, empresaId } = useAuthStore.getState();
@@ -285,9 +289,11 @@ export const api = {
     return facturas;
   },
 
-  // Sugerencia batch (reemplaza múltiples llamadas a sugerirCuenta)
+  // Sugerencia batch (reemplaza múltiples llamadas a sugerirCuenta).
+  // `esVenta`: en ventas la contrapartida a crédito es Clientes (1305), no Proveedores.
   sugerirCuentasBatch: (
-    items: { key: string; nit: string | null; descripcion: string; tipo_proveedor: string | null; nombre_proveedor?: string | null }[]
+    items: { key: string; nit: string | null; descripcion: string; tipo_proveedor: string | null; nombre_proveedor?: string | null }[],
+    esVenta = false,
   ) =>
     req<{
       resultados: Record<string, {
@@ -300,7 +306,7 @@ export const api = {
       }>;
     }>("/causacion/sugerir-cuentas-batch", {
       method: "POST",
-      body: JSON.stringify({ items }),
+      body: JSON.stringify({ items, es_venta: esVenta }),
     }),
 
   // Sugerencia de cuenta (individual — mantenido para compatibilidad)
@@ -322,6 +328,7 @@ export const api = {
     items: { factura: object; mapeos_confirmados: object[] }[];
     tipo_comprobante: string;
     centro_costo: string;
+    es_venta?: boolean;
   }) =>
     req<BatchValidacionResponse>("/causacion/batch/validar", {
       method: "POST",
@@ -334,6 +341,7 @@ export const api = {
     tipo_comprobante: string;
     centro_costo: string;
     confirmar: boolean;
+    es_venta?: boolean;
   }): Promise<Blob> =>
     reqBlob("/causacion/batch/generar", {
       method: "POST",
@@ -376,19 +384,19 @@ export const api = {
     total_facturas: number;
     total_verificadas: number;
     tipo_comp: string | null;
-  }, tipo: "compras" | "nc" = "compras") =>
+  }, tipo: BorradorTipo = "compras") =>
     req<BorradorResumen>(`/causacion/borrador?tipo=${tipo}`, {
       method: "PUT",
       body: JSON.stringify(payload),
     }),
 
-  getBorrador: (tipo: "compras" | "nc" = "compras") =>
+  getBorrador: (tipo: BorradorTipo = "compras") =>
     req<BorradorResumen | null>(`/causacion/borrador?tipo=${tipo}`),
 
-  getBorradorCompleto: (tipo: "compras" | "nc" = "compras") =>
+  getBorradorCompleto: (tipo: BorradorTipo = "compras") =>
     req<BorradorCompleto | null>(`/causacion/borrador/completo?tipo=${tipo}`),
 
-  descartarBorrador: (tipo: "compras" | "nc" = "compras") =>
+  descartarBorrador: (tipo: BorradorTipo = "compras") =>
     req<{ descartado: boolean }>(`/causacion/borrador/descartar?tipo=${tipo}`, { method: "POST" }),
 
   // Aprendizaje / IA
