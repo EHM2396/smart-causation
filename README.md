@@ -148,9 +148,10 @@ Esto arranca:
 Las **migraciones se aplican solas** al arrancar la API y siembran los catálogos base y un usuario demo para desarrollo local:
 
 ```
-📧 admin@smartcausacion.com   🔑 Admin2024!
+📧 admin@smartcausacion.com   🔑 (definida en SEED_ADMIN_PASSWORD del .env)
 ```
-> Solo para local. En producción usa credenciales propias.
+> Las contraseñas semilla se toman de `SEED_ADMIN_PASSWORD` / `SEED_CAUSADOR_PASSWORD`
+> (en tu `.env` local). Solo para desarrollo; en producción usa credenciales propias.
 
 ---
 
