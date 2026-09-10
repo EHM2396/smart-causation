@@ -467,6 +467,22 @@ export function Paso2() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Guardado INMEDIATO al cargar (o cambiar la cantidad de) facturas, sin esperar
+  // el debounce de 2s. Así, si el usuario carga facturas y cambia de módulo enseguida
+  // (p. ej. de Compras a NC o Ventas), no se pierden: quedan ya en el borrador del
+  // módulo y reaparecen en la tarjeta "Continuar" al volver.
+  const nFacturas = facturas.length;
+  useEffect(() => {
+    if (tutorialActivo || nFacturas === 0) return;
+    // Si venimos de RESTAURAR un borrador (hay cache de paso 2 que calza), NO
+    // re-guardar aquí: la config aún no se aplicó y guardaríamos vacío, pisando el
+    // borrador. Ese borrador ya está guardado; el debounce/flush cubren lo demás.
+    const cache = useWizardStore.getState().paso2Cache;
+    if (cache && cache.facturaCount === nFacturas) return;
+    void guardarBorrador();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nFacturas]);
+
   // Construye los mapeos contables de UNA factura (misma lógica de la partida
   // doble). Extraído para poder contar filas en vivo sin duplicar la lógica.
   const construirMapeosFactura = (idx: number, newIdx: number): MapeoItem[] => {
