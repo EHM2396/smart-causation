@@ -71,8 +71,29 @@ export function Combobox({
     }
   }, []);
 
+  // Mientras el menú está abierto (modo portal con position:fixed) debe SEGUIR al
+  // input cuando se hace scroll o se redimensiona la ventana. Sin esto, el menú se
+  // quedaba en la posición del momento de abrir y se "despegaba" del input al
+  // desplazar la lista de ítems, quedando flotando encima del contenido. Si el
+  // input se sale de la vista, se cierra el menú.
   React.useEffect(() => {
-    if (open && portal) updateCoords();
+    if (!open || !portal) return;
+    updateCoords();
+    const reposition = () => {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (rect && (rect.bottom < 0 || rect.top > window.innerHeight)) {
+        setOpen(false);
+        return;
+      }
+      updateCoords();
+    };
+    // capture:true → atrapa el scroll de CUALQUIER contenedor ancestro, no solo window.
+    window.addEventListener("scroll", reposition, true);
+    window.addEventListener("resize", reposition);
+    return () => {
+      window.removeEventListener("scroll", reposition, true);
+      window.removeEventListener("resize", reposition);
+    };
   }, [open, portal, updateCoords]);
 
   // Cerrar al hacer click fuera
