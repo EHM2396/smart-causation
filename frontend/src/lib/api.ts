@@ -171,6 +171,7 @@ export const api = {
 
   // Cuentas
   getCuentasGasto: () => req<CuentaOpcion[]>("/cuentas/gasto"),
+  getCuentasIngreso: () => req<CuentaOpcion[]>("/cuentas/ingreso"),
   getCuentasPago: () => req<CuentaOpcion[]>("/cuentas/pago"),
   getCuentasTodas: () => req<CuentaOpcion[]>("/cuentas/todas"),
   crearCuenta: (body: { codigo: string; nombre: string; fiscal?: boolean }) =>
@@ -187,6 +188,9 @@ export const api = {
     tipo_impuesto?: string;
     tarifa?: number;
     cta_compras?: string;
+    cta_ventas?: string;
+    cta_dev_compras?: string;
+    cta_dev_ventas?: string;
   }) => req<ImpuestoOut>("/impuestos", { method: "POST", body: JSON.stringify(body) }),
 
   // Tipos comprobante

@@ -79,6 +79,8 @@ export function Paso2() {
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
 
   const { data: cuentasGasto = [] } = useQuery({ queryKey: ["cuentas-gasto"], queryFn: api.getCuentasGasto });
+  // En ventas la "cuenta" es de INGRESO (clase 4), no de gasto.
+  const { data: cuentasIngreso = [] } = useQuery({ queryKey: ["cuentas-ingreso"], queryFn: api.getCuentasIngreso });
   const { data: cuentasPago = [] } = useQuery({ queryKey: ["cuentas-pago"], queryFn: api.getCuentasPago });
   const { data: todasCuentas = [] } = useQuery({ queryKey: ["cuentas-todas"], queryFn: api.getCuentasTodas });
   const { data: impuestosRaw = [], refetch: refetchImps } = useQuery({ queryKey: ["impuestos"], queryFn: api.getImpuestos });
@@ -344,7 +346,10 @@ export function Paso2() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [facturas]);
 
-  const gastoOpts = cuentaOpts(cuentasGasto);
+  // En ventas se mapea contra cuentas de INGRESO (clase 4); en compras, gasto/costo.
+  const cuentasParaMapeo = esVenta ? cuentasIngreso : cuentasGasto;
+  const cuentaLabel = esVenta ? "Cuenta de ingreso" : "Cuenta gasto/costo";
+  const gastoOpts = cuentaOpts(cuentasParaMapeo);
   const pagoOpts  = cuentaOpts(cuentasPago);
   const rfOpts    = impOpts(impuestosRaw, ["retefuente"]);
   const riOpts    = impOpts(impuestosRaw, ["reteica"]);
@@ -1434,7 +1439,7 @@ export function Paso2() {
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1.5">
               <label className="text-xs font-medium flex items-center gap-1.5" style={{ color: "var(--info-text)", opacity: 0.85 }}>
-                Cuenta gasto/costo
+                {cuentaLabel}
                 {cuentaGastoGlobalVacia && <span className="require-badge">O por ítem</span>}
               </label>
               <div className={cuentaGastoGlobalVacia ? "require-pulse rounded-lg" : ""}>
@@ -1575,7 +1580,7 @@ export function Paso2() {
                 <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)", minWidth: "220px" }}>Descripción</th>
                 <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Base</th>
                 <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Impuesto</th>
-                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)", minWidth: "260px" }}>Cuenta gasto/costo</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)", minWidth: "260px" }}>{cuentaLabel}</th>
                 {!retGlobalActiva && (
                   <>
                     <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Retefuente</th>
@@ -1738,7 +1743,7 @@ export function Paso2() {
                         {/* Sugerencia IA pendiente: tarjeta con botón para aceptar */}
                         {iaSugerencia && (() => {
                           const iaBadge = ORIGEN_BADGE[iaSugerencia.origen ?? "ia"] ?? ORIGEN_BADGE.ia;
-                          const nombreCuenta = cuentasGasto.find(c => c.codigo === iaSugerencia.cuenta)?.nombre ?? iaSugerencia.cuenta;
+                          const nombreCuenta = cuentasParaMapeo.find(c => c.codigo === iaSugerencia.cuenta)?.nombre ?? iaSugerencia.cuenta;
                           return (
                             <div
                               className="rounded-lg px-3 py-2 space-y-1.5"

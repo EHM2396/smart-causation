@@ -99,6 +99,25 @@ def listar_cuentas_gasto(db: Session, empresa_id: int | None = None) -> list[dic
     return result
 
 
+def listar_cuentas_ingreso(db: Session, empresa_id: int | None = None) -> list[dict]:
+    """Cuentas de INGRESO para causar ventas: clase 4 (ingresos, incluye las
+    devoluciones en ventas — 4175). Nivel transaccional (8 dígitos), no fiscales.
+    Es el equivalente de listar_cuentas_gasto para el módulo de ventas."""
+    stmt = select(CuentaContable).where(
+        CuentaContable.activo == True,
+        CuentaContable.nivel == 8,
+        CuentaContable.clase == 4,
+        CuentaContable.fiscal == False,
+    ).order_by(CuentaContable.codigo)
+    if empresa_id is not None:
+        stmt = stmt.where(CuentaContable.empresa_id == empresa_id)
+    rows = db.scalars(stmt).all()
+    return [
+        {"codigo": r.codigo, "nombre": r.nombre, "tag": "", "label": f"{r.codigo} – {r.nombre}"}
+        for r in rows
+    ]
+
+
 def listar_metodos_pago(db: Session, empresa_id: int | None = None) -> list[dict]:
     stmt = select(CuentaContable).where(
         CuentaContable.activo == True,

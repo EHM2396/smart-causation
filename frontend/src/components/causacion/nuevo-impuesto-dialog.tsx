@@ -21,7 +21,8 @@ export function NuevoImpuestoDialog({ open, tipo, onClose, onCreated, cuentasPag
   const [codigo, setCodigo] = useState("");
   const [nombre, setNombre] = useState("");
   const [tarifa, setTarifa] = useState("0");
-  const [cuentaCre, setCuentaCre] = useState("");
+  const [cuentaCre, setCuentaCre] = useState("");  // cta_compras (retención por pagar)
+  const [cuentaVen, setCuentaVen] = useState("");  // cta_ventas (retención practicada)
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -31,7 +32,7 @@ export function NuevoImpuestoDialog({ open, tipo, onClose, onCreated, cuentasPag
   }));
 
   const handleSave = async () => {
-    if (!codigo.trim() || !cuentaCre) { setError("Código y cuenta crédito son obligatorios."); return; }
+    if (!codigo.trim() || (!cuentaCre && !cuentaVen)) { setError("Código y al menos una cuenta (compras o ventas) son obligatorios."); return; }
     setSaving(true);
     setError("");
     try {
@@ -40,9 +41,10 @@ export function NuevoImpuestoDialog({ open, tipo, onClose, onCreated, cuentasPag
         nombre: nombre.trim() || undefined,
         tipo_impuesto: tipo,
         tarifa: parseFloat(tarifa) || 0,
-        cta_compras: cuentaCre,
+        cta_compras: cuentaCre || undefined,
+        cta_ventas: cuentaVen || undefined,
       });
-      setCodigo(""); setNombre(""); setTarifa("0"); setCuentaCre("");
+      setCodigo(""); setNombre(""); setTarifa("0"); setCuentaCre(""); setCuentaVen("");
       onCreated();
     } catch (e) {
       setError((e as Error).message);
@@ -74,9 +76,15 @@ export function NuevoImpuestoDialog({ open, tipo, onClose, onCreated, cuentasPag
             <Label>Nombre / descripción</Label>
             <Input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="ej. Retefuente servicios 1%" />
           </div>
-          <div className="space-y-1.5">
-            <Label>Cuenta crédito (PUC) *</Label>
-            <Combobox options={allCuentas} value={cuentaCre} onChange={setCuentaCre} placeholder="Buscar por código o nombre..." portal={false} />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label>Cuenta compras (PUC)</Label>
+              <Combobox options={allCuentas} value={cuentaCre} onChange={setCuentaCre} placeholder="Retención por pagar…" portal={false} clearable />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Cuenta ventas (PUC)</Label>
+              <Combobox options={allCuentas} value={cuentaVen} onChange={setCuentaVen} placeholder="Retención practicada…" portal={false} clearable />
+            </div>
           </div>
           {error && <p className="text-sm text-red-400">{error}</p>}
           <div className="flex justify-end gap-2 pt-2">
