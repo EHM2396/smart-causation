@@ -37,6 +37,7 @@ from db.session import get_db
 from services import causacion_service, consecutivos_service, cuentas_service
 from services import terceros_service
 from core import exporter, validator
+from core.parser import usar_cliente_como_tercero
 
 router = APIRouter(prefix="/causacion", tags=["Causación"])
 
@@ -100,7 +101,8 @@ async def parsear_facturas(
                 ventas[0].setdefault("advertencias", []).append(
                     f"[COMPRA] {nums_omitidas[0]}: {len(nums_omitidas)} factura(s) de compra omitida(s) de este archivo."
                 )
-            facturas = ventas
+            # En ventas el tercero es el cliente (receptor), no la empresa emisora.
+            facturas = [usar_cliente_como_tercero(f) for f in ventas]
         else:
             # Módulo de compras: conservar compras, omitir ventas.
             nums_omitidas = [f.get("numero_dian") or archivo.filename or "desconocida" for f in ventas]

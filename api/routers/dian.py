@@ -23,6 +23,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.dependencies import get_empresa_activa
+from core.parser import usar_cliente_como_tercero
 from db.models.auth import Empresa
 from services import causacion_service, dian_service
 from services.dian_service import DianError
@@ -80,27 +81,31 @@ def _mapear_error(e: DianError) -> HTTPException:
 
 
 def _filtrar_por_modo(facturas: list[dict], empresa: Empresa, modo: str = "compras") -> list[dict]:
-    """Filtra según el módulo. Mismo criterio que /causacion/parsear:
-      - ``compras``: conserva compras (emisor ≠ NIT empresa) y omite ventas.
-      - ``ventas``: conserva ventas (emisor == NIT empresa) y omite compras.
+    """Malla de seguridad para el import de la DIAN.
+
+    Los documentos YA vienen del endpoint correcto (``/Document/Received`` para
+    compras, ``/Document/Sent`` para ventas), así que la fuente ya garantiza el
+    tipo. Por eso este filtro NUNCA debe descartar todo por un NIT que no calza
+    exacto (dígito de verificación/formato distinto entre el XML y el guardado):
+
+      - ``ventas``: vienen de *emitidos* → son ventas de la empresa. Se conservan
+        TODAS (antes se caían cuando el NIT del emisor no coincidía exacto).
+      - ``compras``: vienen de *recibidos*. Se quitan, solo por seguridad, las que
+        resulten ser ventas propias (emisor == NIT de la empresa); en la práctica
+        el endpoint de recibidos no las trae.
     """
+    es_venta = (modo or "compras").lower() == "ventas"
+    if es_venta:
+        return facturas
     if not empresa.nit:
         return facturas
     nit_empresa = re.sub(r"[^\d]", "", empresa.nit)
     if not nit_empresa:
         return facturas
-    es_venta = (modo or "compras").lower() == "ventas"
     compras, ventas = [], []
     for fac in facturas:
         nit_emisor = re.sub(r"[^\d]", "", fac.get("nit", "") or "")
         (ventas if (nit_emisor and nit_emisor == nit_empresa) else compras).append(fac)
-
-    if es_venta:
-        if compras and ventas:
-            ventas[0].setdefault("advertencias", []).append(
-                f"{len(compras)} factura(s) de compra omitida(s) (no son ventas de tu empresa)."
-            )
-        return ventas
     if ventas and compras:
         compras[0].setdefault("advertencias", []).append(
             f"{len(ventas)} factura(s) de venta omitida(s) (son ventas de tu empresa, no compras)."
@@ -154,6 +159,9 @@ def importar(body: ImportarRequest, empresa: EmpresaActiva):
                 yield json.dumps({"type": "progress", "done": done, "total": total}) + "\n"
 
             facturas = _filtrar_por_modo(facturas, empresa, modo=body.modo)
+            if (body.modo or "compras").lower() == "ventas":
+                # En ventas el tercero es el cliente (receptor), no la empresa emisora.
+                facturas = [usar_cliente_como_tercero(f) for f in facturas]
             if errores and facturas:
                 facturas[0].setdefault("advertencias", []).append(
                     f"{errores} factura(s) no se pudieron parsear y se omitieron."

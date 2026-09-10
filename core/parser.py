@@ -121,6 +121,83 @@ def _limpiar_telefono(raw: str) -> str:
     return max(validas, key=len)
 
 
+# Campos de tercero que se intercambian emisor↔cliente al causar una venta.
+_CAMPOS_TERCERO = (
+    "nit", "razon_social", "nombre_comercial", "tipo_proveedor",
+    "tipo_identificacion_codigo", "ciudad", "departamento", "direccion",
+    "codigo_postal", "telefono", "email", "nombres_tercero", "apellidos_tercero",
+)
+
+
+def _extraer_party_xml(party) -> dict:
+    """Extrae los datos de un ``cac:Party`` (proveedor o cliente) del XML UBL.
+
+    Es el espejo de la extracción del ``AccountingSupplierParty``, reutilizable
+    para el ``AccountingCustomerParty``: al causar una VENTA el tercero es el
+    CLIENTE (receptor), no el emisor (que es la propia empresa)."""
+    d = {c: "" for c in _CAMPOS_TERCERO}
+    d["tipo_proveedor"] = "juridica"
+    if party is None:
+        return d
+
+    tax_scheme = party.find("cac:PartyTaxScheme", _NS)
+    if tax_scheme is not None:
+        nit_el = tax_scheme.find("cbc:CompanyID", _NS)
+        if nit_el is not None and nit_el.text:
+            d["nit"] = re.sub(r"[^\d\-]", "", nit_el.text.strip())
+            scheme_id = (nit_el.get("schemeID") or "").strip()
+            d["tipo_identificacion_codigo"] = scheme_id
+            if scheme_id in ("13", "22"):
+                d["tipo_proveedor"] = "natural"
+            elif scheme_id == "31":
+                d["tipo_proveedor"] = "juridica"
+
+    legal = party.find("cac:PartyLegalEntity", _NS)
+    if legal is not None:
+        d["razon_social"] = _xml_text(legal.find("cbc:RegistrationName", _NS))
+    pname = party.find("cac:PartyName", _NS)
+    if pname is not None:
+        candidate = _xml_text(pname.find("cbc:Name", _NS))
+        if not d["razon_social"]:
+            d["razon_social"] = candidate
+        elif candidate and candidate.upper() != d["razon_social"].upper():
+            d["nombre_comercial"] = candidate
+
+    addr = party.find("cac:PhysicalLocation/cac:Address", _NS)
+    if addr is None:
+        addr = party.find("cac:PostalAddress", _NS)
+    if addr is not None:
+        d["ciudad"] = _xml_text(addr.find("cbc:CityName", _NS))
+        d["departamento"] = _xml_text(addr.find("cbc:CountrySubentity", _NS))
+        d["codigo_postal"] = _xml_text(addr.find("cbc:PostalZone", _NS))
+        addr_line = addr.find("cac:AddressLine", _NS)
+        if addr_line is not None:
+            d["direccion"] = _xml_text(addr_line.find("cbc:Line", _NS))
+
+    contact = party.find("cac:Contact", _NS)
+    if contact is not None:
+        d["telefono"] = _limpiar_telefono(_xml_text(contact.find("cbc:Telephone", _NS)))
+        d["email"] = _xml_text(contact.find("cbc:ElectronicMail", _NS))
+
+    person = party.find("cac:Person", _NS)
+    if person is not None:
+        d["nombres_tercero"] = _xml_text(person.find("cbc:FirstName", _NS))
+        d["apellidos_tercero"] = _xml_text(person.find("cbc:FamilyName", _NS))
+    return d
+
+
+def usar_cliente_como_tercero(factura: dict) -> dict:
+    """Para causar una VENTA el tercero es el CLIENTE (receptor), no el emisor
+    (que es la propia empresa). Sustituye los campos de tercero por los del
+    comprador (``comprador_*``) extraídos del XML. Si no hay datos de cliente
+    (no debería ocurrir en una venta real), no toca nada."""
+    if not factura.get("comprador_nit"):
+        return factura
+    for c in _CAMPOS_TERCERO:
+        factura[c] = factura.get(f"comprador_{c}", "") or ""
+    return factura
+
+
 def _detectar_cols_token(df: pd.DataFrame) -> dict[str, str | None]:
     cols_norm = {_norm(c): c for c in df.columns}
     asignadas: set[str] = set()
@@ -903,15 +980,11 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
         if issue_date and due_date:
             forma_pago = "CONTADO" if issue_date == due_date else "CRÉDITO"
 
-    # ── Comprador (buyer) — solo para validación compra vs venta ──
-    nit_comprador = ""
-    customer = find("cac:AccountingCustomerParty/cac:Party")
-    if customer is not None:
-        tax_scheme_c = customer.find("cac:PartyTaxScheme", _NS)
-        if tax_scheme_c is not None:
-            nit_c_el = tax_scheme_c.find("cbc:CompanyID", _NS)
-            if nit_c_el is not None and nit_c_el.text:
-                nit_comprador = re.sub(r"[^\d\-]", "", nit_c_el.text.strip())
+    # ── Comprador (cliente / receptor) — es el TERCERO al causar una VENTA ──
+    # Se extraen todos sus datos (no solo el NIT) para poder usarlo como tercero
+    # en ventas vía usar_cliente_como_tercero().
+    _comprador = _extraer_party_xml(find("cac:AccountingCustomerParty/cac:Party"))
+    nit_comprador = _comprador["nit"]
 
     # ── Total ──
     monetary = find("cac:LegalMonetaryTotal")
@@ -997,6 +1070,20 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
         "fecha":                    fecha,
         "nit":                      nit,
         "nit_comprador":            nit_comprador,
+        # Datos completos del cliente (receptor) para usarlo como tercero en ventas.
+        "comprador_nit":            _comprador["nit"],
+        "comprador_razon_social":   _comprador["razon_social"],
+        "comprador_nombre_comercial": _comprador["nombre_comercial"],
+        "comprador_tipo_proveedor": _comprador["tipo_proveedor"],
+        "comprador_tipo_identificacion_codigo": _comprador["tipo_identificacion_codigo"],
+        "comprador_ciudad":         _comprador["ciudad"],
+        "comprador_departamento":   _comprador["departamento"],
+        "comprador_direccion":      _comprador["direccion"],
+        "comprador_codigo_postal":  _comprador["codigo_postal"],
+        "comprador_telefono":       _comprador["telefono"],
+        "comprador_email":          _comprador["email"],
+        "comprador_nombres_tercero": _comprador["nombres_tercero"],
+        "comprador_apellidos_tercero": _comprador["apellidos_tercero"],
         "razon_social":             razon_social,
         "nombre_comercial":         nombre_comercial,
         "tipo_proveedor":           tipo_proveedor,
