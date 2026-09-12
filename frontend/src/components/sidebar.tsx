@@ -1,10 +1,17 @@
 ﻿"use client";
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { FileSpreadsheet, FileMinus2, BookOpen, History, UserCircle, Users, ReceiptText } from "lucide-react";
+import { FileSpreadsheet, FileMinus2, BookOpen, History, UserCircle, Users, ReceiptText, DownloadCloud, Save, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useWizardStore } from "@/stores/wizard";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+
+// Rutas que tienen un wizard de causación con borrador en curso.
+const RUTAS_WIZARD = ["/causacion", "/causacion-nc", "/causacion-ventas", "/causacion-nc-ventas"];
 
 interface NavNode {
   href: string;
@@ -17,6 +24,7 @@ interface NavNode {
 // "Causación Compras" y "Causación Ventas" son módulos con submódulos (por ahora
 // NC; más adelante notas débito).
 const NAV: NavNode[] = [
+  { href: "/importar", icon: DownloadCloud, label: "Importar DIAN", desc: "Traer todo con un token" },
   {
     href: "/causacion", icon: FileSpreadsheet, label: "Causación Compras", desc: "Facturas de compra DIAN",
     children: [
@@ -49,13 +57,18 @@ interface SidebarProps {
 }
 
 function NavLink({
-  node, active, onNavigate, isChild = false,
-}: { node: NavNode; active: boolean; onNavigate?: () => void; isChild?: boolean }) {
+  node, active, onNavigate, isChild = false, onIntercept,
+}: { node: NavNode; active: boolean; onNavigate?: () => void; isChild?: boolean; onIntercept?: (href: string) => boolean }) {
   const { href, icon: Icon, label, desc } = node;
   return (
     <Link
       href={href}
-      onClick={() => onNavigate?.()}
+      onClick={(e) => {
+        // Si hay un borrador en curso y se cambia de módulo, se intercepta para
+        // avisar y guardar antes de salir.
+        if (onIntercept?.(href)) { e.preventDefault(); return; }
+        onNavigate?.();
+      }}
       className={cn(
         "group relative flex items-center gap-3 rounded-lg transition-all duration-150 no-underline",
         isChild ? "py-2 pl-4 pr-3" : "px-3 py-2.5",
@@ -105,6 +118,32 @@ function NavLink({
 
 export function Sidebar({ onNavigate, className }: SidebarProps) {
   const path = usePathname();
+  const router = useRouter();
+  const guardarBorradorFn = useWizardStore((s) => s.guardarBorradorFn);
+  const [navPendiente, setNavPendiente] = useState<string | null>(null);
+  const [guardando, setGuardando] = useState(false);
+
+  // ¿Hay que avisar antes de salir? Solo si estamos en un módulo de causación con
+  // un borrador en curso y se navega a OTRA ruta distinta.
+  const interceptar = (href: string): boolean => {
+    const hayTrabajo = RUTAS_WIZARD.includes(path) && !!guardarBorradorFn;
+    if (hayTrabajo && href !== path) { setNavPendiente(href); return true; }
+    return false;
+  };
+
+  const guardarYSalir = async () => {
+    if (!navPendiente) return;
+    setGuardando(true);
+    try {
+      const fn = useWizardStore.getState().guardarBorradorFn;
+      if (fn) await fn();
+    } catch { /* el guardado maneja su propio estado; igual dejamos salir */ }
+    setGuardando(false);
+    const dest = navPendiente;
+    setNavPendiente(null);
+    onNavigate?.();
+    router.push(dest);
+  };
 
   return (
     <aside
@@ -150,14 +189,14 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
 
         {NAV.map((node) => (
           <div key={node.href} className="space-y-1">
-            <NavLink node={node} active={esActivo(path, node.href)} onNavigate={onNavigate} />
+            <NavLink node={node} active={esActivo(path, node.href)} onNavigate={onNavigate} onIntercept={interceptar} />
             {node.children && node.children.length > 0 && (
               <div
                 className="ml-4 space-y-1 border-l pl-2"
                 style={{ borderColor: "var(--sidebar-border)" }}
               >
                 {node.children.map((child) => (
-                  <NavLink key={child.href} node={child} active={esActivo(path, child.href)} onNavigate={onNavigate} isChild />
+                  <NavLink key={child.href} node={child} active={esActivo(path, child.href)} onNavigate={onNavigate} isChild onIntercept={interceptar} />
                 ))}
               </div>
             )}
@@ -168,7 +207,7 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
       {/* Nav bottom */}
       <nav className="px-3 pb-2 space-y-1" style={{ borderTop: "1px solid var(--sidebar-border)", paddingTop: "8px" }}>
         {NAV_BOTTOM.map((node) => (
-          <NavLink key={node.href} node={node} active={esActivo(path, node.href)} onNavigate={onNavigate} />
+          <NavLink key={node.href} node={node} active={esActivo(path, node.href)} onNavigate={onNavigate} onIntercept={interceptar} />
         ))}
       </nav>
 
@@ -187,6 +226,30 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
           v1.0 · desarrollo
         </p>
       </div>
+
+      {/* Aviso: guardar el borrador antes de cambiar de módulo */}
+      <Dialog open={navPendiente !== null} onOpenChange={(o) => { if (!o && !guardando) setNavPendiente(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Save className="h-5 w-5" style={{ color: "var(--brand)" }} />
+              Guardar antes de cambiar
+            </DialogTitle>
+            <DialogDescription>
+              Tienes un borrador en curso en este módulo. Se guardará antes de cambiar
+              para no perder tu configuración.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setNavPendiente(null)} disabled={guardando}>
+              Cancelar
+            </Button>
+            <Button onClick={() => { void guardarYSalir(); }} disabled={guardando} className="gap-1.5">
+              {guardando ? <><Loader2 className="h-4 w-4 animate-spin" /> Guardando…</> : <><Save className="h-4 w-4" /> Guardar y cambiar</>}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </aside>
   );
 }

@@ -68,6 +68,10 @@ interface WizardState {
   facturasOmitidas: FacturaOmitida[];
   tutorialActivo: boolean;
   tutorialMockMapeo: TutorialMockMapeo | null;
+  // Función de guardado del borrador que registra el paso 2 mientras está activo,
+  // para que el sidebar pueda guardar antes de cambiar de módulo. null = no hay
+  // wizard con trabajo en curso.
+  guardarBorradorFn: (() => Promise<void>) | null;
 
   setDocTipo: (t: DocTipo) => void;
   setNcRuteadas: (n: number) => void;
@@ -87,6 +91,7 @@ interface WizardState {
   setFacturasOmitidas: (items: FacturaOmitida[]) => void;
   setTutorialActivo: (v: boolean) => void;
   setTutorialMockMapeo: (m: TutorialMockMapeo | null) => void;
+  setGuardarBorradorFn: (fn: (() => Promise<void>) | null) => void;
   hydrateBorrador: (snapshot: BorradorSnapshot) => void;
   reset: () => void;
 }
@@ -114,6 +119,8 @@ const initial = {
 
 export const useWizardStore = create<WizardState>((set) => ({
   ...initial,
+  guardarBorradorFn: null,  // fuera de `initial`: lo maneja el paso 2, no lo borra reset()
+  setGuardarBorradorFn: (guardarBorradorFn) => set({ guardarBorradorFn }),
   setDocTipo: (docTipo) => set({ docTipo }),
   setNcRuteadas: (ncRuteadas) => set({ ncRuteadas }),
   setPaso: (paso) => set({ paso }),

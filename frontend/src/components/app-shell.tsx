@@ -18,6 +18,10 @@ import { BRAND } from "@/lib/brand";
 const AUTH_PATHS = ["/login", "/registro", "/legal", "/forgot-password", "/reset-password", "/verify-email"];
 
 const PAGE_META: Record<string, { title: string; description: string }> = {
+  "/importar": {
+    title: "Importar DIAN",
+    description: "Traé compras y ventas con un solo token",
+  },
   "/causacion": {
     title: "Causación",
     description: "Procesá facturas DIAN y generá archivos SIIGO",

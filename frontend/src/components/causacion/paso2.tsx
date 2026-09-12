@@ -418,28 +418,58 @@ export function Paso2() {
     verificadas, baseOverride,
   }), [facturas.length, cuentaPago, tipoProveedor, nitEdit, cuentaGastoGlobal, rfGlobal, riGlobal, codImpuestoGlobal, cuentaIvaGlobal, cuentaGastoItem, rfItem, riItem, codImpuestoItem, cuentaIvaItem, verificadas, baseOverride]);
 
+  // Constructor del payload del borrador, SIEMPRE con el estado más reciente. Se
+  // guarda en un ref para que el guardado (single-flight, abajo) nunca use un
+  // closure viejo.
+  const buildPayload = useCallback(() => {
+    const snapshot: BorradorSnapshot = {
+      facturas, tipoComp, centroCosto,
+      facturasYaCausadas, facturasOmitidas, suggestions,
+      paso2: buildPaso2Snapshot(),
+    };
+    return {
+      datos: snapshot as unknown as Record<string, unknown>,
+      total_facturas: facturas.length,
+      total_verificadas: Object.values(verificadas).filter(Boolean).length,
+      tipo_comp: tipoComp || null,
+    };
+  }, [facturas, tipoComp, centroCosto, facturasYaCausadas, facturasOmitidas, suggestions, buildPaso2Snapshot, verificadas]);
+  const buildPayloadRef = useRef(buildPayload);
+  buildPayloadRef.current = buildPayload;
+  // docTipo capturado UNA sola vez al montar el paso 2: este paso 2 pertenece a UN
+  // módulo y SIEMPRE debe guardar en el borrador de ESE módulo. NO se sigue el
+  // docTipo del store en vivo, porque durante la transición entre módulos el store
+  // cambia antes de que este paso 2 se desmonte, y un guardado tardío (flush/
+  // debounce) terminaría escribiendo en el borrador del OTRO módulo (contaminación
+  // cruzada simétrica: guardar ventas borraba compras y viceversa).
+  const docTipoRef = useRef(docTipo);
+
+  // Guardado del borrador con "single-flight": nunca corren dos guardados a la vez
+  // (así un guardado viejo no puede pisar a uno nuevo por terminar fuera de orden).
+  // Si el estado cambia mientras se está guardando, al terminar se re-guarda con lo
+  // ÚLTIMO. Resultado: SIEMPRE queda persistido el estado más reciente. La función
+  // es estable (no depende del estado) para que autoguardado, flush y botón usen
+  // siempre la misma y coordinen el single-flight.
+  const savingRef = useRef(false);
+  const pendingRef = useRef(false);
   const guardarBorrador = useCallback(async () => {
+    if (savingRef.current) { pendingRef.current = true; return; }  // hay uno en curso: se re-guardará
+    savingRef.current = true;
     setBorradorEstado("guardando");
     try {
-      const snapshot: BorradorSnapshot = {
-        facturas, tipoComp, centroCosto,
-        facturasYaCausadas, facturasOmitidas, suggestions,
-        paso2: buildPaso2Snapshot(),
-      };
-      await api.guardarBorrador({
-        datos: snapshot as unknown as Record<string, unknown>,
-        total_facturas: facturas.length,
-        total_verificadas: Object.values(verificadas).filter(Boolean).length,
-        tipo_comp: tipoComp || null,
-      }, docTipo);
+      do {
+        pendingRef.current = false;
+        await api.guardarBorrador(buildPayloadRef.current(), docTipoRef.current);
+      } while (pendingRef.current);  // cambió mientras guardaba → re-guardar lo último
       setBorradorEstado("guardado");
-      // Mantener sincronizada la tarjeta "Tienes un borrador guardado" del paso 1
-      // para que aparezca al volver sin tener que recargar la página.
-      void queryClient.invalidateQueries({ queryKey: ["borrador", docTipo] });
+      // Mantener sincronizada la tarjeta "Tienes un borrador guardado" del paso 1.
+      void queryClient.invalidateQueries({ queryKey: ["borrador", docTipoRef.current] });
     } catch {
       setBorradorEstado("error");
+    } finally {
+      savingRef.current = false;
     }
-  }, [facturas, tipoComp, centroCosto, facturasYaCausadas, facturasOmitidas, suggestions, buildPaso2Snapshot, verificadas, queryClient, docTipo]);
+  }, [queryClient]);
 
   // Autoguardado de respaldo: 2s tras el último cambio de configuración.
   const paso2Sig = JSON.stringify(buildPaso2Snapshot());
@@ -469,6 +499,15 @@ export function Paso2() {
       window.removeEventListener("pagehide", flush);
       flush(); // al desmontar el paso 2 (navegar, cambiar de módulo…)
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Registrar el guardado en el store para que el sidebar pueda GUARDAR antes de
+  // cambiar de módulo (aviso al salir). Se limpia al desmontar el paso 2.
+  useEffect(() => {
+    if (tutorialActivo) return;
+    useWizardStore.getState().setGuardarBorradorFn(async () => { await guardarRef.current(); });
+    return () => useWizardStore.getState().setGuardarBorradorFn(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -714,7 +753,7 @@ export function Paso2() {
                 variant="outline"
                 size="sm"
                 onClick={() => { void guardarBorrador(); }}
-                disabled={facturas.length === 0 || borradorEstado === "guardando"}
+                disabled={facturas.length === 0}
                 title="Guarda un borrador para retomar más tarde desde donde quedaste"
                 className="gap-1.5"
               >

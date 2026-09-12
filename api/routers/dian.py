@@ -62,6 +62,20 @@ class ImportarRequest(BaseModel):
     modo: str = Field("compras", description="'compras' (recibidos) | 'ventas' (emitidos)")
 
 
+class ConsultarTodoRequest(BaseModel):
+    """Consulta unificada: recibidos (compras) + emitidos (ventas) con un solo token."""
+    auth_url: str = Field(..., description="URL completa de AuthToken de la DIAN")
+    fecha_desde: str = Field(..., description="DD/MM/YYYY")
+    fecha_hasta: str = Field(..., description="DD/MM/YYYY")
+
+
+class ImportarTodoRequest(BaseModel):
+    """Importación unificada: los ids se separan por origen (recibidos/emitidos)."""
+    auth_url: str
+    ids_compras: list[str] = Field(default_factory=list, description="DT_RowId de recibidos")
+    ids_ventas: list[str] = Field(default_factory=list, description="DT_RowId de emitidos")
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _mapear_error(e: DianError) -> HTTPException:
@@ -167,6 +181,88 @@ def importar(body: ImportarRequest, empresa: EmpresaActiva):
                     f"{errores} factura(s) no se pudieron parsear y se omitieron."
                 )
             yield json.dumps({"type": "done", "facturas": facturas, "errores": errores}) + "\n"
+        except DianError as e:
+            yield json.dumps({"type": "error", "code": e.code, "message": e.message}) + "\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="application/x-ndjson",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
+
+
+# ── Importación UNIFICADA (un solo token → compras, NC compras, ventas, NC ventas) ──
+
+@router.post("/consultar-todo")
+def consultar_todo(body: ConsultarTodoRequest, empresa: EmpresaActiva):
+    """Con un solo token, lista TODO en el rango: recibidos (compras) y emitidos
+    (ventas). La sesión DIAN se reutiliza (cacheada por token), así que las dos
+    consultas usan la misma autenticación."""
+    try:
+        compras = dian_service.consultar_documentos(
+            body.auth_url, body.fecha_desde, body.fecha_hasta, modo="compras"
+        )
+        ventas = dian_service.consultar_documentos(
+            body.auth_url, body.fecha_desde, body.fecha_hasta, modo="ventas"
+        )
+    except DianError as e:
+        raise _mapear_error(e)
+    return {"compras": compras, "ventas": ventas}
+
+
+def _bucket_de(factura: dict, origen: str) -> str | None:
+    """Clasifica una factura ya parseada en su módulo destino.
+
+    El ORIGEN manda (recibidos=compra, emitidos=venta); el tipo de documento
+    separa factura de nota crédito. Las notas débito se omiten (no hay módulo).
+    """
+    td = (factura.get("tipo_documento") or "factura").lower()
+    if td == "nota_debito":
+        return None
+    if origen == "ventas":
+        return "nc_ventas" if td == "nota_credito" else "ventas"
+    return "nc" if td == "nota_credito" else "compras"
+
+
+@router.post("/importar-todo")
+def importar_todo(body: ImportarTodoRequest, empresa: EmpresaActiva):
+    """Descarga y parsea recibidos + emitidos con un solo token, y devuelve las
+    facturas ya clasificadas en 4 grupos: compras, nc, ventas, nc_ventas.
+    Responde en streaming NDJSON con progreso real; la línea final trae los grupos.
+
+    Líneas: {"type":"start","total":N} · {"type":"progress","done":i,"total":N}
+            {"type":"done","buckets":{...},"errores":k} · {"type":"error",...}
+    """
+    if not body.ids_compras and not body.ids_ventas:
+        raise HTTPException(400, "No se seleccionaron facturas para importar.")
+
+    total = len(body.ids_compras) + len(body.ids_ventas)
+
+    def gen():
+        buckets: dict[str, list[dict]] = {"compras": [], "nc": [], "ventas": [], "nc_ventas": []}
+        errores = 0
+        done = 0
+        yield json.dumps({"type": "start", "total": total}) + "\n"
+        try:
+            for origen, ids in (("compras", body.ids_compras), ("ventas", body.ids_ventas)):
+                if not ids:
+                    continue
+                for _d, _t, id_, xml in dian_service.descargar_xmls_stream(body.auth_url, ids, modo=origen):
+                    done += 1
+                    try:
+                        nombre = dian_service.nombre_para_parser(xml, id_)
+                        for fac in causacion_service.parsear_archivo(xml, nombre):
+                            destino = _bucket_de(fac, origen)
+                            if destino is None:
+                                continue
+                            if origen == "ventas":
+                                fac = usar_cliente_como_tercero(fac)
+                            buckets[destino].append(fac)
+                    except Exception:  # noqa: BLE001 — un XML malo no debe tumbar el lote
+                        errores += 1
+                    yield json.dumps({"type": "progress", "done": done, "total": total}) + "\n"
+
+            yield json.dumps({"type": "done", "buckets": buckets, "errores": errores}) + "\n"
         except DianError as e:
             yield json.dumps({"type": "error", "code": e.code, "message": e.message}) + "\n"
 
