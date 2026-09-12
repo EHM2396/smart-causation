@@ -74,6 +74,7 @@ export interface ItemFactura {
 
 export interface Factura {
   numero_dian: string;
+  cufe?: string;   // CUFE/CUDE del documento (para buscarlo en la DIAN)
   razon_social: string;
   nit: string;
   nit_comprador?: string;

@@ -13,7 +13,7 @@ import { OmitidasModal } from "@/components/causacion/omitidas-modal";
 import { fmt } from "@/lib/utils";
 import {
   AlertTriangle, Plus, Sparkles, Loader2,
-  ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search, History, X, Trash2, Save, Scissors, Layers,
+  ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search, History, X, Trash2, Save, Scissors, Layers, Copy, Check,
 } from "lucide-react";
 import type { MapeoItem, CuentaOpcion, ImpuestoOut, FuenteMapeo, Sugerencia, ItemFactura, Paso2Snapshot, BorradorSnapshot } from "@/lib/types";
 
@@ -113,6 +113,7 @@ export function Paso2() {
 
   // Borrador (guardado temporal): "idle" | "guardando" | "guardado" | "error"
   const [borradorEstado, setBorradorEstado] = useState<"idle" | "guardando" | "guardado" | "error">("idle");
+  const [cufeCopiado, setCufeCopiado] = useState(false);
   const queryClient = useQueryClient();
 
   // Pre-cargar estado de demo cuando el tutorial está activo
@@ -1179,6 +1180,14 @@ export function Paso2() {
   // ── DETAIL VIEW ──────────────────────────────────────────────────────────────
   const factura = facturas[selectedIdx];
   const esPdf = !["xlsx", "xls"].some(ext => (factura._archivo ?? "").toLowerCase().endsWith(`.${ext}`));
+  const copiarCufe = async () => {
+    if (!factura.cufe) return;
+    try {
+      await navigator.clipboard.writeText(factura.cufe);
+      setCufeCopiado(true);
+      setTimeout(() => setCufeCopiado(false), 1800);
+    } catch { /* portapapeles no disponible: no-op */ }
+  };
   const totalCalculado = factura.items.reduce((sum, item, jdx) => {
     const k = `${selectedIdx}_${jdx}`;
     const effBase = getEffBase(k, item);
@@ -1300,11 +1309,28 @@ export function Paso2() {
             )}
           </div>
         )}
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-6">
           <DataField label={esNC ? "N° Nota crédito" : "N° Factura DIAN"} value={factura.numero_dian} mono />
           <DataField label="Fecha emisión" value={factura.fecha} />
           <div className="col-span-2">
             <DataField label={terceroLabel} value={factura.razon_social} />
+          </div>
+          {/* CUFE: botón para copiarlo al portapapeles y buscar la factura en la DIAN */}
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>CUFE</p>
+            {factura.cufe ? (
+              <button
+                type="button"
+                onClick={() => { void copiarCufe(); }}
+                title={`Copiar CUFE para buscar la factura en la DIAN\n${factura.cufe}`}
+                className="mt-1 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-opacity hover:opacity-80"
+                style={{ borderColor: "var(--border-soft)", color: cufeCopiado ? "var(--success)" : "var(--text-secondary)", backgroundColor: "var(--bg-elevated)" }}
+              >
+                {cufeCopiado ? <><Check className="h-3.5 w-3.5" /> Copiado</> : <><Copy className="h-3.5 w-3.5" /> Copiar CUFE</>}
+              </button>
+            ) : (
+              <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>—</p>
+            )}
           </div>
           <div>
             <p className="text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Total factura</p>
