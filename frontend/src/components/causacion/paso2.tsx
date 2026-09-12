@@ -2,7 +2,7 @@
 import { Fragment, useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useWizardStore, esModoNC, esModoVenta } from "@/stores/wizard";
+import { useWizardStore, esModoNC, esModoVenta, esModoSoporte } from "@/stores/wizard";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
@@ -73,7 +73,7 @@ export function Paso2() {
   const esNC = esModoNC(docTipo);
   const esVenta = esModoVenta(docTipo);
   // En ventas el tercero es el cliente; en compras, el proveedor.
-  const terceroLabel = esVenta ? "Cliente" : "Proveedor";
+  const terceroLabel = esVenta ? "Cliente" : esModoSoporte(docTipo) ? "Vendedor" : "Proveedor";
   const [modalCausadasOpen, setModalCausadasOpen] = useState(false);
   const [modalOmitidasOpen, setModalOmitidasOpen] = useState(false);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);

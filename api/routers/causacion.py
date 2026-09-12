@@ -66,6 +66,7 @@ async def parsear_facturas(
     """
     modo = (modo or "compras").lower()
     es_modo_ventas = modo == "ventas"
+    es_modo_soporte = modo == "soporte"
 
     contenido = await archivo.read()
     try:
@@ -73,12 +74,38 @@ async def parsear_facturas(
     except Exception as exc:
         raise HTTPException(400, f"Error al parsear el archivo: {exc}") from exc
 
-    # Separar compras vs ventas por NIT emisor. Sin NIT de empresa no se puede
-    # distinguir → se devuelve tal cual (mejor esfuerzo).
+    def _es_soporte(f: dict) -> bool:
+        return (f.get("tipo_documento") or "") in ("documento_soporte", "nota_ajuste_soporte")
+
+    # Los documentos soporte (tipo 05) son su propio módulo: se separan primero para
+    # que NO se mezclen con compras/ventas (aunque el NIT del vendedor no sea el de
+    # la empresa, un DS no es una compra normal).
+    soporte = [f for f in facturas if _es_soporte(f)]
+    no_soporte = [f for f in facturas if not _es_soporte(f)]
+
+    if es_modo_soporte:
+        nums = [f.get("numero_dian") or archivo.filename or "desconocido" for f in no_soporte]
+        if nums and not soporte:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"[NO_SOPORTE] {nums[0]}: Este documento no es un Documento Soporte (tipo 05). "
+                    "Úsalo en el módulo de Compras o Ventas según corresponda."
+                ),
+            )
+        if nums and soporte:
+            soporte[0].setdefault("advertencias", []).append(
+                f"[NO_SOPORTE] {nums[0]}: {len(nums)} documento(s) que no son soporte omitido(s)."
+            )
+        return soporte
+
+    # Compras/ventas: separar por NIT emisor SOBRE los que NO son soporte.
     nit_empresa = re.sub(r"[^\d]", "", empresa.nit or "") if empresa.nit else ""
-    if nit_empresa:
+    if not nit_empresa:
+        facturas = no_soporte
+    else:
         compras, ventas = [], []
-        for fac in facturas:
+        for fac in no_soporte:
             nit_emisor = re.sub(r"[^\d]", "", fac.get("nit", "") or "")
             if nit_emisor and nit_empresa == nit_emisor:
                 ventas.append(fac)
@@ -86,7 +113,6 @@ async def parsear_facturas(
                 compras.append(fac)
 
         if es_modo_ventas:
-            # Módulo de ventas: conservar ventas, omitir compras.
             nums_omitidas = [f.get("numero_dian") or archivo.filename or "desconocida" for f in compras]
             if nums_omitidas and not ventas:
                 raise HTTPException(
@@ -104,7 +130,6 @@ async def parsear_facturas(
             # En ventas el tercero es el cliente (receptor), no la empresa emisora.
             facturas = [usar_cliente_como_tercero(f) for f in ventas]
         else:
-            # Módulo de compras: conservar compras, omitir ventas.
             nums_omitidas = [f.get("numero_dian") or archivo.filename or "desconocida" for f in ventas]
             if nums_omitidas and not compras:
                 raise HTTPException(
@@ -120,6 +145,11 @@ async def parsear_facturas(
                 )
             facturas = compras
 
+    # Aviso si se omitieron documentos soporte en un módulo de compras/ventas.
+    if soporte and facturas:
+        facturas[0].setdefault("advertencias", []).append(
+            f"[SOPORTE] {len(soporte)} documento(s) soporte omitido(s). Úsalos en el módulo de Documento Soporte."
+        )
     return facturas
 
 

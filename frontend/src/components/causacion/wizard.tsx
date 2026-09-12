@@ -1,6 +1,6 @@
 "use client";
 import { useEffect } from "react";
-import { useWizardStore, esModoNC, esModoVenta } from "@/stores/wizard";
+import { useWizardStore, esModoNC, esModoVenta, esModoSoporte } from "@/stores/wizard";
 import type { DocTipo } from "@/stores/wizard";
 import { StepIndicator } from "./step-indicator";
 import { Paso1 } from "./paso1";
@@ -180,6 +180,10 @@ export function CausacionWizard({ docTipo = "compras" }: { docTipo?: DocTipo }) 
   }, [docTipo]);
 
   const esNC = esModoNC(docTipo);
+  const esSoporte = esModoSoporte(docTipo);
+  const kpiLabel = esNC
+    ? (esSoporte ? "Notas de ajuste" : "Notas crédito")
+    : (esSoporte ? "Documentos soporte" : "Facturas");
   const totalItems = facturas.reduce((s, f) => s + f.items.length, 0);
   const mapeados = mapeos.filter((m) => m.cuenta_gasto).length;
 
@@ -195,7 +199,7 @@ export function CausacionWizard({ docTipo = "compras" }: { docTipo?: DocTipo }) 
       <div className="flex-1 overflow-y-auto px-4 py-6 lg:px-8 lg:py-8">
         {/* KPI bar */}
         <div className="grid grid-cols-2 gap-3 mb-6 sm:grid-cols-4 lg:mb-8">
-          <KpiCard icon={FileText}    label={esNC ? "Notas crédito" : "Facturas"} value={facturas.length} accent="#4F46E5" sublabel={facturas.length ? (esNC ? "notas cargadas" : "archivos cargados") : "Sin cargar aún"} />
+          <KpiCard icon={FileText}    label={kpiLabel} value={facturas.length} accent="#4F46E5" sublabel={facturas.length ? (esNC ? "notas cargadas" : "documentos cargados") : "Sin cargar aún"} />
           <KpiCard icon={Layers}      label="Ítems"          value={totalItems}      accent="#7c3aed" sublabel={totalItems ? "líneas de factura" : "Carga archivos primero"} />
           <KpiCard icon={CheckCircle2} label="Mapeadas"      value={mapeados}        accent="#8FB5FF" sublabel={mapeados ? `de ${totalItems} ítems` : "Pendiente mapeo"} />
           <KpiCard icon={Tag}         label="Comprobante"    value={tipoComp || "—"} accent="#d97706" sublabel={tipoComp ? "tipo seleccionado" : "Selecciona en config"} />

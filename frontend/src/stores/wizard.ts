@@ -36,18 +36,22 @@ interface Paso2Cache {
   baseOverride: Record<string, string>;
 }
 
-// Los cuatro modos del wizard: compras y sus notas crédito, ventas y sus notas
-// crédito (devoluciones). Cada uno tiene su propia bandeja de borrador.
-export type DocTipo = "compras" | "nc" | "ventas" | "nc_ventas";
+// Modos del wizard: compras y sus NC, ventas y sus NC (devoluciones), y documento
+// soporte y su nota de ajuste. Cada uno tiene su propia bandeja de borrador.
+export type DocTipo = "compras" | "nc" | "ventas" | "nc_ventas" | "soporte" | "nc_soporte";
 
 /** ¿El módulo es de ventas (factura de venta o devolución en ventas)? */
 export const esModoVenta = (t: DocTipo): boolean => t === "ventas" || t === "nc_ventas";
-/** ¿El módulo procesa notas crédito? (NC compras o NC ventas) */
-export const esModoNC = (t: DocTipo): boolean => t === "nc" || t === "nc_ventas";
-/** Bandeja NC hermana del módulo base (compras→nc, ventas→nc_ventas). */
-export const tipoNCHermano = (t: DocTipo): DocTipo => (esModoVenta(t) ? "nc_ventas" : "nc");
+/** ¿El módulo es de documento soporte (DS o su nota de ajuste)? Contablemente = compra. */
+export const esModoSoporte = (t: DocTipo): boolean => t === "soporte" || t === "nc_soporte";
+/** ¿El módulo procesa notas crédito/ajuste? (NC compras, NC ventas o ajuste soporte) */
+export const esModoNC = (t: DocTipo): boolean => t === "nc" || t === "nc_ventas" || t === "nc_soporte";
+/** Bandeja NC/ajuste hermana del módulo base (compras→nc, ventas→nc_ventas, soporte→nc_soporte). */
+export const tipoNCHermano = (t: DocTipo): DocTipo =>
+  esModoSoporte(t) ? "nc_soporte" : esModoVenta(t) ? "nc_ventas" : "nc";
 /** Modo para /causacion/parsear y /dian según el módulo. */
-export const modoParseo = (t: DocTipo): "compras" | "ventas" => (esModoVenta(t) ? "ventas" : "compras");
+export const modoParseo = (t: DocTipo): "compras" | "ventas" | "soporte" =>
+  esModoSoporte(t) ? "soporte" : esModoVenta(t) ? "ventas" : "compras";
 
 interface WizardState {
   docTipo: DocTipo;

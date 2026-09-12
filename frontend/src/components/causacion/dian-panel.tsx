@@ -63,14 +63,15 @@ function buildPresets() {
 interface Props {
   /** Recibe las facturas ya parseadas (mismo shape que la carga manual). */
   onImportadas: (facturas: Factura[]) => void | Promise<void>;
-  /** "compras" (recibidas, default) | "ventas" (emitidas). */
-  modo?: "compras" | "ventas";
+  /** "compras" (recibidas) | "ventas" (emitidas) | "soporte" (documento soporte). */
+  modo?: "compras" | "ventas" | "soporte";
 }
 
 export function DianPanel({ onImportadas, modo = "compras" }: Props) {
   const esVenta = modo === "ventas";
-  const sustantivo = esVenta ? "emitida" : "recibida"; // femenino singular
-  const sustantivoP = esVenta ? "emitidas" : "recibidas";
+  const esSoporte = modo === "soporte";
+  const sustantivo = esSoporte ? "documento soporte" : esVenta ? "emitida" : "recibida"; // singular
+  const sustantivoP = esSoporte ? "documentos soporte" : esVenta ? "emitidas" : "recibidas";
   const presets = useMemo(buildPresets, []);
   const [authUrl, setAuthUrl] = useState("");
   const [desde, setDesde] = useState(() => presets[0].desde); // por defecto: "Este mes"
@@ -172,7 +173,7 @@ export function DianPanel({ onImportadas, modo = "compras" }: Props) {
         api.dianImportarStream({ auth_url: authUrl.trim(), ids, modo }, (done, total) => setProg({ done, total }))
       );
       if (!facturas.length) {
-        setError(`No se pudo traer ninguna factura (¿ya causadas o de ${esVenta ? "compra" : "venta"}?).`);
+        setError(`No se pudo traer ning${esSoporte ? "ún documento" : "una factura"} (¿ya causad${esSoporte ? "o" : "a"}s o de otro tipo?).`);
         return;
       }
       await onImportadas(facturas);

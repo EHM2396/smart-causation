@@ -869,9 +869,16 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
     cufe = _xml_text(find("cbc:UUID"))
     fecha = _to_fecha(_xml_text(find("cbc:IssueDate")))
 
-    # ── Tipo de documento: factura / nota crédito / nota débito ──
+    # ── Tipo de documento: factura / nota crédito / nota débito / soporte ──
     root_local = root.tag.rsplit("}", 1)[-1]
-    if root_local == "CreditNote" or _xml_text(find("cbc:CreditNoteTypeCode")):
+    customization = (_xml_text(find("cbc:CustomizationID")) or "").strip()
+    es_credito = root_local == "CreditNote" or bool(_xml_text(find("cbc:CreditNoteTypeCode")))
+    if customization == "05":
+        # Documento Soporte en adquisiciones a no obligados a facturar (tipo 05).
+        # Su nota de ajuste usa la estructura de nota crédito. En ambos el tercero
+        # es el VENDEDOR (AccountingSupplierParty), igual que una compra.
+        tipo_documento = "nota_ajuste_soporte" if es_credito else "documento_soporte"
+    elif es_credito:
         tipo_documento = "nota_credito"
     elif root_local == "DebitNote" or _xml_text(find("cbc:DebitNoteTypeCode")):
         tipo_documento = "nota_debito"

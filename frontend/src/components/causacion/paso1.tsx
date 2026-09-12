@@ -1,7 +1,7 @@
 "use client";
 import { useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useWizardStore, esModoNC, esModoVenta, modoParseo, tipoNCHermano } from "@/stores/wizard";
+import { useWizardStore, esModoNC, esModoVenta, esModoSoporte, modoParseo, tipoNCHermano } from "@/stores/wizard";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle2, Loader2, TrendingDown, Clock, History, Trash2, ArrowRight, Building2 } from "lucide-react";
@@ -33,10 +33,11 @@ export function Paso1() {
   const { docTipo, ncRuteadas, setNcRuteadas, setFacturas, setFacturasYaCausadas, setPaso, facturas: stored, setPdfUrls, pdfUrls, setFilesProcesando, setSuggestions, setPaso2Cache, setFacturasOmitidas, hydrateBorrador, tutorialActivo } = useWizardStore();
   const esNC = esModoNC(docTipo);
   const esVenta = esModoVenta(docTipo);
-  // Etiqueta de lo que se EXCLUYE en este módulo: en compras se excluyen ventas y
-  // viceversa. El backend marca esas omisiones con el prefijo [VENTA] o [COMPRA].
-  const tagExcluido = esVenta ? "[COMPRA]" : "[VENTA]";
-  const nombreExcluido = esVenta ? "compra" : "venta";
+  const esSoporte = esModoSoporte(docTipo);
+  // Etiqueta de lo que se EXCLUYE en este módulo. El backend marca esas omisiones
+  // con [VENTA]/[COMPRA] (compras/ventas) o [NO_SOPORTE] (documento soporte).
+  const tagExcluido = esSoporte ? "[NO_SOPORTE]" : esVenta ? "[COMPRA]" : "[VENTA]";
+  const nombreExcluido = esSoporte ? "otro tipo" : esVenta ? "compra" : "venta";
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -144,19 +145,24 @@ export function Paso1() {
     errs: string[],
   ) => {
     setNcRuteadas(0);
-    // Separar por tipo de documento según el módulo actual (compras vs NC).
-    const esNotaCredito = (f: Factura) => (f as { tipo_documento?: string }).tipo_documento === "nota_credito";
-    const esNotaDebito = (f: Factura) => (f as { tipo_documento?: string }).tipo_documento === "nota_debito";
+    // Separar por tipo de documento según el módulo actual. La "nota" del módulo:
+    // en soporte es la nota de AJUSTE; en compras/ventas, la nota CRÉDITO.
+    const tdOf = (f: Factura) => (f as { tipo_documento?: string }).tipo_documento;
+    const esNotaModulo = (f: Factura) =>
+      esSoporte ? tdOf(f) === "nota_ajuste_soporte" : tdOf(f) === "nota_credito";
+    const esNotaDebito = (f: Factura) => tdOf(f) === "nota_debito";
+    const nombreNota = esSoporte ? "nota de ajuste" : "nota crédito";
     let ncCount = 0;
 
     if (esNC) {
-      // Módulo NC: solo notas crédito; lo demás se omite.
-      const otras = parsed.filter((f) => !esNotaCredito(f));
-      if (otras.length) errs.push(`${otras.length} documento(s) que no son nota crédito se omitieron (van en Causación ${esVenta ? "Ventas" : "Compras"}).`);
-      parsed = parsed.filter(esNotaCredito);
+      // Módulo NC/ajuste: solo notas del módulo; lo demás se omite.
+      const otras = parsed.filter((f) => !esNotaModulo(f));
+      if (otras.length) errs.push(`${otras.length} documento(s) que no son ${nombreNota} se omitieron (van en el módulo base).`);
+      parsed = parsed.filter(esNotaModulo);
     } else {
-      // Módulo base (Compras/Ventas): NC se rutean a su bandeja NC; ND aún no soportadas.
-      const ncs = parsed.filter(esNotaCredito);
+      // Módulo base (Compras/Ventas/Soporte): las notas se rutean a su bandeja
+      // hermana (NC / ajuste); las notas débito aún no se soportan.
+      const ncs = parsed.filter(esNotaModulo);
       const nds = parsed.filter(esNotaDebito);
       if (ncs.length) {
         await rutearANC(ncs);
@@ -164,7 +170,7 @@ export function Paso1() {
         setNcRuteadas(ncs.length);
       }
       if (nds.length) errs.push(`${nds.length} nota(s) débito omitidas (aún no soportadas).`);
-      parsed = parsed.filter((f) => !esNotaCredito(f) && !esNotaDebito(f));
+      parsed = parsed.filter((f) => !esNotaModulo(f) && !esNotaDebito(f));
     }
 
     if (!parsed.length) {

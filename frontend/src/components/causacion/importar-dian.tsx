@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { DatePicker } from "@/components/ui/date-picker";
 import {
   AlertTriangle, Search, Download, Loader2, ShieldCheck, KeyRound, CalendarDays, X,
-  ShoppingCart, TrendingUp, FileMinus2, ArrowRight, CheckCircle2,
+  ShoppingCart, TrendingUp, FileMinus2, ArrowRight, CheckCircle2, FileCheck2,
 } from "lucide-react";
 import type { DocTipo } from "@/stores/wizard";
 import type { Factura } from "@/lib/types";
@@ -47,13 +47,15 @@ function limpiarError(raw: string): string {
   return jsonPart || raw;
 }
 
-type Bucket = "compras" | "nc" | "ventas" | "nc_ventas";
+type Bucket = "compras" | "nc" | "ventas" | "nc_ventas" | "soporte" | "nc_soporte";
 
 const DESTINOS: { tipo: Bucket; ruta: string; label: string; icon: typeof ShoppingCart; color: string }[] = [
-  { tipo: "compras",   ruta: "/causacion",          label: "Causación Compras", icon: ShoppingCart, color: "#4F46E5" },
-  { tipo: "nc",        ruta: "/causacion-nc",        label: "NC Compras",        icon: FileMinus2,   color: "#7c3aed" },
-  { tipo: "ventas",    ruta: "/causacion-ventas",    label: "Causación Ventas",  icon: TrendingUp,   color: "#0ea5a4" },
-  { tipo: "nc_ventas", ruta: "/causacion-nc-ventas", label: "NC Ventas",         icon: FileMinus2,   color: "#d97706" },
+  { tipo: "compras",    ruta: "/causacion",           label: "Causación Compras", icon: ShoppingCart, color: "#4F46E5" },
+  { tipo: "nc",         ruta: "/causacion-nc",         label: "NC Compras",        icon: FileMinus2,   color: "#7c3aed" },
+  { tipo: "ventas",     ruta: "/causacion-ventas",     label: "Causación Ventas",  icon: TrendingUp,   color: "#0ea5a4" },
+  { tipo: "nc_ventas",  ruta: "/causacion-nc-ventas",  label: "NC Ventas",         icon: FileMinus2,   color: "#d97706" },
+  { tipo: "soporte",    ruta: "/causacion-soporte",    label: "Documento Soporte", icon: FileCheck2,   color: "#0284c7" },
+  { tipo: "nc_soporte", ruta: "/causacion-nc-soporte", label: "Ajuste Soporte",    icon: FileMinus2,   color: "#9333ea" },
 ];
 
 export function ImportarDian() {
@@ -68,8 +70,9 @@ export function ImportarDian() {
   const [importando, setImportando] = useState(false);
   const [prog, setProg] = useState({ done: 0, total: 0 });
   const [error, setError] = useState("");
-  const [resultado, setResultado] = useState<{ compras: number; ventas: number; idsCompras: string[]; idsVentas: string[] } | null>(null);
+  const [resultado, setResultado] = useState<{ compras: number; ventas: number; soporte: number; soporteAjuste: number; idsCompras: string[]; idsVentas: string[]; idsSoporte: string[]; idsSoporteAjuste: string[] } | null>(null);
   const [resumen, setResumen] = useState<Record<Bucket, number> | null>(null);
+  const [erroresImport, setErroresImport] = useState(0);
 
   const consultar = async () => {
     if (!authUrl.trim()) { setError("Pega la URL de AuthToken de la DIAN."); return; }
@@ -77,8 +80,17 @@ export function ImportarDian() {
     try {
       const res = await api.dianConsultarTodo({ auth_url: authUrl.trim(), fecha_desde: isoToDian(desde), fecha_hasta: isoToDian(hasta) });
       const idsCompras = res.compras.documents.map((d) => d.id).filter((x): x is string => !!x);
-      const idsVentas = res.ventas.documents.map((d) => d.id).filter((x): x is string => !!x);
-      setResultado({ compras: res.compras.total, ventas: res.ventas.total, idsCompras, idsVentas });
+      const idsSoporte = res.soporte.documents.map((d) => d.id).filter((x): x is string => !!x);
+      const idsSoporteAjuste = res.soporte_ajuste.documents.map((d) => d.id).filter((x): x is string => !!x);
+      const emitidoAparte = new Set([...idsSoporte, ...idsSoporteAjuste]);
+      // Los DS y sus ajustes se consultan aparte (tipo 05/95): se quitan de ventas
+      // por si aparecieran también en la bandeja de emitidos, para no duplicar.
+      const idsVentas = res.ventas.documents.map((d) => d.id).filter((x): x is string => !!x && !emitidoAparte.has(x));
+      setResultado({
+        compras: res.compras.total, ventas: idsVentas.length,
+        soporte: idsSoporte.length, soporteAjuste: idsSoporteAjuste.length,
+        idsCompras, idsVentas, idsSoporte, idsSoporteAjuste,
+      });
     } catch (e) {
       setError(limpiarError((e as Error).message));
     } finally {
@@ -87,7 +99,7 @@ export function ImportarDian() {
   };
 
   const distribuir = async (buckets: Record<Bucket, Factura[]>) => {
-    const conteo: Record<Bucket, number> = { compras: 0, nc: 0, ventas: 0, nc_ventas: 0 };
+    const conteo: Record<Bucket, number> = { compras: 0, nc: 0, ventas: 0, nc_ventas: 0, soporte: 0, nc_soporte: 0 };
     for (const { tipo } of DESTINOS) {
       const nuevas = buckets[tipo] ?? [];
       conteo[tipo] = nuevas.length;
@@ -120,18 +132,18 @@ export function ImportarDian() {
 
   const importar = async () => {
     if (!resultado) return;
-    if (!resultado.idsCompras.length && !resultado.idsVentas.length) {
-      setError("No hay facturas para traer en este rango."); return;
-    }
-    setImportando(true); setError(""); setResumen(null);
-    setProg({ done: 0, total: resultado.idsCompras.length + resultado.idsVentas.length });
+    const totalDocs = resultado.idsCompras.length + resultado.idsVentas.length + resultado.idsSoporte.length + resultado.idsSoporteAjuste.length;
+    if (!totalDocs) { setError("No hay documentos para traer en este rango."); return; }
+    setImportando(true); setError(""); setResumen(null); setErroresImport(0);
+    setProg({ done: 0, total: totalDocs });
     try {
-      const { buckets } = await api.dianImportarTodoStream(
-        { auth_url: authUrl.trim(), ids_compras: resultado.idsCompras, ids_ventas: resultado.idsVentas },
+      const { buckets, errores } = await api.dianImportarTodoStream(
+        { auth_url: authUrl.trim(), ids_compras: resultado.idsCompras, ids_ventas: resultado.idsVentas, ids_soporte: resultado.idsSoporte, ids_soporte_ajuste: resultado.idsSoporteAjuste },
         (done, total) => setProg({ done, total }),
       );
       const conteo = await distribuir(buckets);
       setResumen(conteo);
+      setErroresImport(errores);
     } catch (e) {
       setError(limpiarError((e as Error).message));
     } finally {
@@ -148,7 +160,7 @@ export function ImportarDian() {
         <h1 className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>Importar de la DIAN</h1>
         <p className="mt-1 text-sm" style={{ color: "var(--text-secondary)" }}>
           Pega el token una sola vez y trae <strong>todo</strong> del rango: el sistema separa cada documento
-          en su módulo — Compras, NC Compras, Ventas y NC Ventas.
+          en su módulo — Compras, NC Compras, Ventas, NC Ventas, Documento Soporte y Ajuste Soporte.
         </p>
       </div>
 
@@ -157,7 +169,7 @@ export function ImportarDian() {
         <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" style={{ color: "var(--info-text)" }} />
         <div className="text-xs leading-relaxed" style={{ color: "var(--info-text)" }}>
           Inicia sesión en el portal de la DIAN, copia la <strong>URL de AuthToken</strong> y pégala aquí.
-          Con un solo token se traen recibidas (compras) y emitidas (ventas). Tu token es temporal y no se guarda.
+          Con un solo token se traen recibidas (compras), emitidas (ventas) y documentos soporte. Tu token es temporal y no se guarda.
         </div>
       </div>
 
@@ -231,7 +243,7 @@ export function ImportarDian() {
           <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
             Encontrado en el rango
           </p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div className="rounded-lg border p-3" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
               <div className="flex items-center gap-2"><ShoppingCart className="h-4 w-4" style={{ color: "#4F46E5" }} /><span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Recibidas (compras)</span></div>
               <p className="mt-1 text-2xl font-bold" style={{ color: "var(--text-primary)" }}>{resultado.compras}</p>
@@ -240,9 +252,16 @@ export function ImportarDian() {
               <div className="flex items-center gap-2"><TrendingUp className="h-4 w-4" style={{ color: "#0ea5a4" }} /><span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Emitidas (ventas)</span></div>
               <p className="mt-1 text-2xl font-bold" style={{ color: "var(--text-primary)" }}>{resultado.ventas}</p>
             </div>
+            <div className="rounded-lg border p-3" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
+              <div className="flex items-center gap-2"><FileCheck2 className="h-4 w-4" style={{ color: "#0284c7" }} /><span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Documento soporte</span></div>
+              <p className="mt-1 text-2xl font-bold" style={{ color: "var(--text-primary)" }}>{resultado.soporte + resultado.soporteAjuste}</p>
+              {resultado.soporteAjuste > 0 && (
+                <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>{resultado.soporte} soporte · {resultado.soporteAjuste} ajuste</p>
+              )}
+            </div>
           </div>
           <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-            Al traer, las facturas van a Compras/Ventas y las notas crédito a NC Compras/NC Ventas — cada una a su módulo.
+            Al traer, cada documento va a su módulo: facturas a Compras/Ventas, notas crédito a NC, y los documentos soporte (y sus ajustes) a Documento Soporte.
           </p>
 
           {importando && (
@@ -256,10 +275,15 @@ export function ImportarDian() {
             </div>
           )}
 
-          <Button onClick={importar} disabled={importando || (resultado.compras + resultado.ventas === 0)} size="lg" className="gap-2 w-full">
-            {importando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            {importando ? "Trayendo…" : `Traer ${resultado.compras + resultado.ventas} y distribuir`}
-          </Button>
+          {(() => {
+            const totalDocs = resultado.compras + resultado.ventas + resultado.soporte + resultado.soporteAjuste;
+            return (
+              <Button onClick={importar} disabled={importando || totalDocs === 0} size="lg" className="gap-2 w-full">
+                {importando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                {importando ? "Trayendo…" : `Traer ${totalDocs} y distribuir`}
+              </Button>
+            );
+          })()}
         </div>
       )}
 
@@ -293,6 +317,23 @@ export function ImportarDian() {
             Entra a cada módulo (verás la tarjeta “Continuar borrador”) para mapear las cuentas y causar.
             Se fusionaron con lo que ya tenías sin duplicar.
           </p>
+
+          {erroresImport > 0 && (
+            <div className="rounded-lg border p-3 space-y-2" style={{ borderColor: "var(--warning-border)", backgroundColor: "var(--warning-bg)" }}>
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: "var(--warning-text)" }} />
+                <p className="text-xs" style={{ color: "var(--warning-text)" }}>
+                  <strong>{erroresImport} documento(s) no se pudieron traer</strong> (fallo de red o descarga).
+                  Lo demás ya quedó guardado. Dale <strong>Reintentar</strong> para completar los que faltaron —
+                  no se duplican los que ya entraron.
+                </p>
+              </div>
+              <Button onClick={() => { void importar(); }} disabled={importando} size="sm" className="gap-1.5">
+                {importando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                {importando ? "Reintentando…" : "Reintentar los que faltaron"}
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>

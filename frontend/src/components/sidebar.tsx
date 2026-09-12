@@ -4,14 +4,14 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { FileSpreadsheet, FileMinus2, BookOpen, History, UserCircle, Users, ReceiptText, DownloadCloud, Save, Loader2 } from "lucide-react";
+import { FileSpreadsheet, FileMinus2, BookOpen, History, UserCircle, Users, ReceiptText, DownloadCloud, Save, Loader2, FileCheck2, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWizardStore } from "@/stores/wizard";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
 // Rutas que tienen un wizard de causación con borrador en curso.
-const RUTAS_WIZARD = ["/causacion", "/causacion-nc", "/causacion-ventas", "/causacion-nc-ventas"];
+const RUTAS_WIZARD = ["/causacion", "/causacion-nc", "/causacion-ventas", "/causacion-nc-ventas", "/causacion-soporte", "/causacion-nc-soporte"];
 
 interface NavNode {
   href: string;
@@ -37,6 +37,12 @@ const NAV: NavNode[] = [
       { href: "/causacion-nc-ventas", icon: FileMinus2, label: "NC Ventas", desc: "Devoluciones en ventas" },
     ],
   },
+  {
+    href: "/causacion-soporte", icon: FileCheck2, label: "Documento Soporte", desc: "Compras a no obligados (tipo 05)",
+    children: [
+      { href: "/causacion-nc-soporte", icon: FileMinus2, label: "Ajuste Soporte", desc: "Notas de ajuste al DS" },
+    ],
+  },
   { href: "/historial", icon: History, label: "Historial", desc: "Facturas causadas" },
   { href: "/terceros", icon: Users, label: "Terceros", desc: "Proveedores y vendedores" },
   { href: "/catalogos", icon: BookOpen, label: "Catálogos", desc: "Impuestos, PUC, comprobantes" },
@@ -57,8 +63,8 @@ interface SidebarProps {
 }
 
 function NavLink({
-  node, active, onNavigate, isChild = false, onIntercept,
-}: { node: NavNode; active: boolean; onNavigate?: () => void; isChild?: boolean; onIntercept?: (href: string) => boolean }) {
+  node, active, onNavigate, isChild = false, onIntercept, hasChildren = false, expanded = false,
+}: { node: NavNode; active: boolean; onNavigate?: () => void; isChild?: boolean; onIntercept?: (href: string) => boolean; hasChildren?: boolean; expanded?: boolean }) {
   const { href, icon: Icon, label, desc } = node;
   return (
     <Link
@@ -112,7 +118,57 @@ function NavLink({
         <p className={cn("font-semibold leading-none", isChild ? "text-[13px]" : "text-sm")}>{label}</p>
         <p className="mt-0.5 truncate text-xs" style={{ color: "var(--sidebar-label)" }}>{desc}</p>
       </div>
+
+      {/* Chevron para módulos con submódulos: gira cuando está desplegado */}
+      {hasChildren && (
+        <ChevronDown
+          className="h-4 w-4 shrink-0 transition-transform duration-200"
+          style={{ color: "var(--sidebar-label)", transform: expanded ? "rotate(180deg)" : "rotate(0deg)" }}
+        />
+      )}
     </Link>
+  );
+}
+
+// Grupo de navegación: un módulo y (si tiene) sus submódulos, que se muestran solo
+// cuando la sección está ACTIVA (estás dentro) o al pasar el mouse por encima.
+function NavGroup({
+  node, path, onNavigate, onIntercept,
+}: { node: NavNode; path: string; onNavigate?: () => void; onIntercept?: (href: string) => boolean }) {
+  const [hover, setHover] = useState(false);
+  const tieneHijos = !!node.children?.length;
+  const seccionActiva = esActivo(path, node.href) || (node.children?.some((c) => esActivo(path, c.href)) ?? false);
+  const abierto = tieneHijos && (seccionActiva || hover);
+
+  return (
+    <div
+      className="space-y-1"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      <NavLink
+        node={node}
+        active={esActivo(path, node.href)}
+        onNavigate={onNavigate}
+        onIntercept={onIntercept}
+        hasChildren={tieneHijos}
+        expanded={abierto}
+      />
+      {tieneHijos && abierto && (
+        <div className="ml-4 space-y-1 border-l pl-2" style={{ borderColor: "var(--sidebar-border)" }}>
+          {node.children!.map((child) => (
+            <NavLink
+              key={child.href}
+              node={child}
+              active={esActivo(path, child.href)}
+              onNavigate={onNavigate}
+              onIntercept={onIntercept}
+              isChild
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -188,19 +244,7 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
         </p>
 
         {NAV.map((node) => (
-          <div key={node.href} className="space-y-1">
-            <NavLink node={node} active={esActivo(path, node.href)} onNavigate={onNavigate} onIntercept={interceptar} />
-            {node.children && node.children.length > 0 && (
-              <div
-                className="ml-4 space-y-1 border-l pl-2"
-                style={{ borderColor: "var(--sidebar-border)" }}
-              >
-                {node.children.map((child) => (
-                  <NavLink key={child.href} node={child} active={esActivo(path, child.href)} onNavigate={onNavigate} isChild onIntercept={interceptar} />
-                ))}
-              </div>
-            )}
-          </div>
+          <NavGroup key={node.href} node={node} path={path} onNavigate={onNavigate} onIntercept={interceptar} />
         ))}
       </nav>
 

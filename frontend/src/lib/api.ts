@@ -22,7 +22,9 @@ import type {
 import { useAuthStore } from "@/stores/auth";
 
 // Tipo de borrador/causación: cada módulo del wizard tiene su propia bandeja.
-type BorradorTipo = "compras" | "nc" | "ventas" | "nc_ventas";
+type BorradorTipo = "compras" | "nc" | "ventas" | "nc_ventas" | "soporte" | "nc_soporte";
+// Grupos del importador unificado (destino de cada documento).
+type BucketKey = "compras" | "nc" | "ventas" | "nc_ventas" | "soporte" | "nc_soporte";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -208,7 +210,7 @@ export const api = {
     }),
 
   // Parseo de facturas. `modo`: "compras" (default) | "ventas".
-  parsearFacturas: async (file: File, modo: "compras" | "ventas" = "compras") => {
+  parsearFacturas: async (file: File, modo: "compras" | "ventas" | "soporte" = "compras") => {
     const { token, empresaId } = useAuthStore.getState();
     const form = new FormData();
     form.append("archivo", file);
@@ -237,7 +239,7 @@ export const api = {
 
   // DIAN — consultar facturas del rango (sin descargar XML).
   // `modo`: "compras" (recibidas) | "ventas" (emitidas).
-  dianConsultar: (body: { auth_url: string; fecha_desde: string; fecha_hasta: string; modo?: "compras" | "ventas" }) =>
+  dianConsultar: (body: { auth_url: string; fecha_desde: string; fecha_hasta: string; modo?: "compras" | "ventas" | "soporte" }) =>
     req<{ success: boolean; total: number; documents: DianDocumento[] }>("/dian/consultar", {
       method: "POST",
       body: JSON.stringify(body),
@@ -247,7 +249,7 @@ export const api = {
   // Lee la respuesta en streaming (NDJSON) e informa el progreso real de descarga
   // vía onProgress(done, total). Devuelve las facturas ya parseadas.
   dianImportarStream: async (
-    body: { auth_url: string; ids: string[]; modo?: "compras" | "ventas" },
+    body: { auth_url: string; ids: string[]; modo?: "compras" | "ventas" | "soporte" },
     onProgress: (done: number, total: number) => void,
   ): Promise<Factura[]> => {
     const { token, empresaId } = useAuthStore.getState();
@@ -293,18 +295,20 @@ export const api = {
     return facturas;
   },
 
-  // DIAN unificado — consultar TODO (recibidos + emitidos) con un solo token.
+  // DIAN unificado — consultar TODO (recibidos + emitidos + soporte) con un solo token.
   dianConsultarTodo: (body: { auth_url: string; fecha_desde: string; fecha_hasta: string }) =>
     req<{
       compras: { success: boolean; total: number; documents: DianDocumento[] };
       ventas: { success: boolean; total: number; documents: DianDocumento[] };
+      soporte: { success: boolean; total: number; documents: DianDocumento[] };
+      soporte_ajuste: { success: boolean; total: number; documents: DianDocumento[] };
     }>("/dian/consultar-todo", { method: "POST", body: JSON.stringify(body) }),
 
-  // DIAN unificado — traer y clasificar en 4 grupos (compras, nc, ventas, nc_ventas).
+  // DIAN unificado — traer y clasificar en 6 grupos (compras, nc, ventas, nc_ventas, soporte, nc_soporte).
   dianImportarTodoStream: async (
-    body: { auth_url: string; ids_compras: string[]; ids_ventas: string[] },
+    body: { auth_url: string; ids_compras: string[]; ids_ventas: string[]; ids_soporte: string[]; ids_soporte_ajuste: string[] },
     onProgress: (done: number, total: number) => void,
-  ): Promise<{ buckets: Record<"compras" | "nc" | "ventas" | "nc_ventas", Factura[]>; errores: number }> => {
+  ): Promise<{ buckets: Record<BucketKey, Factura[]>; errores: number }> => {
     const { token, empresaId } = useAuthStore.getState();
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -324,7 +328,7 @@ export const api = {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let buckets: Record<"compras" | "nc" | "ventas" | "nc_ventas", Factura[]> = { compras: [], nc: [], ventas: [], nc_ventas: [] };
+    let buckets: Record<BucketKey, Factura[]> = { compras: [], nc: [], ventas: [], nc_ventas: [], soporte: [], nc_soporte: [] };
     let errores = 0;
     let errorMsg = "";
 
@@ -337,7 +341,7 @@ export const api = {
       for (const line of lines) {
         const t = line.trim();
         if (!t) continue;
-        let msg: { type: string; done?: number; total?: number; buckets?: Record<"compras" | "nc" | "ventas" | "nc_ventas", Factura[]>; errores?: number; message?: string };
+        let msg: { type: string; done?: number; total?: number; buckets?: Record<BucketKey, Factura[]>; errores?: number; message?: string };
         try { msg = JSON.parse(t); } catch { continue; }
         if (msg.type === "start") onProgress(0, msg.total ?? 0);
         else if (msg.type === "progress") onProgress(msg.done ?? 0, msg.total ?? 0);
