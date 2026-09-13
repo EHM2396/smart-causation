@@ -208,11 +208,12 @@ def sugerir_cuenta_gasto(
             cuenta_pago_origen="aprendizaje" if cp_anterior else None,
         )
 
-    # 2. Mapeo aprendido
-    cuenta = aprendizaje_service.obtener_mapeo(db, nit, descripcion, empresa_id=empresa_id, usuario_id=usuario_id)
-    if cuenta:
+    # 2. Mapeo aprendido (propio del tercero o del mismo ítem en otro proveedor)
+    mapeo = aprendizaje_service.obtener_mapeo(db, nit, descripcion, empresa_id=empresa_id, usuario_id=usuario_id)
+    if mapeo:
+        cuenta, es_otro = mapeo
         return ResultadoSugerencia(
-            cuenta=cuenta, origen="aprendizaje",
+            cuenta=cuenta, origen="aprendizaje_otro" if es_otro else "aprendizaje",
             cuenta_pago=cp_anterior,
             cuenta_pago_origen="aprendizaje" if cp_anterior else None,
         )
@@ -369,9 +370,12 @@ def sugerir_cuentas_batch(
             db, sin_regla, empresa_id=empresa_id, usuario_id=usuario_id
         )
         for item in sin_regla:
-            cuenta = mapeos.get(item["key"])
-            if cuenta:
-                resultados[item["key"]] = ResultadoSugerencia(cuenta=cuenta, origen="aprendizaje")
+            mapeo = mapeos.get(item["key"])
+            if mapeo:
+                cuenta, es_otro = mapeo
+                resultados[item["key"]] = ResultadoSugerencia(
+                    cuenta=cuenta, origen="aprendizaje_otro" if es_otro else "aprendizaje",
+                )
             else:
                 sin_aprendizaje.append(item)
 

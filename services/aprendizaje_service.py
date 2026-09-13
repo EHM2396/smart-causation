@@ -31,23 +31,48 @@ def obtener_mapeo(
     descripcion: str,
     empresa_id: int | None = None,
     usuario_id: int | None = None,
-) -> str | None:
-    palabras = [p for p in _norm(descripcion).split() if len(p) > 3]
+) -> tuple[str, bool] | None:
+    """Busca la cuenta aprendida para un ítem.
 
-    for palabra in palabras:
+    Devuelve ``(cuenta_puc, es_otro_proveedor)`` o ``None``:
+      1. Primero busca el aprendizaje PROPIO del tercero (nit + keyword).
+      2. Si no hay, cae al aprendizaje del MISMO ítem en OTRO proveedor
+         (solo keyword, dentro de la misma empresa/usuario) → ``es_otro=True``.
+    Siempre aislado por (empresa, usuario); nunca cruza entre empresas.
+    """
+    palabras = [p for p in _norm(descripcion).split() if len(p) > 3]
+    if not palabras:
+        return None
+
+    def _buscar(por_nit: bool) -> str | None:
         stmt = (
             select(MapeoPUC)
-            .where(MapeoPUC.nit == nit, MapeoPUC.keyword == palabra)
+            .where(MapeoPUC.keyword.in_(palabras))
             .order_by(MapeoPUC.usos.desc(), MapeoPUC.confianza.desc())
         )
+        if por_nit:
+            stmt = stmt.where(MapeoPUC.nit == nit)
         if empresa_id is not None:
             stmt = stmt.where(MapeoPUC.empresa_id == empresa_id)
         if usuario_id is not None:
             stmt = stmt.where(MapeoPUC.usuario_id == usuario_id)
-        row = db.scalar(stmt)
-        if row:
-            return row.cuenta_puc
+        # Cuenta dominante por keyword (rows ya ordenados por usos/confianza).
+        por_kw: dict[str, str] = {}
+        for row in db.scalars(stmt).all():
+            por_kw.setdefault(row.keyword, row.cuenta_puc)
+        # Respetar el orden de las palabras del ítem.
+        for palabra in palabras:
+            if palabra in por_kw:
+                return por_kw[palabra]
+        return None
 
+    if nit:
+        propio = _buscar(por_nit=True)
+        if propio:
+            return (propio, False)
+    otro = _buscar(por_nit=False)
+    if otro:
+        return (otro, True)
     return None
 
 
@@ -231,15 +256,19 @@ def obtener_mapeos_batch(
     items: list[dict],
     empresa_id: int | None = None,
     usuario_id: int | None = None,
-) -> dict[str, str]:
+) -> dict[str, tuple[str, bool]]:
     """
     Lookup de aprendizaje para múltiples ítems en una sola query.
-    Retorna {key: cuenta_puc} para los ítems con mapeo encontrado.
+    Retorna ``{key: (cuenta_puc, es_otro_proveedor)}`` para los ítems con mapeo:
+      - Primero el aprendizaje PROPIO del tercero (nit + keyword) → es_otro=False.
+      - Si no hay, cae al MISMO ítem aprendido en OTRO proveedor (solo keyword,
+        dentro de la misma empresa/usuario) → es_otro=True. Así, si dos proveedores
+        distintos traen el mismo ítem, se reutiliza la cuenta ya aprendida.
+    Siempre aislado por (empresa, usuario).
     """
     if not items:
         return {}
 
-    all_nits: set[str] = set()
     item_keywords: dict[str, list[str]] = {}
     all_keywords: set[str] = set()
 
@@ -247,18 +276,13 @@ def obtener_mapeos_batch(
         palabras = [p for p in _norm(item["descripcion"]).split() if len(p) > 3]
         item_keywords[item["key"]] = palabras
         all_keywords.update(palabras)
-        if item.get("nit"):
-            all_nits.add(item["nit"])
 
-    if not all_keywords or not all_nits:
+    if not all_keywords:
         return {}
 
     stmt = (
         select(MapeoPUC)
-        .where(
-            MapeoPUC.nit.in_(all_nits),
-            MapeoPUC.keyword.in_(all_keywords),
-        )
+        .where(MapeoPUC.keyword.in_(all_keywords))
         .order_by(MapeoPUC.usos.desc(), MapeoPUC.confianza.desc())
     )
     if empresa_id is not None:
@@ -268,23 +292,34 @@ def obtener_mapeos_batch(
 
     rows = db.scalars(stmt).all()
 
-    # (nit, keyword) -> cuenta_puc; primer resultado gana (ya ordenado por usos DESC)
-    lookup: dict[tuple, str] = {}
+    # (nit, keyword) -> cuenta (aprendizaje propio) · keyword -> cuenta dominante
+    # (cualquier proveedor). Primer resultado gana (rows ya ordenados por usos DESC).
+    lookup_nit: dict[tuple, str] = {}
+    lookup_kw: dict[str, str] = {}
     for row in rows:
-        k = (row.nit, row.keyword)
-        if k not in lookup:
-            lookup[k] = row.cuenta_puc
+        lookup_nit.setdefault((row.nit, row.keyword), row.cuenta_puc)
+        lookup_kw.setdefault(row.keyword, row.cuenta_puc)
 
-    # Aplicar al primer keyword que haga match para cada ítem
-    resultados: dict[str, str] = {}
+    resultados: dict[str, tuple[str, bool]] = {}
     for item in items:
         nit = item.get("nit")
-        if not nit:
+        keywords = item_keywords.get(item["key"], [])
+        # Paso 1: aprendizaje propio del tercero.
+        cuenta_propia: str | None = None
+        if nit:
+            for keyword in keywords:
+                c = lookup_nit.get((nit, keyword))
+                if c:
+                    cuenta_propia = c
+                    break
+        if cuenta_propia:
+            resultados[item["key"]] = (cuenta_propia, False)
             continue
-        for keyword in item_keywords.get(item["key"], []):
-            cuenta = lookup.get((nit, keyword))
-            if cuenta:
-                resultados[item["key"]] = cuenta
+        # Paso 2 (fallback): mismo ítem aprendido en otro proveedor.
+        for keyword in keywords:
+            c = lookup_kw.get(keyword)
+            if c:
+                resultados[item["key"]] = (c, True)
                 break
 
     return resultados

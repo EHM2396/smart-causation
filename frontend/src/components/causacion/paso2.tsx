@@ -34,7 +34,8 @@ function impOpts(imps: ImpuestoOut[], tipos?: string[]) {
 }
 
 const ORIGEN_BADGE: Record<string, { label: string; variant: "success" | "info" | "purple" | "warning" | "default" }> = {
-  aprendizaje:  { label: "Aprendido",      variant: "success" },
+  aprendizaje:      { label: "Aprendido",              variant: "success" },
+  aprendizaje_otro: { label: "Aprendido (otro prov.)", variant: "warning" },
   regla:        { label: "Regla",          variant: "info" },
   forma_pago:   { label: "Forma pago",     variant: "info" },
   ia_alta:      { label: "IA · Alta",      variant: "purple" },
@@ -46,6 +47,7 @@ const ORIGEN_BADGE: Record<string, { label: string; variant: "success" | "info" 
 
 function origenToFuente(origen: string | null): FuenteMapeo {
   if (origen === "aprendizaje") return "aprendido";
+  if (origen === "aprendizaje_otro") return "aprendido_otro";
   if (origen === "regla") return "regla";
   if (origen === "ia") return "ia_alta";
   return "manual";
@@ -246,7 +248,7 @@ export function Paso2() {
         allItems.forEach(({ key }) => {
           const sug = sugs[key];
           if (!sug) return;
-          const esAutoconfiable = sug.origen === "regla" || sug.origen === "aprendizaje";
+          const esAutoconfiable = sug.origen === "regla" || sug.origen === "aprendizaje" || sug.origen === "aprendizaje_otro";
           if (!next[key] && sug.cuenta && esAutoconfiable) next[key] = sug.cuenta;
         });
         return next;

@@ -134,7 +134,7 @@ export interface Sugerencia {
 
 // ─── Mapeo ────────────────────────────────────────────────────────────────────
 
-export type FuenteMapeo = "aprendido" | "regla" | "sugerido" | "ia_alta" | "manual";
+export type FuenteMapeo = "aprendido" | "aprendido_otro" | "regla" | "sugerido" | "ia_alta" | "manual";
 
 export interface MapeoItem {
   idx_factura: number;
