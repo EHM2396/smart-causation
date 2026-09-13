@@ -41,6 +41,15 @@ from core.parser import usar_cliente_como_tercero
 
 router = APIRouter(prefix="/causacion", tags=["Causación"])
 
+# Documentos que REVERSAN la partida (nota crédito): la nota crédito normal y la
+# nota de ajuste al documento soporte (tipo 95), que se comporta como una NC.
+_TIPOS_NOTA_REVERSA = ("nota_credito", "nota_ajuste_soporte")
+
+
+def _es_nota_reversa(factura: dict | None) -> bool:
+    return (factura or {}).get("tipo_documento") in _TIPOS_NOTA_REVERSA
+
+
 DB = Annotated[Session, Depends(get_db)]
 EmpresaActiva = Annotated[Empresa, Depends(get_empresa_activa)]
 CurrentUser = Annotated[Usuario, Depends(get_current_user)]
@@ -419,7 +428,7 @@ def batch_validar(body: BatchRequest, db: DB, empresa: EmpresaActiva):
             mapeos_confirmados=item.mapeos_confirmados,
             tipo_comprobante=body.tipo_comprobante,
             centro_costo=body.centro_costo,
-            es_nota_credito=(item.factura or {}).get("tipo_documento") == "nota_credito",
+            es_nota_credito=_es_nota_reversa(item.factura),
             es_venta=body.es_venta,
         )
         filas_por_consecutivo[consecutivo] = len(movs)
@@ -473,7 +482,7 @@ def batch_generar(body: BatchRequest, db: DB, empresa: EmpresaActiva, current_us
             mapeos_confirmados=item.mapeos_confirmados,
             tipo_comprobante=body.tipo_comprobante,
             centro_costo=body.centro_costo,
-            es_nota_credito=(item.factura or {}).get("tipo_documento") == "nota_credito",
+            es_nota_credito=_es_nota_reversa(item.factura),
             es_venta=body.es_venta,
         )
         todos_movs.extend(movs)
@@ -587,7 +596,7 @@ def exportar_lote_historial(
             mapeos_confirmados=data["mapeos"],
             tipo_comprobante=fc.tipo_comprobante or data.get("tipo_comprobante", "12"),
             centro_costo=data.get("centro_costo", ""),
-            es_nota_credito=data["factura"].get("tipo_documento") == "nota_credito",
+            es_nota_credito=_es_nota_reversa(data["factura"]),
             es_venta=bool(data.get("es_venta", False)),
         )
         todos_movs.extend(movs)
@@ -692,7 +701,7 @@ def regenerar_historial(registro_id: int, db: DB, empresa: EmpresaActiva):
         mapeos_confirmados=data["mapeos"],
         tipo_comprobante=fc.tipo_comprobante or data.get("tipo_comprobante", "12"),
         centro_costo=data.get("centro_costo", ""),
-        es_nota_credito=data["factura"].get("tipo_documento") == "nota_credito",
+        es_nota_credito=_es_nota_reversa(data["factura"]),
         es_venta=bool(data.get("es_venta", False)),
     )
     xlsx_buf = exporter.generar_xlsx(movimientos)

@@ -165,6 +165,68 @@ def construir_movimientos(
             ))
             total_creditos += val_imp
 
+        # ── Otros tributos de la línea (INC, bolsas, IBUA, ICUI, INPP, otros) ──
+        # Todos se construyen como DÉBITO antes de invertir; el `flip` los deja en
+        # el lado correcto según el módulo:
+        #   - Compra / documento soporte: quedan al débito = MAYOR VALOR DEL GASTO
+        #     (no descontables), sobre la misma cuenta de gasto del ítem.
+        #   - Venta, tributo "independiente" (INC / bolsas): al invertir quedan al
+        #     crédito = impuesto por pagar a la DIAN / cobro al cliente, sobre la
+        #     cuenta del tributo tomada del catálogo de impuestos.
+        #   - Venta, tributo "costo" (IBUA / ICUI / INPP / otros): al invertir queda
+        #     al crédito sobre la cuenta de ingreso = MAYOR VALOR DEL INGRESO.
+        for trib in (m.get("otros_tributos") or []):
+            val_t = float(trib.get("valor", 0) or 0)
+            if not val_t:
+                continue
+            grupo_t = str(trib.get("grupo", "costo"))
+            nombre_t = str(trib.get("nombre", "Tributo"))
+            cod_t = str(trib.get("cod_impuesto", "")).strip()
+            if es_venta and grupo_t == "independiente":
+                # Cuenta propia del tributo (catálogo). Si no está configurada, se
+                # usa la de gasto/ingreso para no dejar la línea sin cuenta.
+                cuenta_t = str(trib.get("cuenta", "")).strip() or cuenta_gasto
+                desc_t = f"{nombre_t}{' devolucion' if es_nota_credito else ''}"
+            else:
+                # Mayor valor del gasto (compra/DS) o del ingreso (venta grupo costo).
+                cuenta_t = cuenta_gasto
+                desc_t = f"{desc} ({nombre_t})"[:100]
+            if cuenta_t:
+                movimientos.append(_fila(
+                    tipo_comprobante, consecutivo, fecha, nit,
+                    cuenta_t, val_t, None,
+                    desc_t, centro_costo, observaciones, cod_t,
+                ))
+                total_debitos += val_t
+
+    # ── Descuentos / recargos GLOBALES (a nivel de factura) ──
+    # Cuenta representativa de gasto/ingreso: la primera cuenta de gasto usada.
+    cuenta_gasto_repr = next(
+        (str(m.get("cuenta_gasto", "")).strip() for m in mapeos_confirmados
+         if str(m.get("cuenta_gasto", "")).strip()),
+        "",
+    )
+    descuento_global = round(float(factura.get("descuento_global", 0) or 0), 2)
+    recargo_global   = round(float(factura.get("recargo_global", 0) or 0), 2)
+    if descuento_global and cuenta_gasto_repr:
+        # Crédito sobre la cuenta de gasto/ingreso: menor valor del gasto (compra) y,
+        # al invertir en la venta, menor valor de la venta.
+        movimientos.append(_fila(
+            tipo_comprobante, consecutivo, fecha, nit,
+            cuenta_gasto_repr, None, descuento_global,
+            "Descuento global", centro_costo, observaciones, "",
+        ))
+        total_creditos += descuento_global
+    if recargo_global and cuenta_gasto_repr:
+        # Débito sobre la cuenta de gasto/ingreso: mayor valor del gasto (compra) y,
+        # al invertir en la venta, cobro adicional al cliente (mayor ingreso).
+        movimientos.append(_fila(
+            tipo_comprobante, consecutivo, fecha, nit,
+            cuenta_gasto_repr, recargo_global, None,
+            "Recargo global", centro_costo, observaciones, "",
+        ))
+        total_debitos += recargo_global
+
     # ── Ajuste de redondeo al total declarado por la factura ──
     # El IVA renglón por renglón puede diferir en unos pesos del IVA que declara el
     # encabezado de la factura (el proveedor redondea cada línea por separado). Para
@@ -175,7 +237,9 @@ def construir_movimientos(
     # no ocultarlo.
     objetivo = round(float(factura.get("total", 0) or 0), 2)
     if objetivo > 0 and lineas_iva:
-        delta = round(total_debitos - objetivo, 2)
+        # El descuento global es un crédito que reduce el total de la factura pero no
+        # el total de débitos; se descuenta aquí para comparar contra el objetivo.
+        delta = round((total_debitos - descuento_global) - objetivo, 2)
         tolerancia = max(2.0, len(mapeos_confirmados) * 1.0)
         if 0 < abs(delta) <= tolerancia:
             fila = max(lineas_iva, key=lambda r: float(r["Débito"] or 0))

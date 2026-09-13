@@ -15,7 +15,7 @@ import {
   AlertTriangle, Plus, Sparkles, Loader2,
   ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search, History, X, Trash2, Save, Scissors, Layers, Copy, Check,
 } from "lucide-react";
-import type { MapeoItem, CuentaOpcion, ImpuestoOut, FuenteMapeo, Sugerencia, ItemFactura, Paso2Snapshot, BorradorSnapshot } from "@/lib/types";
+import type { MapeoItem, CuentaOpcion, ImpuestoOut, FuenteMapeo, Sugerencia, ItemFactura, Factura, Paso2Snapshot, BorradorSnapshot } from "@/lib/types";
 
 // SIIGO acepta máx. 500 líneas por archivo, incluyendo el encabezado → 499 de
 // datos. Debe coincidir con core/exporter.MAX_FILAS_ARCHIVO en el backend.
@@ -398,6 +398,39 @@ export function Paso2() {
   const ctaRetencion = (imp?: { cta_compras: string | null; cta_ventas: string | null } | null): string =>
     esVenta ? (imp?.cta_ventas ?? "") : (imp?.cta_compras ?? "");
 
+  // Palabras clave para emparejar un tributo DIAN con un impuesto del catálogo.
+  const TRIBUTO_KEYWORDS: Record<string, string[]> = {
+    "02": ["inc", "consumo"], "04": ["inc", "consumo"], "08": ["inc", "consumo"],
+    "22": ["bolsa"],
+    "33": ["inpp", "plastic", "plástic"],
+    "34": ["ibua", "azucarad"],
+    "35": ["icui", "ultraprocesad"],
+  };
+  const _n = (s: string | null | undefined) =>
+    (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const esImpRetencion = (i: ImpuestoOut) =>
+    ["retefuente", "reteica", "reteiva"].some((r) => _n(i.tipo_impuesto).includes(r));
+
+  // Busca en el catálogo de impuestos el que corresponde a un tributo DIAN y
+  // devuelve su cuenta (según módulo) y código SIIGO. Solo se NECESITA cuenta para
+  // los tributos "independientes" en VENTAS (INC / bolsas por pagar); en compras y
+  // en los de grupo "costo" el tributo va a la cuenta de gasto/ingreso del ítem.
+  const resolverCuentaTributo = (
+    trib: { cod_dian: string; nombre: string },
+  ): { cuenta: string; cod_impuesto: string; encontrado: boolean } => {
+    const kws = TRIBUTO_KEYWORDS[trib.cod_dian] ?? _n(trib.nombre).split(/\s+/).filter((w) => w.length > 3);
+    const imp = impuestosRaw.find((i) => {
+      if (esImpRetencion(i)) return false;
+      const texto = `${_n(i.tipo_impuesto)} ${_n(i.nombre)}`;
+      return kws.some((k) => texto.includes(k));
+    });
+    if (!imp) return { cuenta: "", cod_impuesto: "", encontrado: false };
+    const cuenta = esVenta
+      ? (esNC ? imp.cta_dev_ventas || imp.cta_ventas || "" : imp.cta_ventas || "")
+      : (esNC ? imp.cta_dev_compras || imp.cta_compras || "" : imp.cta_compras || "");
+    return { cuenta, cod_impuesto: imp.codigo, encontrado: true };
+  };
+
   const getImpInfo = (cod: string) => impuestosRaw.find((i) => i.codigo === cod);
   const getEffBase = (key: string, item: ItemFactura): number => {
     const v = Number(baseOverride[key]);
@@ -572,6 +605,17 @@ export function Paso2() {
       const tarifa = impInfo?.tarifa ?? item.porcentaje ?? 0;
       const valorIva = tarifa > 0 ? Math.round(effBase * tarifa / 100) : item.valor_impuesto;
 
+      // Otros tributos de la línea (INC, bolsas, IBUA, ICUI, INPP, otros). Solo los
+      // "independientes" en ventas necesitan cuenta propia del catálogo; el resto va
+      // a la cuenta de gasto/ingreso del ítem (cuenta vacía → el exporter usa esa).
+      const otrosTributos = (item.otros_tributos ?? []).map((t) => {
+        if (esVenta && t.grupo === "independiente") {
+          const r = resolverCuentaTributo(t);
+          return { ...t, cuenta: r.cuenta, cod_impuesto: r.cod_impuesto };
+        }
+        return { ...t, cuenta: "", cod_impuesto: "" };
+      });
+
       mapeos.push({
         idx_factura: newIdx, descripcion: item.descripcion, base: effBase,
         cod_impuesto: impInfo?.codigo ?? codIva,
@@ -581,6 +625,7 @@ export function Paso2() {
         cuenta_impuesto_deb: cuentaIvaFinal,
         cuenta_impuesto_cre: "", es_retencion: false,
         cuenta_pago: pago, cuenta_pago_nombre: pagoNombre,
+        otros_tributos: otrosTributos,
       });
 
       if (!globalRetActiva) {
@@ -640,7 +685,7 @@ export function Paso2() {
   // deduplican ítems idénticos: cada línea de la factura produce sus propias
   // filas, así el conteo cuadra con el archivo real y el batching de 500 filas
   // de SIIGO no se queda corto.
-  const contarFilas = (ms: MapeoItem[]): number => {
+  const contarFilas = (ms: MapeoItem[], factura?: Factura): number => {
     let filas = 0, deb = 0, cred = 0;
     for (const m of ms) {
       const base = m.base || 0;
@@ -649,6 +694,17 @@ export function Paso2() {
       if (base && m.cuenta_gasto) { filas++; deb += base; }
       if (val && m.cuenta_impuesto_deb && !esRet) { filas++; deb += val; }
       if (val && m.cuenta_impuesto_cre && esRet) { filas++; cred += val; }
+      // Otros tributos (INC, bolsas, IBUA, ICUI, INPP, otros): una fila débito c/u.
+      for (const t of (m.otros_tributos ?? [])) {
+        const vt = t.valor || 0;
+        if (vt && (t.cuenta || m.cuenta_gasto)) { filas++; deb += vt; }
+      }
+    }
+    // Descuento / recargo globales de la factura (una fila c/u).
+    const cgRepr = ms.find((m) => m.cuenta_gasto)?.cuenta_gasto || "";
+    if (factura && cgRepr) {
+      if (factura.descuento_global) { filas++; cred += factura.descuento_global; }
+      if (factura.recargo_global)  { filas++; deb  += factura.recargo_global; }
     }
     if (Math.round((deb - cred) * 100) / 100 !== 0) filas++; // fila de pago
     return filas;
@@ -661,7 +717,7 @@ export function Paso2() {
     let excede = false, verificadasCount = 0;
     for (let idx = 0; idx < facturas.length; idx++) {
       if (!verificadas[idx] || estaCausada(idx)) continue;
-      const filas = contarFilas(construirMapeosFactura(idx, verificadasCount));
+      const filas = contarFilas(construirMapeosFactura(idx, verificadasCount), facturas[idx]);
       verificadasCount++;
       total += filas;
       if (acum + filas <= MAX_FILAS) {
@@ -683,7 +739,7 @@ export function Paso2() {
       if (!verificadas[idx] || estaCausada(idx)) continue;
       const newIdx = facturasVerificadas.length;
       const mFactura = construirMapeosFactura(idx, newIdx);
-      const filas = contarFilas(mFactura);
+      const filas = contarFilas(mFactura, facturas[idx]);
       // Tope SIIGO: no pasar de MAX_FILAS en un archivo. Siempre entra ≥1.
       if (facturasVerificadas.length > 0 && filasAcum + filas > MAX_FILAS) break;
       filasAcum += filas;
@@ -1197,8 +1253,21 @@ export function Paso2() {
     const ivaInfo = codIva ? getImpInfo(codIva) : null;
     const tarifa = ivaInfo?.tarifa ?? 0;
     const valorIva = tarifa > 0 ? Math.round(effBase * tarifa / 100) : item.valor_impuesto;
-    return sum + effBase + valorIva;
-  }, 0);
+    const otros = (item.otros_tributos ?? []).reduce((s, t) => s + (t.valor || 0), 0);
+    return sum + effBase + valorIva + otros;
+  }, 0) - (factura.descuento_global || 0) + (factura.recargo_global || 0);
+
+  // Alerta: un tributo "independiente" en VENTAS sin cuenta configurada en el
+  // catálogo no se puede desglosar (INC / bolsas por pagar a la DIAN).
+  const alertasTributo = [...new Set(
+    esVenta
+      ? factura.items.flatMap((item) =>
+          (item.otros_tributos ?? [])
+            .filter((t) => t.grupo === "independiente" && !resolverCuentaTributo(t).cuenta)
+            .map((t) => `El tributo "${t.nombre}" no tiene una cuenta configurada en Catálogos → Impuestos; configúrala para poder desglosarlo en la venta.`),
+        )
+      : [],
+  )];
   const isFirst = selectedIdx === 0;
   const isLast  = selectedIdx === facturas.length - 1;
   const retGlobalActiva = !!(rfGlobal[selectedIdx] || riGlobal[selectedIdx]);
@@ -1343,16 +1412,26 @@ export function Paso2() {
                 Calculado: {fmt(totalCalculado)}
               </p>
             )}
+            {(factura.descuento_global ?? 0) > 0 && (
+              <p className="mt-0.5 text-[11px] font-medium tabular-nums" style={{ color: "var(--success)" }}>
+                Descuento global: −{fmt(factura.descuento_global ?? 0)} <span style={{ color: "var(--text-muted)" }}>(menor valor {esVenta ? "de la venta" : "del gasto"})</span>
+              </p>
+            )}
+            {(factura.recargo_global ?? 0) > 0 && (
+              <p className="mt-0.5 text-[11px] font-medium tabular-nums" style={{ color: "var(--text-secondary)" }}>
+                Recargo global: +{fmt(factura.recargo_global ?? 0)} <span style={{ color: "var(--text-muted)" }}>({esVenta ? "cobro al cliente" : "mayor valor del gasto"})</span>
+              </p>
+            )}
           </div>
         </div>
-        {factura.advertencias && factura.advertencias.length > 0 && (
+        {((factura.advertencias?.length ?? 0) > 0 || alertasTributo.length > 0) && (
           <div
             className="mt-3 flex items-start gap-2 rounded-lg px-3 py-2 text-xs"
             style={{ backgroundColor: "var(--warning-bg)", border: "1px solid var(--warning-border)", color: "var(--warning-text)" }}
           >
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <ul className="flex-1 space-y-0.5">
-              {factura.advertencias.map((w, i) => <li key={i}>{w}</li>)}
+              {[...(factura.advertencias ?? []), ...alertasTributo].map((w, i) => <li key={i}>{w}</li>)}
             </ul>
             {factura._archivo && pdfUrls[factura._archivo] && (
               <button
@@ -1716,6 +1795,30 @@ export function Paso2() {
                       <p className="text-sm break-words whitespace-normal" style={{ color: "var(--text-secondary)" }}>
                         {item.descripcion}
                       </p>
+                      {/* Otros tributos y descuento de la línea (informativo) */}
+                      {((item.otros_tributos?.length ?? 0) > 0 || (item.descuento_item ?? 0) > 0) && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {(item.otros_tributos ?? []).map((t, ti) => (
+                            <span
+                              key={ti}
+                              title={`${t.nombre}${esVenta && t.grupo === "independiente" ? " · se desglosa aparte" : " · mayor valor del " + (esVenta ? "ingreso" : "gasto")}`}
+                              className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium"
+                              style={{ backgroundColor: "var(--brand-soft, var(--warning-bg))", color: "var(--brand, var(--warning-text))" }}
+                            >
+                              {t.nombre.replace(/\s*\(.*\)/, "")}: {fmt(t.valor)}
+                            </span>
+                          ))}
+                          {(item.descuento_item ?? 0) > 0 && (
+                            <span
+                              className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium"
+                              style={{ backgroundColor: "var(--success-bg, var(--warning-bg))", color: "var(--success, var(--warning-text))" }}
+                              title="Descuento del ítem (ya incluido en la base)"
+                            >
+                              Dcto ítem: {fmt(item.descuento_item ?? 0)}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </td>
 
                     {/* Base — editable solo si viene de PDF (extracción imprecisa) */}
