@@ -1,6 +1,7 @@
 "use client";
 import { createPortal } from "react-dom";
-import { X, TrendingDown, CheckCircle2, FileText } from "lucide-react";
+import Link from "next/link";
+import { X, TrendingDown, CheckCircle2, FileText, ArrowRight } from "lucide-react";
 import type { FacturaOmitida } from "@/lib/types";
 
 interface Props {
@@ -162,15 +163,33 @@ export function OmitidasModal({ omitidas, onClose }: Props) {
             style={{ borderColor: "var(--border-soft)" }}
           >
             {ventas.length > 0 && (
-              <p className="text-xs" style={{ color: "var(--text-primary)" }}>
-                <span className="font-semibold" style={{ color: "rgb(99,102,241)" }}>Facturas de venta</span>
-                {" "}— emitidas por tu empresa. Este módulo procesa compras; usa el módulo de Causación Ventas.
+              <p className="flex flex-wrap items-center gap-1.5 text-xs" style={{ color: "var(--text-primary)" }}>
+                <span>
+                  <span className="font-semibold" style={{ color: "rgb(99,102,241)" }}>Facturas de venta</span>
+                  {" "}— emitidas por tu empresa. Este módulo procesa compras.
+                </span>
+                <Link
+                  href="/causacion-ventas"
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold transition-opacity hover:opacity-80"
+                  style={{ backgroundColor: "rgba(99,102,241,0.12)", color: "rgb(99,102,241)", border: "1px solid rgba(99,102,241,0.3)" }}
+                >
+                  Ir a Causación Ventas <ArrowRight className="h-3 w-3" />
+                </Link>
               </p>
             )}
             {compras.length > 0 && (
-              <p className="text-xs" style={{ color: "var(--text-primary)" }}>
-                <span className="font-semibold" style={{ color: "rgb(217,119,6)" }}>Facturas de compra</span>
-                {" "}— emitidas por un proveedor. Este módulo procesa ventas; usa el módulo de Causación Compras.
+              <p className="flex flex-wrap items-center gap-1.5 text-xs" style={{ color: "var(--text-primary)" }}>
+                <span>
+                  <span className="font-semibold" style={{ color: "rgb(217,119,6)" }}>Facturas de compra</span>
+                  {" "}— emitidas por un proveedor. Este módulo procesa ventas.
+                </span>
+                <Link
+                  href="/causacion"
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold transition-opacity hover:opacity-80"
+                  style={{ backgroundColor: "rgba(217,119,6,0.12)", color: "rgb(217,119,6)", border: "1px solid rgba(217,119,6,0.3)" }}
+                >
+                  Ir a Causación Compras <ArrowRight className="h-3 w-3" />
+                </Link>
               </p>
             )}
             {causadas.length > 0 && (

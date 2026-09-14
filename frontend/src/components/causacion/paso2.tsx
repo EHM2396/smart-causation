@@ -876,10 +876,13 @@ export function Paso2() {
                 </span>
                 {(() => {
                   const v = facturasOmitidas.filter(o => o.motivo === "venta").length;
+                  const cp = facturasOmitidas.filter(o => o.motivo === "compra").length;
                   const c = facturasOmitidas.filter(o => o.motivo === "ya_causada").length;
-                  if (v > 0 && c > 0) return ` — ${v} de venta, ${c} ya causada${c !== 1 ? "s" : ""}`;
-                  if (v > 0) return " — facturas de venta (próximamente disponible)";
-                  return " — ya causadas anteriormente";
+                  const partes: string[] = [];
+                  if (v > 0) partes.push(`${v} de venta`);
+                  if (cp > 0) partes.push(`${cp} de compra`);
+                  if (c > 0) partes.push(`${c} ya causada${c !== 1 ? "s" : ""}`);
+                  return partes.length ? ` — ${partes.join(", ")}` : "";
                 })()}
               </p>
             </div>

@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWizardStore, esModoNC, esModoVenta, esModoSoporte, modoParseo, tipoNCHermano } from "@/stores/wizard";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle2, Loader2, TrendingDown, Clock, History, Trash2, ArrowRight, ExternalLink } from "lucide-react";
+import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle2, Loader2, TrendingDown, History, Trash2, ArrowRight, ExternalLink } from "lucide-react";
 import { cn, fmt, ordenarPorFechaEmision } from "@/lib/utils";
 import type { Factura } from "@/lib/types";
 
@@ -28,6 +28,11 @@ export function Paso1() {
   // con [VENTA]/[COMPRA] (compras/ventas) o [NO_SOPORTE] (documento soporte).
   const tagExcluido = esSoporte ? "[NO_SOPORTE]" : esVenta ? "[COMPRA]" : "[VENTA]";
   const nombreExcluido = esSoporte ? "otro tipo" : esVenta ? "compra" : "venta";
+  // Módulo al que redirigir un documento excluido. En soporte el tipo real es
+  // ambiguo (puede ser compra o venta), así que no hay una ruta única a dónde
+  // mandarlo — se deja sin botón y con un mensaje genérico.
+  const rutaExcluido = esSoporte ? null : esVenta ? "/causacion" : "/causacion-ventas";
+  const labelExcluido = esVenta ? "Causación Compras" : "Causación Ventas";
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -478,7 +483,7 @@ export function Paso1() {
             </div>
           )}
 
-          {/* Facturas de VENTA detectadas — Próximamente */}
+          {/* Documentos de OTRO módulo detectados: llevan a su módulo correcto */}
           {!loading && ventasDetectadas.length > 0 && (
             <div
               className="rounded-xl border p-4 space-y-3"
@@ -492,29 +497,19 @@ export function Paso1() {
                   <TrendingDown className="h-4 w-4 text-white" />
                 </div>
                 <div className="flex-1 space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-semibold" style={{ color: "var(--brand-btn)" }}>
-                      {ventasDetectadas.length === 1
-                        ? `1 factura de ${nombreExcluido} excluida`
-                        : `${ventasDetectadas.length} facturas de ${nombreExcluido} excluidas`}
-                    </p>
-                    {!esVenta && (
-                      <span
-                        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold"
-                        style={{ backgroundColor: "color-mix(in srgb, var(--brand-btn) 15%, transparent)", color: "var(--brand-btn)", border: "1px solid color-mix(in srgb, var(--brand-btn) 35%, transparent)" }}
-                      >
-                        <Clock className="h-3 w-3" /> Próximamente
-                      </span>
-                    )}
-                  </div>
+                  <p className="text-sm font-semibold" style={{ color: "var(--brand-btn)" }}>
+                    {ventasDetectadas.length === 1
+                      ? `1 documento de otro módulo`
+                      : `${ventasDetectadas.length} documentos de otro módulo`}
+                  </p>
                   <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
                     {ventasDetectadas.length === 1
-                      ? `Esta factura corresponde a una ${nombreExcluido} y no puede causarse en este módulo.`
-                      : `Estas facturas corresponden a ${nombreExcluido}s y no pueden causarse en este módulo.`}
+                      ? `Este documento corresponde a una ${nombreExcluido} y no se puede causar acá.`
+                      : `Estos documentos corresponden a ${nombreExcluido}s y no se pueden causar acá.`}
                     {" "}
-                    {esVenta
-                      ? "Úsalas en el módulo de Causación Compras."
-                      : "El módulo de causación de ventas estará disponible próximamente."}
+                    {rutaExcluido
+                      ? "Cárgalo en el módulo correcto:"
+                      : "Revisa de qué tipo es y cárgalo en el módulo correspondiente (Compras o Ventas)."}
                   </p>
                 </div>
               </div>
@@ -531,6 +526,16 @@ export function Paso1() {
                   </span>
                 ))}
               </div>
+              {/* Ir directo al módulo correcto (compras ↔ ventas) */}
+              {rutaExcluido && (
+                <div className="pl-12">
+                  <Link href={rutaExcluido}>
+                    <Button size="sm" className="gap-1.5">
+                      Ir a {labelExcluido} <ArrowRight className="h-3.5 w-3.5" />
+                    </Button>
+                  </Link>
+                </div>
+              )}
               {/* Botón continuar si hay facturas de compra válidas */}
               {stored.length > 0 && (
                 <div className="pl-12">
