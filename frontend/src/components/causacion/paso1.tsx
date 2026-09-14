@@ -1,13 +1,13 @@
 "use client";
 import { useState, useCallback } from "react";
+import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWizardStore, esModoNC, esModoVenta, esModoSoporte, modoParseo, tipoNCHermano } from "@/stores/wizard";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle2, Loader2, TrendingDown, Clock, History, Trash2, ArrowRight, Building2 } from "lucide-react";
+import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle2, Loader2, TrendingDown, Clock, History, Trash2, ArrowRight, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fmt } from "@/lib/utils";
-import { DianPanel } from "@/components/causacion/dian-panel";
 import type { Factura } from "@/lib/types";
 
 // Clave de orden cronológico a partir de la fecha de emisión "DD/MM/YYYY".
@@ -44,7 +44,6 @@ export function Paso1() {
   const [ventasDetectadas, setVentasDetectadas] = useState<{ filename: string; numero: string }[]>([]);
   const [omitidas, setOmitidas] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
-  const [modo, setModo] = useState<"archivos" | "dian">("archivos");
 
   // ── Borrador guardado (guardado temporal, por tipo compras/nc) ───────────────
   const queryClient = useQueryClient();
@@ -275,21 +274,6 @@ export function Paso1() {
     await finalizarYAvanzar(parsed, ventas, errs);
   };
 
-  // Facturas traídas de la DIAN (ya parseadas y sin ventas): reutiliza el mismo
-  // post-procesado que la carga manual.
-  const importarDeDian = async (facturas: Factura[]) => {
-    setLoading(true);
-    setErrors([]);
-    setVentasDetectadas([]);
-    setOmitidas([]);
-    setFacturas([]);
-    setSuggestions({});
-    setPaso2Cache(null);
-    const errs: string[] = [];
-    for (const f of facturas) for (const adv of f.advertencias ?? []) errs.push(adv);
-    await finalizarYAvanzar(facturas, [], errs);
-  };
-
   return (
     <div className="space-y-6">
       <div>
@@ -352,33 +336,24 @@ export function Paso1() {
         </div>
       )}
 
-      {/* Selector de origen: carga manual o traer de la DIAN por token */}
-      <div className="flex gap-1 rounded-xl border p-1" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
-        {([
-          { id: "archivos", label: "Cargar archivos", icon: <Upload className="h-4 w-4" /> },
-          { id: "dian", label: "Traer de la DIAN", icon: <Building2 className="h-4 w-4" /> },
-        ] as const).map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setModo(t.id)}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
-            style={{
-              backgroundColor: modo === t.id ? "var(--bg-surface)" : "transparent",
-              color: modo === t.id ? "var(--brand)" : "var(--text-muted)",
-              boxShadow: modo === t.id ? "var(--shadow-sm)" : "none",
-            }}
-          >
-            {t.icon} {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* ── Traer de la DIAN ── */}
-      {modo === "dian" && <DianPanel onImportadas={importarDeDian} modo={modoParseo(docTipo)} />}
+      {/* Traer de la DIAN por token: ahora es solo desde el importador unificado
+          (un único token trae y reparte todo a sus módulos), para no tener dos
+          lugares distintos donde pegar el token. */}
+      <Link
+        href="/importar"
+        className="flex items-center justify-between gap-3 rounded-xl border p-4 transition-colors hover:opacity-90"
+        style={{ borderColor: "var(--info-border)", backgroundColor: "var(--info-bg)" }}
+      >
+        <span className="text-sm" style={{ color: "var(--info-text)" }}>
+          ¿Quieres traer facturas de la DIAN con un token? Usa <strong>Importar DIAN</strong>: con un
+          solo token trae todo y lo reparte automáticamente a cada módulo.
+        </span>
+        <span className="flex shrink-0 items-center gap-1.5 text-sm font-semibold" style={{ color: "var(--info-text)" }}>
+          Ir a Importar DIAN <ExternalLink className="h-4 w-4" />
+        </span>
+      </Link>
 
       {/* ── Carga manual de archivos ── */}
-      {modo === "archivos" && (
       <label
         data-tutorial="dropzone"
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
@@ -444,10 +419,9 @@ export function Paso1() {
           </div>
         )}
       </label>
-      )}
 
-      {/* Overlay de análisis (solo carga manual) */}
-      {modo === "archivos" && loading && (
+      {/* Overlay de análisis */}
+      {loading && (
         <div
           className="flex flex-col items-center gap-4 py-10 rounded-xl border"
           style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}
@@ -469,8 +443,8 @@ export function Paso1() {
         </div>
       )}
 
-      {/* Lista de archivos (solo carga manual) */}
-      {modo === "archivos" && !loading && files.length > 0 && (
+      {/* Lista de archivos */}
+      {!loading && files.length > 0 && (
             <div className="overflow-hidden rounded-xl border" style={{ borderColor: "var(--border-soft)" }}>
               {/* Header */}
               <div
@@ -625,7 +599,7 @@ export function Paso1() {
             </div>
           )}
 
-          {modo === "archivos" && !loading && omitidas.length === 0 && !(ventasDetectadas.length > 0 && stored.length > 0) && (
+          {!loading && omitidas.length === 0 && !(ventasDetectadas.length > 0 && stored.length > 0) && (
             <Button data-tutorial="parse-btn" onClick={handleParse} disabled={!files.length} size="lg" className="w-full sm:w-auto">
               {files.length
                 ? `Procesar ${files.length} archivo${files.length > 1 ? "s" : ""}`
