@@ -582,12 +582,31 @@ def registrar_factura_causada(
     numero = factura.get("numero_dian") or factura.get("numero_factura", "")
     hoy = date.today()
 
-    # Si ya existe para esta empresa, devolver el registro existente sin error
+    # Si ya existe para esta empresa...
     stmt = select(FacturaCausada).where(FacturaCausada.numero_dian == numero)
     if empresa_id is not None:
         stmt = stmt.where(FacturaCausada.empresa_id == empresa_id)
     existente = db.scalar(stmt)
     if existente is not None:
+        if not existente.eliminado:
+            # ...y sigue activa: devolver el registro existente sin duplicar.
+            return existente
+        # ...pero el usuario la ELIMINÓ del historial: se reutiliza la misma fila
+        # (nunca se borra de la BD) con los datos de esta nueva causación, en vez
+        # de bloquearla como "ya causada". Así "eliminar del historial" permite
+        # volver a causar la factura, como espera el usuario.
+        existente.eliminado = False
+        existente.eliminado_at = None
+        existente.nit_proveedor = factura.get("nit")
+        existente.razon_social = factura.get("razon_social")
+        existente.fecha_factura = _parse_date(factura.get("fecha", ""))
+        existente.total = factura.get("total", 0.0)
+        existente.consecutivo = str(consecutivo)
+        existente.tipo_comprobante = tipo_comprobante
+        existente.fecha_causacion = hoy
+        existente.archivo_origen = archivo_origen
+        existente.datos_json = datos_json
+        db.flush()
         return existente
 
     fc = FacturaCausada(
@@ -610,7 +629,12 @@ def registrar_factura_causada(
 
 def esta_causada(db: Session, numero_dian: str, empresa_id: int | None = None) -> bool:
     from sqlalchemy import select
-    stmt = select(FacturaCausada.id).where(FacturaCausada.numero_dian == numero_dian)
+    # Una factura eliminada del historial NO cuenta como "ya causada": eliminarla
+    # es precisamente cómo el usuario libera el número para volver a causarla.
+    stmt = select(FacturaCausada.id).where(
+        FacturaCausada.numero_dian == numero_dian,
+        FacturaCausada.eliminado.is_(False),
+    )
     if empresa_id is not None:
         stmt = stmt.where(FacturaCausada.empresa_id == empresa_id)
     return db.scalar(stmt) is not None

@@ -170,6 +170,7 @@ def verificar_causadas(body: VerificarCausadasRequest, db: DB, empresa: EmpresaA
         .where(
             FacturaCausada.numero_dian.in_(body.numeros_dian),
             FacturaCausada.empresa_id == empresa.id,
+            FacturaCausada.eliminado.is_(False),
         )
     )
     rows = db.scalars(stmt).all()
