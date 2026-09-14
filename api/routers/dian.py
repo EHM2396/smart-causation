@@ -263,7 +263,11 @@ def importar_todo(body: ImportarTodoRequest, empresa: EmpresaActiva):
     Responde en streaming NDJSON con progreso real; la línea final trae los grupos.
 
     Líneas: {"type":"start","total":N} · {"type":"progress","done":i,"total":N}
-            {"type":"done","buckets":{...},"errores":k} · {"type":"error",...}
+            {"type":"factura","destino":"compras"|...,"factura":{...}}   (una por
+                documento clasificado — así el cliente NUNCA pierde lo ya traído
+                aunque la conexión se corte a mitad de camino: cada factura llega
+                en su propia línea, no solo al final del lote)
+            {"type":"done","errores":k} · {"type":"error",...}
     """
     if not (body.ids_compras or body.ids_ventas or body.ids_soporte or body.ids_soporte_ajuste):
         raise HTTPException(400, "No se seleccionaron facturas para importar.")
@@ -276,9 +280,6 @@ def importar_todo(body: ImportarTodoRequest, empresa: EmpresaActiva):
              + len(body.ids_soporte) + len(body.ids_soporte_ajuste))
 
     def gen():
-        buckets: dict[str, list[dict]] = {
-            "compras": [], "nc": [], "ventas": [], "nc_ventas": [], "soporte": [], "nc_soporte": [],
-        }
         errores = 0
         done = 0
         yield json.dumps({"type": "start", "total": total}) + "\n"
@@ -302,12 +303,12 @@ def importar_todo(body: ImportarTodoRequest, empresa: EmpresaActiva):
                             # soporte el tercero es el vendedor (ya viene bien).
                             if destino in ("ventas", "nc_ventas"):
                                 fac = usar_cliente_como_tercero(fac)
-                            buckets[destino].append(fac)
+                            yield json.dumps({"type": "factura", "destino": destino, "factura": fac}) + "\n"
                     except Exception:  # noqa: BLE001 — un XML malo no debe tumbar el lote
                         errores += 1
                     yield json.dumps({"type": "progress", "done": done, "total": total}) + "\n"
 
-            yield json.dumps({"type": "done", "buckets": buckets, "errores": errores}) + "\n"
+            yield json.dumps({"type": "done", "errores": errores}) + "\n"
         except DianError as e:
             yield json.dumps({"type": "error", "code": e.code, "message": e.message}) + "\n"
 

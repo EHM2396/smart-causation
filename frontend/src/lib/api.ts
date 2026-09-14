@@ -305,10 +305,15 @@ export const api = {
     }>("/dian/consultar-todo", { method: "POST", body: JSON.stringify(body) }),
 
   // DIAN unificado — traer y clasificar en 6 grupos (compras, nc, ventas, nc_ventas, soporte, nc_soporte).
+  // Resiliente a un corte de conexión A MITAD del lote: cada factura llega en su
+  // propia línea (no solo al final), así que si la conexión se cae en el
+  // documento 350 de 400, las 350 ya traídas NO se pierden — se devuelven junto
+  // con `conexionError` para que el llamador las guarde y ofrezca reintentar solo
+  // lo que faltó, en vez de descartar todo y empezar de cero.
   dianImportarTodoStream: async (
     body: { auth_url: string; ids_compras: string[]; ids_ventas: string[]; ids_soporte: string[]; ids_soporte_ajuste: string[] },
     onProgress: (done: number, total: number) => void,
-  ): Promise<{ buckets: Record<BucketKey, Factura[]>; errores: number }> => {
+  ): Promise<{ buckets: Record<BucketKey, Factura[]>; errores: number; conexionError?: string }> => {
     const { token, empresaId } = useAuthStore.getState();
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -321,6 +326,7 @@ export const api = {
     });
     if (res.status === 401) _handleUnauthorized();
     if (!res.ok || !res.body) {
+      // Sin datos parciales posibles: la conexión ni siquiera abrió el stream.
       const text = await res.text().catch(() => res.statusText);
       throw new Error(`API ${res.status}: ${text}`);
     }
@@ -328,28 +334,36 @@ export const api = {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let buckets: Record<BucketKey, Factura[]> = { compras: [], nc: [], ventas: [], nc_ventas: [], soporte: [], nc_soporte: [] };
+    const buckets: Record<BucketKey, Factura[]> = { compras: [], nc: [], ventas: [], nc_ventas: [], soporte: [], nc_soporte: [] };
     let errores = 0;
-    let errorMsg = "";
 
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        const t = line.trim();
-        if (!t) continue;
-        let msg: { type: string; done?: number; total?: number; buckets?: Record<BucketKey, Factura[]>; errores?: number; message?: string };
-        try { msg = JSON.parse(t); } catch { continue; }
-        if (msg.type === "start") onProgress(0, msg.total ?? 0);
-        else if (msg.type === "progress") onProgress(msg.done ?? 0, msg.total ?? 0);
-        else if (msg.type === "done") { buckets = msg.buckets ?? buckets; errores = msg.errores ?? 0; }
-        else if (msg.type === "error") errorMsg = msg.message || "Error al traer de la DIAN.";
+    const procesarLinea = (t: string) => {
+      let msg: { type: string; done?: number; total?: number; destino?: BucketKey; factura?: Factura; errores?: number; message?: string };
+      try { msg = JSON.parse(t); } catch { return; }
+      if (msg.type === "start") onProgress(0, msg.total ?? 0);
+      else if (msg.type === "progress") onProgress(msg.done ?? 0, msg.total ?? 0);
+      else if (msg.type === "factura" && msg.destino && msg.factura) buckets[msg.destino].push(msg.factura);
+      else if (msg.type === "done") errores = msg.errores ?? 0;
+      else if (msg.type === "error") throw new Error(msg.message || "Error al traer de la DIAN.");
+    };
+
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const t = line.trim();
+          if (t) procesarLinea(t);
+        }
       }
+    } catch (e) {
+      // Conexión cortada (o error de sesión) A MITAD del lote: lo ya recibido en
+      // `buckets` queda intacto y se devuelve igual, en vez de perderse.
+      return { buckets, errores, conexionError: (e as Error).message || "Se perdió la conexión con la DIAN." };
     }
-    if (errorMsg) throw new Error(errorMsg);
     return { buckets, errores };
   },
 

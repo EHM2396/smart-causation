@@ -72,8 +72,11 @@ export function ImportarDian() {
   const [prog, setProg] = useState({ done: 0, total: 0 });
   const [error, setError] = useState("");
   const [resultado, setResultado] = useState<{ compras: number; ventas: number; soporte: number; soporteAjuste: number; idsCompras: string[]; idsVentas: string[]; idsSoporte: string[]; idsSoporteAjuste: string[] } | null>(null);
-  const [resumen, setResumen] = useState<Record<Bucket, number> | null>(null);
+  const [resumen, setResumen] = useState<{ encontradas: Record<Bucket, number>; agregadas: Record<Bucket, number> } | null>(null);
   const [erroresImport, setErroresImport] = useState(0);
+  // Se cortó la conexión A MITAD del lote (no un documento puntual): lo ya
+  // traído hasta ese momento igual se guardó — solo falta reintentar el resto.
+  const [conexionCortada, setConexionCortada] = useState(false);
 
   const consultar = async () => {
     if (!authUrl.trim()) { setError("Pega la URL de AuthToken de la DIAN."); return; }
@@ -100,24 +103,40 @@ export function ImportarDian() {
   };
 
   const distribuir = async (buckets: Record<Bucket, Factura[]>) => {
-    const conteo: Record<Bucket, number> = { compras: 0, nc: 0, ventas: 0, nc_ventas: 0, soporte: 0, nc_soporte: 0 };
+    // encontradas: documentos que trajo ESTE lote de la DIAN, antes de descartar
+    // duplicados. agregadas: las que realmente terminaron NUEVAS en el borrador
+    // (la DIAN a veces lista el mismo documento más de una vez — reenvíos,
+    // eventos de validación — y ya estar en el borrador tampoco cuenta). Se
+    // muestran ambas para que un número "agregadas" menor que "encontradas" no
+    // se lea como pérdida de datos: es el sistema evitando duplicar la misma
+    // factura.
+    const encontradas: Record<Bucket, number> = { compras: 0, nc: 0, ventas: 0, nc_ventas: 0, soporte: 0, nc_soporte: 0 };
+    const agregadas: Record<Bucket, number> = { compras: 0, nc: 0, ventas: 0, nc_ventas: 0, soporte: 0, nc_soporte: 0 };
     for (const { tipo } of DESTINOS) {
       const nuevasSinOrdenar = buckets[tipo] ?? [];
-      conteo[tipo] = nuevasSinOrdenar.length;
+      encontradas[tipo] = nuevasSinOrdenar.length;
       if (!nuevasSinOrdenar.length) continue;
       // La DIAN devuelve los documentos más recientes primero; se ordenan de más
       // antigua a más reciente ANTES de fusionar (así SIIGO asigna los
       // consecutivos en orden cronológico, no al revés).
       const nuevas = ordenarPorFechaEmision(nuevasSinOrdenar);
-      // Fusionar con lo que ya haya en ese borrador (sin duplicar por numero_dian).
-      // Solo se ordena el lote NUEVO: lo existente no se reordena, porque su
-      // posición puede estar ligada a configuración ya guardada (cuenta,
-      // verificada…) por índice.
+      // Fusionar con lo que ya haya en ese borrador (sin duplicar por numero_dian,
+      // ni contra lo existente NI dentro del propio lote nuevo — la DIAN puede
+      // listar el mismo documento más de una vez). Solo se ordena el lote NUEVO:
+      // lo existente no se reordena, porque su posición puede estar ligada a
+      // configuración ya guardada (cuenta, verificada…) por índice.
       const completo = await api.getBorradorCompleto(tipo as DocTipo);
       const prev = (completo?.datos ?? {}) as Record<string, unknown>;
       const existentes = (prev.facturas as Factura[]) ?? [];
       const nums = new Set(existentes.map((f) => f.numero_dian));
-      const merged = [...existentes, ...nuevas.filter((f) => !nums.has(f.numero_dian))];
+      const nuevasUnicas: Factura[] = [];
+      for (const f of nuevas) {
+        if (nums.has(f.numero_dian)) continue;
+        nums.add(f.numero_dian);
+        nuevasUnicas.push(f);
+      }
+      agregadas[tipo] = nuevasUnicas.length;
+      const merged = [...existentes, ...nuevasUnicas];
       const snapshot = {
         facturas: merged,
         tipoComp: (prev.tipoComp as string) ?? "",
@@ -135,23 +154,27 @@ export function ImportarDian() {
       }, tipo as DocTipo);
       qc.invalidateQueries({ queryKey: ["borrador", tipo] });
     }
-    return conteo;
+    return { encontradas, agregadas };
   };
 
   const importar = async () => {
     if (!resultado) return;
     const totalDocs = resultado.idsCompras.length + resultado.idsVentas.length + resultado.idsSoporte.length + resultado.idsSoporteAjuste.length;
     if (!totalDocs) { setError("No hay documentos para traer en este rango."); return; }
-    setImportando(true); setError(""); setResumen(null); setErroresImport(0);
+    setImportando(true); setError(""); setResumen(null); setErroresImport(0); setConexionCortada(false);
     setProg({ done: 0, total: totalDocs });
     try {
-      const { buckets, errores } = await api.dianImportarTodoStream(
+      const { buckets, errores, conexionError } = await api.dianImportarTodoStream(
         { auth_url: authUrl.trim(), ids_compras: resultado.idsCompras, ids_ventas: resultado.idsVentas, ids_soporte: resultado.idsSoporte, ids_soporte_ajuste: resultado.idsSoporteAjuste },
         (done, total) => setProg({ done, total }),
       );
+      // SIEMPRE se distribuye lo que se alcanzó a traer, aunque la conexión se
+      // haya cortado a mitad de camino — así nunca se pierde el progreso ni hay
+      // que volver a empezar desde cero.
       const conteo = await distribuir(buckets);
       setResumen(conteo);
       setErroresImport(errores);
+      setConexionCortada(!!conexionError);
     } catch (e) {
       setError(limpiarError((e as Error).message));
     } finally {
@@ -315,7 +338,16 @@ export function ImportarDian() {
                   <span className="text-sm" style={{ color: "var(--text-primary)" }}>{label}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold tabular-nums" style={{ color: "var(--text-primary)" }}>{resumen[tipo]}</span>
+                  <span className="text-sm font-bold tabular-nums" style={{ color: "var(--text-primary)" }}>{resumen.agregadas[tipo]}</span>
+                  {resumen.agregadas[tipo] < resumen.encontradas[tipo] && (
+                    <span
+                      className="text-[10px] tabular-nums"
+                      style={{ color: "var(--text-muted)" }}
+                      title="La DIAN listó estos documentos más de una vez (reenvíos/eventos de validación); no se duplican en el módulo."
+                    >
+                      ({resumen.encontradas[tipo]} encontradas, {resumen.encontradas[tipo] - resumen.agregadas[tipo]} repetida{resumen.encontradas[tipo] - resumen.agregadas[tipo] !== 1 ? "s" : ""})
+                    </span>
+                  )}
                   <ArrowRight className="h-4 w-4" style={{ color: "var(--text-muted)" }} />
                 </div>
               </Link>
@@ -326,19 +358,23 @@ export function ImportarDian() {
             Se fusionaron con lo que ya tenías sin duplicar.
           </p>
 
-          {erroresImport > 0 && (
+          {(erroresImport > 0 || conexionCortada) && (
             <div className="rounded-lg border p-3 space-y-2" style={{ borderColor: "var(--warning-border)", backgroundColor: "var(--warning-bg)" }}>
               <div className="flex items-start gap-2">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: "var(--warning-text)" }} />
                 <p className="text-xs" style={{ color: "var(--warning-text)" }}>
-                  <strong>{erroresImport} documento(s) no se pudieron traer</strong> (fallo de red o descarga).
-                  Lo demás ya quedó guardado. Dale <strong>Reintentar</strong> para completar los que faltaron —
-                  no se duplican los que ya entraron.
+                  {conexionCortada ? (
+                    <><strong>Se cortó la conexión con la DIAN</strong> antes de terminar de traer todo el lote.</>
+                  ) : (
+                    <><strong>{erroresImport} documento(s) no se pudieron traer</strong> (fallo de red o descarga).</>
+                  )}{" "}
+                  Lo que ya se alcanzó a traer <strong>quedó guardado</strong> (no se perdió). Dale <strong>Reintentar</strong> para
+                  completar lo que falta — no se duplica lo que ya entró.
                 </p>
               </div>
               <Button onClick={() => { void importar(); }} disabled={importando} size="sm" className="gap-1.5">
                 {importando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                {importando ? "Reintentando…" : "Reintentar los que faltaron"}
+                {importando ? "Reintentando…" : "Reintentar lo que falta"}
               </Button>
             </div>
           )}
