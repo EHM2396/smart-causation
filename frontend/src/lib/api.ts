@@ -434,6 +434,9 @@ export const api = {
     return req<{ eliminados: number }>(`/causacion/historial${qs ? `?${qs}` : ""}`, { method: "DELETE" });
   },
 
+  eliminarRegistroHistorial: (id: number) =>
+    req<{ ok: boolean }>(`/causacion/historial/${id}`, { method: "DELETE" }),
+
   exportarLoteHistorial: (params?: { fechaDesde?: string; fechaHasta?: string }): Promise<Blob> => {
     const qp = new URLSearchParams();
     if (params?.fechaDesde) qp.set("fecha_desde", params.fechaDesde);

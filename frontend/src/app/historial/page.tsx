@@ -37,6 +37,8 @@ export default function HistorialPage() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [exportingLote, setExportingLote] = useState(false);
+  const [deleteRow, setDeleteRow] = useState<HistorialItem | null>(null);
+  const [deletingRow, setDeletingRow] = useState(false);
 
   const hasDateFilter = fechaDesde !== TODAY || fechaHasta !== TODAY;
   const queryClient = useQueryClient();
@@ -82,6 +84,19 @@ export default function HistorialPage() {
       alert((e as Error).message);
     }
     setDeleting(false);
+  };
+
+  const handleEliminarRegistro = async () => {
+    if (!deleteRow) return;
+    setDeletingRow(true);
+    try {
+      await api.eliminarRegistroHistorial(deleteRow.id);
+      setDeleteRow(null);
+      queryClient.invalidateQueries({ queryKey: ["historial-causaciones"] });
+    } catch (e) {
+      alert((e as Error).message);
+    }
+    setDeletingRow(false);
   };
 
   const clearFiltros = () => {
@@ -159,6 +174,52 @@ export default function HistorialPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Confirm delete single row dialog */}
+      <Dialog open={!!deleteRow} onOpenChange={(open) => !open && setDeleteRow(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5" style={{ color: "var(--error-text)" }} />
+              ¿Eliminar este registro?
+            </DialogTitle>
+          </DialogHeader>
+
+          {deleteRow && (
+            <div className="rounded-lg px-3 py-2.5 mb-4 text-xs space-y-1" style={{ backgroundColor: "var(--bg-elevated)", border: "1px solid var(--border-soft)" }}>
+              <p><span style={{ color: "var(--text-muted)" }}>Factura: </span><span className="font-mono font-medium" style={{ color: "var(--text-primary)" }}>{deleteRow.numero_dian}</span></p>
+              <p><span style={{ color: "var(--text-muted)" }}>Proveedor: </span><span style={{ color: "var(--text-primary)" }}>{deleteRow.razon_social ?? "-"}</span></p>
+              <p><span style={{ color: "var(--text-muted)" }}>Total: </span><span className="font-medium tabular-nums" style={{ color: "var(--text-primary)" }}>{fmt(deleteRow.total)}</span></p>
+            </div>
+          )}
+
+          <p className="text-sm mb-4" style={{ color: "var(--text-secondary)" }}>
+            Este registro dejará de verse en el historial, pero la factura sigue contando como
+            ya causada (no se podrá volver a procesar con el mismo número).
+          </p>
+
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => setDeleteRow(null)}
+              disabled={deletingRow}
+              className="rounded-lg border px-4 py-2 text-sm transition-colors hover:opacity-80"
+              style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)", backgroundColor: "var(--bg-surface)" }}
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleEliminarRegistro}
+              disabled={deletingRow}
+              className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors hover:opacity-90 disabled:opacity-60"
+              style={{ backgroundColor: "var(--error-text)", color: "#fff" }}
+            >
+              {deletingRow ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              {deletingRow ? "Eliminando..." : "Sí, eliminar"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -340,30 +401,40 @@ export default function HistorialPage() {
 
                   {/* Acciones */}
                   <td className="px-4 py-3">
-                    {row.tiene_datos ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={regenerating === row.id}
-                        onClick={() => handleRegenerar(row)}
-                        className="flex items-center gap-1.5 text-xs"
+                    <div className="flex items-center gap-2">
+                      {row.tiene_datos ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={regenerating === row.id}
+                          onClick={() => handleRegenerar(row)}
+                          className="flex items-center gap-1.5 text-xs"
+                        >
+                          {regenerating === row.id ? (
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Download className="h-3.5 w-3.5" />
+                          )}
+                          {regenerating === row.id ? "Generando..." : "Descargar"}
+                        </Button>
+                      ) : (
+                        <span
+                          className="cursor-help text-xs underline decoration-dotted"
+                          style={{ color: "var(--text-muted)" }}
+                          title="Esta factura fue causada antes de que el sistema almacenara datos de regeneraci\u00f3n. Solo facturas causadas desde esta versi\u00f3n pueden descargarse nuevamente."
+                        >
+                          No disponible
+                        </span>
+                      )}
+                      <button
+                        onClick={() => setDeleteRow(row)}
+                        title="Eliminar este registro"
+                        className="rounded-lg p-1.5 transition-colors hover:opacity-80"
+                        style={{ color: "var(--error-text)" }}
                       >
-                        {regenerating === row.id ? (
-                          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Download className="h-3.5 w-3.5" />
-                        )}
-                        {regenerating === row.id ? "Generando..." : "Descargar"}
-                      </Button>
-                    ) : (
-                      <span
-                        className="cursor-help text-xs underline decoration-dotted"
-                        style={{ color: "var(--text-muted)" }}
-                        title="Esta factura fue causada antes de que el sistema almacenara datos de regeneraci\u00f3n. Solo facturas causadas desde esta versi\u00f3n pueden descargarse nuevamente."
-                      >
-                        No disponible
-                      </span>
-                    )}
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))

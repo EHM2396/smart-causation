@@ -6,13 +6,13 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from io import BytesIO
-from sqlalchemy import delete, select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_current_user, get_empresa_activa
@@ -563,7 +563,11 @@ def exportar_lote_historial(
     """Genera un único XLSX SIIGO con todas las facturas del período que tienen datos almacenados."""
     stmt = (
         select(FacturaCausada)
-        .where(FacturaCausada.datos_json.is_not(None), FacturaCausada.empresa_id == empresa.id)
+        .where(
+            FacturaCausada.datos_json.is_not(None),
+            FacturaCausada.empresa_id == empresa.id,
+            FacturaCausada.eliminado.is_(False),
+        )
         .order_by(FacturaCausada.id)
     )
     if fecha_desde:
@@ -625,7 +629,7 @@ def get_historial_causadas(
     """Listado filtrable de facturas causadas, orden descendente por fecha."""
     stmt = (
         select(FacturaCausada)
-        .where(FacturaCausada.empresa_id == empresa.id)
+        .where(FacturaCausada.empresa_id == empresa.id, FacturaCausada.eliminado.is_(False))
         .order_by(FacturaCausada.fecha_causacion.desc(), FacturaCausada.id.desc())
         .limit(limit)
     )
@@ -685,7 +689,7 @@ def get_historial_causadas(
 def regenerar_historial(registro_id: int, db: DB, empresa: EmpresaActiva):
     """Re-genera el xlsx de una factura causada previamente a partir de datos almacenados."""
     fc = db.get(FacturaCausada, registro_id)
-    if not fc or fc.empresa_id != empresa.id:
+    if not fc or fc.empresa_id != empresa.id or fc.eliminado:
         raise HTTPException(404, "Registro no encontrado")
     if not fc.datos_json:
         raise HTTPException(
@@ -713,6 +717,22 @@ def regenerar_historial(registro_id: int, db: DB, empresa: EmpresaActiva):
     )
 
 
+@router.delete("/historial/{registro_id}", response_model=dict)
+def eliminar_registro_historial(registro_id: int, db: DB, empresa: EmpresaActiva):
+    """
+    Quita UN registro puntual del historial (soft-delete: nunca se borra la fila
+    de la base de datos, se marca como eliminado y se filtra de los listados).
+    La factura sigue contando como "ya causada" para no duplicarla en SIIGO.
+    """
+    fc = db.get(FacturaCausada, registro_id)
+    if not fc or fc.empresa_id != empresa.id or fc.eliminado:
+        raise HTTPException(404, "Registro no encontrado")
+    fc.eliminado = True
+    fc.eliminado_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"ok": True}
+
+
 @router.delete("/historial", response_model=dict)
 def limpiar_historial(
     db: DB,
@@ -720,8 +740,16 @@ def limpiar_historial(
     fecha_desde: str | None = None,
     fecha_hasta: str | None = None,
 ):
-    """Elimina registros del historial, opcionalmente filtrados por rango de fechas."""
-    stmt = delete(FacturaCausada).where(FacturaCausada.empresa_id == empresa.id)
+    """
+    Quita del historial los registros del período (soft-delete: nunca se borra la
+    fila de la base de datos, se marcan como eliminados y se filtran de los
+    listados).
+    """
+    stmt = (
+        update(FacturaCausada)
+        .where(FacturaCausada.empresa_id == empresa.id, FacturaCausada.eliminado.is_(False))
+        .values(eliminado=True, eliminado_at=datetime.now(timezone.utc))
+    )
     if fecha_desde:
         try:
             stmt = stmt.where(FacturaCausada.fecha_causacion >= date.fromisoformat(fecha_desde))
