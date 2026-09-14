@@ -6,18 +6,8 @@ import { useWizardStore, esModoNC, esModoVenta, esModoSoporte, modoParseo, tipoN
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle2, Loader2, TrendingDown, Clock, History, Trash2, ArrowRight, ExternalLink } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { fmt } from "@/lib/utils";
+import { cn, fmt, ordenarPorFechaEmision } from "@/lib/utils";
 import type { Factura } from "@/lib/types";
-
-// Clave de orden cronológico a partir de la fecha de emisión "DD/MM/YYYY".
-// Devuelve YYYYMMDD (número); fechas inválidas van al final.
-function fechaEmisionKey(fecha: string): number {
-  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec((fecha || "").trim());
-  if (!m) return Number.POSITIVE_INFINITY;
-  const [, d, mo, y] = m;
-  return Number(y) * 10000 + Number(mo) * 100 + Number(d);
-}
 
 function fechaBorrador(iso: string): string {
   try {
@@ -222,7 +212,7 @@ export function Paso1() {
     // Ordenar cronológicamente por fecha de emisión: la más antigua primero, para
     // que los consecutivos SIIGO se asignen en ese orden (los asigna el backend
     // según el orden en que se envían las facturas).
-    const nuevasOrdenadas = [...nuevas].sort((a, b) => fechaEmisionKey(a.fecha) - fechaEmisionKey(b.fecha));
+    const nuevasOrdenadas = ordenarPorFechaEmision(nuevas);
     setFacturas(nuevasOrdenadas);
     setLoading(false);
     // Avanzar a paso2 — filesProcesando activa el overlay mientras cargan las sugerencias IA

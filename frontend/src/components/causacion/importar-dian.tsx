@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import type { DocTipo } from "@/stores/wizard";
 import type { Factura } from "@/lib/types";
+import { ordenarPorFechaEmision } from "@/lib/utils";
 
 // YYYY-MM-DD (input date) → DD/MM/YYYY (formato que espera el portal DIAN)
 function isoToDian(iso: string): string {
@@ -101,10 +102,17 @@ export function ImportarDian() {
   const distribuir = async (buckets: Record<Bucket, Factura[]>) => {
     const conteo: Record<Bucket, number> = { compras: 0, nc: 0, ventas: 0, nc_ventas: 0, soporte: 0, nc_soporte: 0 };
     for (const { tipo } of DESTINOS) {
-      const nuevas = buckets[tipo] ?? [];
-      conteo[tipo] = nuevas.length;
-      if (!nuevas.length) continue;
+      const nuevasSinOrdenar = buckets[tipo] ?? [];
+      conteo[tipo] = nuevasSinOrdenar.length;
+      if (!nuevasSinOrdenar.length) continue;
+      // La DIAN devuelve los documentos más recientes primero; se ordenan de más
+      // antigua a más reciente ANTES de fusionar (así SIIGO asigna los
+      // consecutivos en orden cronológico, no al revés).
+      const nuevas = ordenarPorFechaEmision(nuevasSinOrdenar);
       // Fusionar con lo que ya haya en ese borrador (sin duplicar por numero_dian).
+      // Solo se ordena el lote NUEVO: lo existente no se reordena, porque su
+      // posición puede estar ligada a configuración ya guardada (cuenta,
+      // verificada…) por índice.
       const completo = await api.getBorradorCompleto(tipo as DocTipo);
       const prev = (completo?.datos ?? {}) as Record<string, unknown>;
       const existentes = (prev.facturas as Factura[]) ?? [];
