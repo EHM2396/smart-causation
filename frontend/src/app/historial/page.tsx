@@ -133,7 +133,8 @@ export default function HistorialPage() {
           </DialogHeader>
 
           <p className="text-sm mb-4" style={{ color: "var(--text-secondary)" }}>
-            Esta acción es <strong>irreversible</strong>. Se eliminarán permanentemente los siguientes registros:
+            Estos registros dejarán de verse en el historial y quedarán <strong>libres para volver a causarse</strong> con
+            el mismo número, si hace falta corregirlos:
           </p>
 
           {/* Summary cards */}
@@ -194,8 +195,8 @@ export default function HistorialPage() {
           )}
 
           <p className="text-sm mb-4" style={{ color: "var(--text-secondary)" }}>
-            Este registro dejará de verse en el historial, pero la factura sigue contando como
-            ya causada (no se podrá volver a procesar con el mismo número).
+            Este registro dejará de verse en el historial y quedará <strong>libre para volver a causarla</strong> con
+            el mismo número, si hace falta corregirla.
           </p>
 
           <div className="flex justify-end gap-3">
