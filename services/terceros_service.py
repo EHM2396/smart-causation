@@ -133,6 +133,18 @@ def _norm_geo(s: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
 
 
+# Alias de ciudades colombianas: nombre OFICIAL/largo (como suele venir en el
+# CityName de la factura DIAN) → nombre corto sembrado en la tabla de ciudades.
+# Ya normalizados (sin acentos/puntuación) para comparar directo.
+_ALIAS_CIUDAD: dict[str, str] = {
+    "santiago de cali": "cali",
+    "san jose de cucuta": "cucuta",
+    "san juan de pasto": "pasto",
+    "santa fe de bogota": "bogota",
+    "san sebastian de mariquita": "mariquita",
+}
+
+
 def _norm_depto(s: str | None) -> str:
     """Como _norm_geo pero quitando adornos comunes de departamento
     (D.C., 'distrito capital', 'departamento de'…) para que 'Bogotá, D.C.',
@@ -147,8 +159,17 @@ _GEO_CACHE: dict | None = None
 
 
 def _build_geo_cache(db: Session) -> dict:
-    deptos = db.scalars(select(Departamento)).all()
-    ciudades = db.scalars(select(Ciudad)).all()
+    # Las tablas geo guardan departamentos/ciudades de más de 150 países (para los
+    # selectores de país en el formulario de terceros), no solo Colombia: 3106
+    # departamentos y 4588 ciudades en total, de los cuales solo 33 y 1120 son
+    # colombianos. Este resolver SIEMPRE es para proveedores colombianos
+    # (upsert_tercero fija pais_codigo="Col"), así que se acota la búsqueda a
+    # Colombia. Sin este filtro, un nombre de ciudad colombiana que coincide con
+    # el de otra ciudad en el mundo (p. ej. "Independencia", "La Paz", "Santa
+    # Rosa" — ~7% de las ciudades colombianas colisionan con otro país) vuelve
+    # ambigua la búsqueda y el código de ciudad queda vacío de forma intermitente.
+    deptos = db.scalars(select(Departamento).where(Departamento.pais_codigo == "Col")).all()
+    ciudades = db.scalars(select(Ciudad).where(Ciudad.pais_codigo == "Col")).all()
     depto_by_norm: dict[str, str] = {}
     for d in deptos:
         key = _norm_depto(d.nombre)
@@ -156,13 +177,25 @@ def _build_geo_cache(db: Session) -> dict:
             depto_by_norm.setdefault(key, d.codigo)
     ciudad_by_depto: dict[tuple[str, str], str] = {}
     ciudad_by_norm: dict[str, list[tuple[str, str]]] = {}
+    ciudades_por_depto: dict[str, list[str]] = {}
     for c in ciudades:
         ck = _norm_geo(c.nombre)
         if not ck:
             continue
         ciudad_by_depto[(c.departamento_codigo, ck)] = c.codigo
         ciudad_by_norm.setdefault(ck, []).append((c.codigo, c.departamento_codigo))
-    return {"depto": depto_by_norm, "ciudad_depto": ciudad_by_depto, "ciudad": ciudad_by_norm}
+        ciudades_por_depto.setdefault(c.departamento_codigo, []).append(c.codigo)
+    # Departamentos con UN solo municipio posible (p. ej. Bogotá D.C. → 11001): si
+    # el nombre de ciudad del XML no calza (algunas facturas ponen literalmente
+    # "Bogotá, D.C." como ciudad, que no matchea "Bogotá"), no hay ambigüedad
+    # posible y se puede asignar directo.
+    ciudad_unica_por_depto = {d: cs[0] for d, cs in ciudades_por_depto.items() if len(cs) == 1}
+    return {
+        "depto": depto_by_norm,
+        "ciudad_depto": ciudad_by_depto,
+        "ciudad": ciudad_by_norm,
+        "ciudad_unica_por_depto": ciudad_unica_por_depto,
+    }
 
 
 def _get_geo_cache(db: Session) -> dict:
@@ -192,6 +225,7 @@ def _resolver_geo(
         codigo_depto = cache["depto"].get(ndepto)
 
     nciudad = _norm_geo(ciudad)
+    nciudad = _ALIAS_CIUDAD.get(nciudad, nciudad)
     if nciudad:
         if codigo_depto:
             codigo_ciudad = cache["ciudad_depto"].get((codigo_depto, nciudad))
@@ -205,6 +239,13 @@ def _resolver_geo(
             if len(matches) == 1:
                 codigo_ciudad, depto_de_ciudad = matches[0]
                 codigo_depto = depto_de_ciudad
+
+    # Último recurso: el departamento se identificó pero el nombre de ciudad no
+    # calzó con ninguno (p. ej. "Bogotá, D.C." como CIUDAD, no solo como
+    # departamento). Si ese departamento tiene un único municipio posible, no hay
+    # ambigüedad: se asigna directo en vez de dejar el campo vacío.
+    if codigo_ciudad is None and codigo_depto:
+        codigo_ciudad = cache["ciudad_unica_por_depto"].get(codigo_depto)
 
     return codigo_depto, codigo_ciudad
 
