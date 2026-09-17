@@ -119,6 +119,11 @@ class FacturaCausada(Base):
     total: Mapped[float | None] = mapped_column(Numeric(18, 4))
     consecutivo: Mapped[str | None] = mapped_column(String(20))
     tipo_comprobante: Mapped[str | None] = mapped_column(String(10))
+    # Módulo de causación: "compras" | "nc" | "ventas" | "nc_ventas" | "soporte" |
+    # "nc_soporte" (mismos valores que DocTipo en el frontend). Se deriva del
+    # tipo_documento de la factura + si es venta, al momento de causar. Nulo en
+    # registros de antes de este campo (se puede backfillear desde datos_json).
+    tipo_causacion: Mapped[str | None] = mapped_column(String(20), index=True)
     fecha_causacion: Mapped[date | None] = mapped_column(Date)
     archivo_origen: Mapped[str | None] = mapped_column(String(500))
     datos_json: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -191,6 +191,9 @@ export interface HistorialItem {
   subtotal: number | null;
   total: number;
   tipo_comprobante: string | null;
+  // Módulo de causación: "compras" | "nc" | "ventas" | "nc_ventas" | "soporte" |
+  // "nc_soporte". Nulo en registros de antes de que se guardara este dato.
+  tipo_causacion: string | null;
   archivo_origen: string | null;
   tiene_datos: boolean;
 }

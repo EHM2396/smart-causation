@@ -50,6 +50,39 @@ def _es_nota_reversa(factura: dict | None) -> bool:
     return (factura or {}).get("tipo_documento") in _TIPOS_NOTA_REVERSA
 
 
+def _columna_fecha(campo_fecha: str | None):
+    """Columna de FacturaCausada sobre la que aplica el rango de fechas del
+    historial: 'emision' = fecha de la factura (la que emitió el proveedor/
+    cliente); 'causacion' (por defecto) = fecha en que se causó en el sistema."""
+    return FacturaCausada.fecha_factura if campo_fecha == "emision" else FacturaCausada.fecha_causacion
+
+
+def _aplicar_rango_fecha(stmt, campo_fecha: str | None, fecha_desde: str | None, fecha_hasta: str | None):
+    columna = _columna_fecha(campo_fecha)
+    if fecha_desde:
+        try:
+            stmt = stmt.where(columna >= date.fromisoformat(fecha_desde))
+        except ValueError:
+            pass
+    if fecha_hasta:
+        try:
+            stmt = stmt.where(columna <= date.fromisoformat(fecha_hasta))
+        except ValueError:
+            pass
+    return stmt
+
+
+def _aplicar_filtro_tipo_causacion(stmt, tipo_causacion: str | None):
+    """Filtra por módulo de causación. Acepta un valor único o varios separados
+    por coma (ej. "compras,nc")."""
+    if not tipo_causacion:
+        return stmt
+    valores = [v.strip() for v in tipo_causacion.split(",") if v.strip()]
+    if valores:
+        stmt = stmt.where(FacturaCausada.tipo_causacion.in_(valores))
+    return stmt
+
+
 DB = Annotated[Session, Depends(get_db)]
 EmpresaActiva = Annotated[Empresa, Depends(get_empresa_activa)]
 CurrentUser = Annotated[Usuario, Depends(get_current_user)]
@@ -305,6 +338,7 @@ def generar_causacion(body: CausacionRequest, db: DB, empresa: EmpresaActiva, cu
         consecutivo=consecutivo,
         tipo_comprobante=body.tipo_comprobante,
         empresa_id=empresa.id,
+        tipo_causacion=causacion_service.derivar_tipo_causacion(body.factura, False),
     )
 
     db.commit()
@@ -362,6 +396,7 @@ def generar_y_descargar(body: CausacionRequest, db: DB, empresa: EmpresaActiva, 
         consecutivo=consecutivo,
         tipo_comprobante=body.tipo_comprobante,
         empresa_id=empresa.id,
+        tipo_causacion=causacion_service.derivar_tipo_causacion(body.factura, False),
     )
 
     db.commit()
@@ -523,6 +558,7 @@ def batch_generar(body: BatchRequest, db: DB, empresa: EmpresaActiva, current_us
                 tipo_comprobante=body.tipo_comprobante,
                 archivo_origen=item.factura.get("_archivo", ""),
                 empresa_id=empresa.id,
+                tipo_causacion=causacion_service.derivar_tipo_causacion(item.factura, body.es_venta),
                 datos_json=json.dumps(
                     {
                         "factura": item.factura,
@@ -559,6 +595,8 @@ def exportar_lote_historial(
     empresa: EmpresaActiva,
     fecha_desde: str | None = None,
     fecha_hasta: str | None = None,
+    campo_fecha: str = "causacion",  # 'causacion' (por defecto) | 'emision'
+    tipo_causacion: str | None = None,
     tipo_comprobante: str | None = None,
 ):
     """Genera un único XLSX SIIGO con todas las facturas del período que tienen datos almacenados."""
@@ -571,16 +609,8 @@ def exportar_lote_historial(
         )
         .order_by(FacturaCausada.id)
     )
-    if fecha_desde:
-        try:
-            stmt = stmt.where(FacturaCausada.fecha_causacion >= date.fromisoformat(fecha_desde))
-        except ValueError:
-            pass
-    if fecha_hasta:
-        try:
-            stmt = stmt.where(FacturaCausada.fecha_causacion <= date.fromisoformat(fecha_hasta))
-        except ValueError:
-            pass
+    stmt = _aplicar_rango_fecha(stmt, campo_fecha, fecha_desde, fecha_hasta)
+    stmt = _aplicar_filtro_tipo_causacion(stmt, tipo_causacion)
     if tipo_comprobante:
         stmt = stmt.where(FacturaCausada.tipo_comprobante == tipo_comprobante)
 
@@ -623,27 +653,27 @@ def get_historial_causadas(
     empresa: EmpresaActiva,
     fecha_desde: str | None = None,
     fecha_hasta: str | None = None,
+    campo_fecha: str = "causacion",  # 'causacion' (por defecto) | 'emision'
+    tipo_causacion: str | None = None,  # 'compras' | 'nc' | 'ventas' | 'nc_ventas' | 'soporte' | 'nc_soporte' (o varios separados por coma)
     buscar: str | None = None,
     tipo_comprobante: str | None = None,
     limit: int = 500,
 ):
-    """Listado filtrable de facturas causadas, orden descendente por fecha."""
+    """Listado filtrable de facturas causadas.
+
+    El rango de fechas (fecha_desde/fecha_hasta) aplica sobre la fecha de
+    CAUSACIÓN o sobre la fecha de EMISIÓN de la factura según `campo_fecha`.
+    `tipo_causacion` filtra por módulo (compras/ventas/soporte/sus NC).
+    """
+    columna_orden = _columna_fecha(campo_fecha)
     stmt = (
         select(FacturaCausada)
         .where(FacturaCausada.empresa_id == empresa.id, FacturaCausada.eliminado.is_(False))
-        .order_by(FacturaCausada.fecha_causacion.desc(), FacturaCausada.id.desc())
+        .order_by(columna_orden.desc(), FacturaCausada.id.desc())
         .limit(limit)
     )
-    if fecha_desde:
-        try:
-            stmt = stmt.where(FacturaCausada.fecha_causacion >= date.fromisoformat(fecha_desde))
-        except ValueError:
-            pass
-    if fecha_hasta:
-        try:
-            stmt = stmt.where(FacturaCausada.fecha_causacion <= date.fromisoformat(fecha_hasta))
-        except ValueError:
-            pass
+    stmt = _aplicar_rango_fecha(stmt, campo_fecha, fecha_desde, fecha_hasta)
+    stmt = _aplicar_filtro_tipo_causacion(stmt, tipo_causacion)
     if tipo_comprobante:
         stmt = stmt.where(FacturaCausada.tipo_comprobante == tipo_comprobante)
     if buscar:
@@ -679,6 +709,7 @@ def get_historial_causadas(
             "subtotal": _subtotal(r.datos_json),
             "total": float(r.total or 0),
             "tipo_comprobante": r.tipo_comprobante,
+            "tipo_causacion": r.tipo_causacion,
             "archivo_origen": r.archivo_origen,
             "tiene_datos": r.datos_json is not None,
         }
@@ -740,6 +771,8 @@ def limpiar_historial(
     empresa: EmpresaActiva,
     fecha_desde: str | None = None,
     fecha_hasta: str | None = None,
+    campo_fecha: str = "causacion",  # 'causacion' (por defecto) | 'emision'
+    tipo_causacion: str | None = None,
 ):
     """
     Quita del historial los registros del período (soft-delete: nunca se borra la
@@ -751,16 +784,8 @@ def limpiar_historial(
         .where(FacturaCausada.empresa_id == empresa.id, FacturaCausada.eliminado.is_(False))
         .values(eliminado=True, eliminado_at=datetime.now(timezone.utc))
     )
-    if fecha_desde:
-        try:
-            stmt = stmt.where(FacturaCausada.fecha_causacion >= date.fromisoformat(fecha_desde))
-        except ValueError:
-            pass
-    if fecha_hasta:
-        try:
-            stmt = stmt.where(FacturaCausada.fecha_causacion <= date.fromisoformat(fecha_hasta))
-        except ValueError:
-            pass
+    stmt = _aplicar_rango_fecha(stmt, campo_fecha, fecha_desde, fecha_hasta)
+    stmt = _aplicar_filtro_tipo_causacion(stmt, tipo_causacion)
     result = db.execute(stmt)
     db.commit()
     return {"eliminados": result.rowcount}

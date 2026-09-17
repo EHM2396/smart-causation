@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, type CampoFechaHistorial, type BorradorTipo } from "@/lib/api";
 import { DataTableShell, useDataTable } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Combobox } from "@/components/ui/combobox";
 import {
   Dialog,
   DialogContent,
@@ -30,9 +31,38 @@ const searchFn = (h: HistorialItem, q: string) =>
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
+// Módulo de causación (mismos valores que DocTipo en el wizard).
+const TIPO_CAUSACION_LABEL: Record<BorradorTipo, string> = {
+  compras: "Compras",
+  nc: "NC Compras",
+  ventas: "Ventas",
+  nc_ventas: "NC Ventas",
+  soporte: "Documento Soporte",
+  nc_soporte: "Ajuste Soporte",
+};
+// Mismos colores que el importador DIAN unificado (importar-dian.tsx DESTINOS).
+const TIPO_CAUSACION_COLOR: Record<BorradorTipo, string> = {
+  compras: "#4F46E5",
+  nc: "#7c3aed",
+  ventas: "#0ea5a4",
+  nc_ventas: "#d97706",
+  soporte: "#0284c7",
+  nc_soporte: "#9333ea",
+};
+const TIPO_CAUSACION_OPCIONES = [
+  { value: "", label: "Todos los módulos" },
+  ...(Object.entries(TIPO_CAUSACION_LABEL) as [BorradorTipo, string][]).map(([value, label]) => ({ value, label })),
+];
+
 export default function HistorialPage() {
   const [fechaDesde, setFechaDesde] = useState(TODAY);
   const [fechaHasta, setFechaHasta] = useState(TODAY);
+  // Sobre qué fecha aplica el rango Desde/Hasta: cuándo se causó en el sistema,
+  // o la fecha de emisión de la factura (la que se ve al mapear cuentas).
+  const [campoFecha, setCampoFecha] = useState<CampoFechaHistorial>("causacion");
+  const labelCampoFecha = campoFecha === "emision" ? "fecha de emisión" : "fecha de causación";
+  // Filtro por módulo: "" = todos.
+  const [tipoCausacion, setTipoCausacion] = useState<BorradorTipo | "">("");
   const [regenerating, setRegenerating] = useState<number | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -40,12 +70,16 @@ export default function HistorialPage() {
   const [deleteRow, setDeleteRow] = useState<HistorialItem | null>(null);
   const [deletingRow, setDeletingRow] = useState(false);
 
-  const hasDateFilter = fechaDesde !== TODAY || fechaHasta !== TODAY;
+  const rangoActivo = fechaDesde !== TODAY || fechaHasta !== TODAY;
+  const hasDateFilter = rangoActivo || tipoCausacion !== "";
+  const mensajeSinResultados = tipoCausacion
+    ? `Sin resultados para ${TIPO_CAUSACION_LABEL[tipoCausacion]}${rangoActivo ? ` en ese rango de ${labelCampoFecha}` : ""}.`
+    : `Sin resultados para ese rango de ${labelCampoFecha}.`;
   const queryClient = useQueryClient();
 
   const { data: historial = [], isLoading, refetch } = useQuery({
-    queryKey: ["historial-causaciones", fechaDesde, fechaHasta],
-    queryFn: () => api.getHistorial({ fechaDesde, fechaHasta }),
+    queryKey: ["historial-causaciones", fechaDesde, fechaHasta, campoFecha, tipoCausacion],
+    queryFn: () => api.getHistorial({ fechaDesde, fechaHasta, campoFecha, tipoCausacion: tipoCausacion || undefined }),
     staleTime: 30_000,
   });
 
@@ -61,7 +95,7 @@ export default function HistorialPage() {
   const handleExportarLote = async () => {
     setExportingLote(true);
     try {
-      const blob = await api.exportarLoteHistorial({ fechaDesde, fechaHasta });
+      const blob = await api.exportarLoteHistorial({ fechaDesde, fechaHasta, campoFecha, tipoCausacion: tipoCausacion || undefined });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -77,7 +111,7 @@ export default function HistorialPage() {
   const handleEliminar = async () => {
     setDeleting(true);
     try {
-      await api.limpiarHistorial({ fechaDesde, fechaHasta });
+      await api.limpiarHistorial({ fechaDesde, fechaHasta, campoFecha, tipoCausacion: tipoCausacion || undefined });
       setShowDeleteDialog(false);
       queryClient.invalidateQueries({ queryKey: ["historial-causaciones"] });
     } catch (e) {
@@ -102,6 +136,7 @@ export default function HistorialPage() {
   const clearFiltros = () => {
     setFechaDesde(TODAY);
     setFechaHasta(TODAY);
+    setTipoCausacion("");
   };
 
   const handleRegenerar = async (row: HistorialItem) => {
@@ -149,9 +184,17 @@ export default function HistorialPage() {
             </div>
           </div>
 
-          <div className="rounded-lg px-3 py-2 mb-6 text-xs" style={{ backgroundColor: "var(--bg-elevated)", border: "1px solid var(--border-soft)" }}>
-            <span style={{ color: "var(--text-muted)" }}>Período: </span>
-            <span className="font-mono font-medium" style={{ color: "var(--text-primary)" }}>{rangoLabel}</span>
+          <div className="rounded-lg px-3 py-2 mb-6 text-xs space-y-1" style={{ backgroundColor: "var(--bg-elevated)", border: "1px solid var(--border-soft)" }}>
+            <div>
+              <span style={{ color: "var(--text-muted)" }}>Período ({labelCampoFecha}): </span>
+              <span className="font-mono font-medium" style={{ color: "var(--text-primary)" }}>{rangoLabel}</span>
+            </div>
+            <div>
+              <span style={{ color: "var(--text-muted)" }}>Módulo: </span>
+              <span className="font-medium" style={{ color: "var(--text-primary)" }}>
+                {tipoCausacion ? TIPO_CAUSACION_LABEL[tipoCausacion] : "Todos"}
+              </span>
+            </div>
           </div>
 
           <div className="flex justify-end gap-3">
@@ -228,7 +271,7 @@ export default function HistorialPage() {
             Historial de causaciones
           </h1>
           <p className="mt-1 text-sm" style={{ color: "var(--text-secondary)" }}>
-            Todas las facturas confirmadas. Filtrá por fecha y regenerá el archivo SIIGO cuando lo necesites.
+            Todas las facturas confirmadas. Filtrá por módulo, por fecha de causación o de emisión, y regenerá el archivo SIIGO cuando lo necesites.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -258,8 +301,42 @@ export default function HistorialPage() {
         className="flex flex-wrap items-end gap-4 rounded-xl border px-4 py-3"
         style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)", boxShadow: "var(--shadow-card)" }}
       >
+        <div className="space-y-1.5">
+          <label className="block text-xs font-medium" style={{ color: "var(--text-muted)" }}>Filtrar por</label>
+          <div className="flex gap-1 rounded-lg border p-0.5" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
+            {([
+              { id: "causacion", label: "Fecha de causación" },
+              { id: "emision", label: "Fecha de emisión" },
+            ] as const).map((op) => (
+              <button
+                key={op.id}
+                type="button"
+                onClick={() => setCampoFecha(op.id)}
+                className="rounded-md px-2.5 py-1 text-xs font-medium transition-colors"
+                style={{
+                  backgroundColor: campoFecha === op.id ? "var(--bg-surface)" : "transparent",
+                  color: campoFecha === op.id ? "var(--brand)" : "var(--text-muted)",
+                  boxShadow: campoFecha === op.id ? "var(--shadow-sm)" : "none",
+                }}
+              >
+                {op.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <DatePicker label="Desde" value={fechaDesde} onChange={setFechaDesde} max={fechaHasta || undefined} />
         <DatePicker label="Hasta" value={fechaHasta} onChange={setFechaHasta} max={new Date().toISOString().slice(0, 10)} />
+
+        <div className="w-56 space-y-1.5">
+          <label className="block text-xs font-medium" style={{ color: "var(--text-muted)" }}>Módulo</label>
+          <Combobox
+            options={TIPO_CAUSACION_OPCIONES}
+            value={tipoCausacion}
+            onChange={(v) => setTipoCausacion(v as BorradorTipo | "")}
+            placeholder="Todos los módulos"
+            clearable
+          />
+        </div>
 
         {/* Spacer */}
         <div className="flex-1" />
@@ -313,28 +390,44 @@ export default function HistorialPage() {
         <table className="w-full min-w-[900px] text-sm">
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
-              {["Consec.", "N° Factura DIAN", "Proveedor", "F. Factura", "F. Causación", "Subtotal", "Total", "Tipo comp.", "Archivo origen", "Acciones"].map((h) => (
-                <th
-                  key={h}
-                  className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  {h}
-                </th>
-              ))}
+              {[
+                { label: "Consec.", campo: null },
+                { label: "N° Factura DIAN", campo: null },
+                { label: "Proveedor", campo: null },
+                { label: "Módulo", campo: null },
+                { label: "F. Emisión", campo: "emision" as const },
+                { label: "F. Causación", campo: "causacion" as const },
+                { label: "Subtotal", campo: null },
+                { label: "Total", campo: null },
+                { label: "Tipo comp.", campo: null },
+                { label: "Archivo origen", campo: null },
+                { label: "Acciones", campo: null },
+              ].map(({ label, campo }) => {
+                const activa = campo !== null && campo === campoFecha;
+                return (
+                  <th
+                    key={label}
+                    className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide"
+                    style={{ color: activa ? "var(--brand)" : "var(--text-muted)" }}
+                    title={activa ? "Filtrando por esta fecha" : undefined}
+                  >
+                    {label}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={10} className="px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>
+                <td colSpan={11} className="px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>
                   Cargando historial...
                 </td>
               </tr>
             ) : dt.rows.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>
-                  {hasDateFilter ? "Sin resultados para el rango de fechas seleccionado." : "No hay facturas causadas aún."}
+                <td colSpan={11} className="px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>
+                  {hasDateFilter ? mensajeSinResultados : "No hay facturas causadas aún."}
                 </td>
               </tr>
             ) : (
@@ -362,6 +455,22 @@ export default function HistorialPage() {
                     <p className="font-mono text-xs" style={{ color: "var(--text-muted)" }}>
                       {row.nit_proveedor ?? ""}
                     </p>
+                  </td>
+
+                  {/* Módulo */}
+                  <td className="px-4 py-3">
+                    {row.tipo_causacion && row.tipo_causacion in TIPO_CAUSACION_LABEL ? (
+                      <span
+                        className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"
+                        style={{ backgroundColor: `${TIPO_CAUSACION_COLOR[row.tipo_causacion as BorradorTipo]}22`, color: TIPO_CAUSACION_COLOR[row.tipo_causacion as BorradorTipo] }}
+                      >
+                        {TIPO_CAUSACION_LABEL[row.tipo_causacion as BorradorTipo]}
+                      </span>
+                    ) : (
+                      <span className="text-xs" style={{ color: "var(--text-muted)" }} title="Causada antes de guardar este dato">
+                        Sin clasificar
+                      </span>
+                    )}
                   </td>
 
                   {/* Fecha factura */}

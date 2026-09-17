@@ -22,9 +22,13 @@ import type {
 import { useAuthStore } from "@/stores/auth";
 
 // Tipo de borrador/causación: cada módulo del wizard tiene su propia bandeja.
-type BorradorTipo = "compras" | "nc" | "ventas" | "nc_ventas" | "soporte" | "nc_soporte";
+// También es el valor de tipo_causacion en el historial (mismo módulo).
+export type BorradorTipo = "compras" | "nc" | "ventas" | "nc_ventas" | "soporte" | "nc_soporte";
 // Grupos del importador unificado (destino de cada documento).
 type BucketKey = "compras" | "nc" | "ventas" | "nc_ventas" | "soporte" | "nc_soporte";
+
+// Historial: sobre qué fecha aplica el rango Desde/Hasta.
+export type CampoFechaHistorial = "causacion" | "emision";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -428,10 +432,15 @@ export const api = {
     }),
 
   // Historial de causaciones
-  getHistorial: (params?: { fechaDesde?: string; fechaHasta?: string; buscar?: string }) => {
+  // campoFecha: sobre qué fecha aplica el rango Desde/Hasta — "causacion" (cuándo
+  // se causó en el sistema, por defecto) o "emision" (fecha de la factura DIAN).
+  // tipoCausacion: módulo (compras/nc/ventas/nc_ventas/soporte/nc_soporte).
+  getHistorial: (params?: { fechaDesde?: string; fechaHasta?: string; campoFecha?: CampoFechaHistorial; tipoCausacion?: BorradorTipo; buscar?: string }) => {
     const qp = new URLSearchParams();
     if (params?.fechaDesde) qp.set("fecha_desde", params.fechaDesde);
     if (params?.fechaHasta) qp.set("fecha_hasta", params.fechaHasta);
+    if (params?.campoFecha) qp.set("campo_fecha", params.campoFecha);
+    if (params?.tipoCausacion) qp.set("tipo_causacion", params.tipoCausacion);
     if (params?.buscar) qp.set("buscar", params.buscar);
     const qs = qp.toString();
     return req<HistorialItem[]>(`/causacion/historial${qs ? `?${qs}` : ""}`);
@@ -440,10 +449,12 @@ export const api = {
   regenerarHistorial: (id: number): Promise<Blob> =>
     reqBlob(`/causacion/historial/${id}/regenerar`, { method: "POST" }),
 
-  limpiarHistorial: (params?: { fechaDesde?: string; fechaHasta?: string }) => {
+  limpiarHistorial: (params?: { fechaDesde?: string; fechaHasta?: string; campoFecha?: CampoFechaHistorial; tipoCausacion?: BorradorTipo }) => {
     const qp = new URLSearchParams();
     if (params?.fechaDesde) qp.set("fecha_desde", params.fechaDesde);
     if (params?.fechaHasta) qp.set("fecha_hasta", params.fechaHasta);
+    if (params?.campoFecha) qp.set("campo_fecha", params.campoFecha);
+    if (params?.tipoCausacion) qp.set("tipo_causacion", params.tipoCausacion);
     const qs = qp.toString();
     return req<{ eliminados: number }>(`/causacion/historial${qs ? `?${qs}` : ""}`, { method: "DELETE" });
   },
@@ -451,10 +462,12 @@ export const api = {
   eliminarRegistroHistorial: (id: number) =>
     req<{ ok: boolean }>(`/causacion/historial/${id}`, { method: "DELETE" }),
 
-  exportarLoteHistorial: (params?: { fechaDesde?: string; fechaHasta?: string }): Promise<Blob> => {
+  exportarLoteHistorial: (params?: { fechaDesde?: string; fechaHasta?: string; campoFecha?: CampoFechaHistorial; tipoCausacion?: BorradorTipo }): Promise<Blob> => {
     const qp = new URLSearchParams();
     if (params?.fechaDesde) qp.set("fecha_desde", params.fechaDesde);
     if (params?.fechaHasta) qp.set("fecha_hasta", params.fechaHasta);
+    if (params?.campoFecha) qp.set("campo_fecha", params.campoFecha);
+    if (params?.tipoCausacion) qp.set("tipo_causacion", params.tipoCausacion);
     const qs = qp.toString();
     return reqBlob(`/causacion/historial/exportar-lote${qs ? `?${qs}` : ""}`);
   },

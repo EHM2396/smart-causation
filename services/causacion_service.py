@@ -568,6 +568,25 @@ def generar_siigo(
 
 # ── Registro de factura causada ───────────────────────────────────────────────
 
+def derivar_tipo_causacion(factura: dict, es_venta: bool) -> str:
+    """
+    Módulo de causación al que pertenece una factura ya parseada, según su
+    tipo_documento + si la operación es una venta. Mismos valores que DocTipo en
+    el frontend: "compras" | "nc" | "ventas" | "nc_ventas" | "soporte" |
+    "nc_soporte". Espejo de _bucket_de() en api/routers/dian.py (ahí también
+    interviene el ORIGEN de la consulta DIAN; acá solo se tiene la factura ya
+    causada, así que basta con tipo_documento).
+    """
+    td = (factura.get("tipo_documento") or "factura").lower()
+    if td == "documento_soporte":
+        return "soporte"
+    if td == "nota_ajuste_soporte":
+        return "nc_soporte"
+    if es_venta:
+        return "nc_ventas" if td == "nota_credito" else "ventas"
+    return "nc" if td == "nota_credito" else "compras"
+
+
 def registrar_factura_causada(
     db: Session,
     *,
@@ -577,6 +596,7 @@ def registrar_factura_causada(
     archivo_origen: str = "",
     datos_json: str | None = None,
     empresa_id: int | None = None,
+    tipo_causacion: str | None = None,
 ) -> FacturaCausada:
     from sqlalchemy import select
     numero = factura.get("numero_dian") or factura.get("numero_factura", "")
@@ -606,6 +626,7 @@ def registrar_factura_causada(
         existente.fecha_causacion = hoy
         existente.archivo_origen = archivo_origen
         existente.datos_json = datos_json
+        existente.tipo_causacion = tipo_causacion
         db.flush()
         return existente
 
@@ -621,6 +642,7 @@ def registrar_factura_causada(
         archivo_origen=archivo_origen,
         datos_json=datos_json,
         empresa_id=empresa_id,
+        tipo_causacion=tipo_causacion,
     )
     db.add(fc)
     db.flush()
