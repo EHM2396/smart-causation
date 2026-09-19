@@ -18,7 +18,7 @@ import {
   ArrowDownRight, ArrowUpRight, Building2, CalendarDays, FileStack, Info, Loader2, Scale,
 } from "lucide-react";
 
-import { api } from "@/lib/api";
+import { api, type CampoFechaHistorial } from "@/lib/api";
 import { fmt } from "@/lib/utils";
 import { Combobox } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -138,6 +138,9 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
   const [desde, setDesde] = useState(presets[2].desde);
   const [hasta, setHasta] = useState(presets[2].hasta);
   const [empresaId, setEmpresaId] = useState<number | null>(null);
+  // Una factura de agosto causada en septiembre cae en un mes o en el otro según
+  // esto, así que el rango de fechas no significa nada si no se ve cuál está activo.
+  const [campoFecha, setCampoFecha] = useState<CampoFechaHistorial>("causacion");
 
   const presetActivo = presets.find((p) => p.desde === desde && p.hasta === hasta)?.id ?? "personalizado";
 
@@ -155,8 +158,8 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
   }, [empresas, exigeEmpresa]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["analitica", desde, hasta, empresaId],
-    queryFn: () => api.analiticaResumen(desde, hasta, empresaId),
+    queryKey: ["analitica", desde, hasta, empresaId, campoFecha],
+    queryFn: () => api.analiticaResumen(desde, hasta, empresaId, campoFecha),
     enabled: !faltaElegir,
   });
 
@@ -193,8 +196,25 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
 
       {/* ── Filtros ─────────────────────────────────────────────────────── */}
       <div className="mb-6 rounded-xl border p-4" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
-        <div className="mb-2 flex items-center gap-1.5 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-          <CalendarDays className="h-4 w-4" style={{ color: "var(--brand)" }} /> Periodo
+        <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <span className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+            <CalendarDays className="h-4 w-4" style={{ color: "var(--brand)" }} /> Periodo
+          </span>
+          <div className="flex items-center gap-1 rounded-full p-0.5" style={{ backgroundColor: "var(--bg-elevated)", border: "1px solid var(--border-soft)" }}>
+            {([
+              { id: "causacion", label: "Por fecha de causación" },
+              { id: "emision", label: "Por fecha de emisión" },
+            ] as const).map((op) => {
+              const active = campoFecha === op.id;
+              return (
+                <button key={op.id} type="button" onClick={() => setCampoFecha(op.id)}
+                  className="rounded-full px-3 py-1 text-xs font-medium transition-colors"
+                  style={{ backgroundColor: active ? "var(--brand)" : "transparent", color: active ? "#fff" : "var(--text-secondary)" }}>
+                  {op.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           {presets.map((p) => {
@@ -247,8 +267,12 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
       ) : !hayDatos ? (
         <div className="rounded-xl border px-4 py-16 text-center" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
           <FileStack className="mx-auto mb-3 h-8 w-8" style={{ color: "var(--text-muted)" }} />
-          <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>Todavía no hay documentos causados en este periodo</p>
-          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>Probá con un rango de fechas más amplio.</p>
+          <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>No hay documentos en este periodo</p>
+          <p className="mx-auto mt-1 max-w-md text-sm" style={{ color: "var(--text-muted)" }}>
+            {campoFecha === "causacion"
+              ? "Estás filtrando por fecha de causación. Si las facturas se emitieron en este rango pero se causaron después, probá con “Por fecha de emisión”."
+              : "Estás filtrando por fecha de emisión. Probá con un rango más amplio o con “Por fecha de causación”."}
+          </p>
         </div>
       ) : (
         <>

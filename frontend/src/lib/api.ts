@@ -156,11 +156,12 @@ export const api = {
     const q = qs.toString();
     return req<import("@/lib/types").AdminUsuarioDetalle>(`/admin/usuario/${id}/detalle${q ? `?${q}` : ""}`);
   },
-  analiticaResumen: (desde?: string, hasta?: string, empresaId?: number | null) => {
+  analiticaResumen: (desde?: string, hasta?: string, empresaId?: number | null, campoFecha?: CampoFechaHistorial) => {
     const qs = new URLSearchParams();
     if (desde) qs.set("desde", desde);
     if (hasta) qs.set("hasta", hasta);
     if (empresaId != null) qs.set("empresa_id", String(empresaId));
+    if (campoFecha) qs.set("campo_fecha", campoFecha);
     const q = qs.toString();
     return req<import("@/lib/types").AnaliticaResumen>(`/analitica/resumen${q ? `?${q}` : ""}`);
   },

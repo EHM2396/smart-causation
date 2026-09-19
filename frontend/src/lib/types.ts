@@ -449,6 +449,8 @@ export interface AnaliticaTercero {
 
 export interface AnaliticaResumen {
   periodo: { desde: string; hasta: string };
+  /** Sobre qué fecha corrió el rango: la de emisión del documento o la de causación. */
+  campo_fecha: "emision" | "causacion";
   /** "cuenta" = todas las empresas (admin); "empresa" = una sola. */
   alcance: "cuenta" | "empresa";
   empresas: number;

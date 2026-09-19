@@ -79,10 +79,9 @@ def _es_nota_reversa(factura: dict | None) -> bool:
 
 
 def _columna_fecha(campo_fecha: str | None):
-    """Columna de FacturaCausada sobre la que aplica el rango de fechas del
-    historial: 'emision' = fecha de la factura (la que emitió el proveedor/
-    cliente); 'causacion' (por defecto) = fecha en que se causó en el sistema."""
-    return FacturaCausada.fecha_factura if campo_fecha == "emision" else FacturaCausada.fecha_causacion
+    """Columna sobre la que aplica el rango de fechas del historial. La
+    definición vive en causacion_service para que analítica filtre igual."""
+    return causacion_service.columna_fecha(campo_fecha)
 
 
 def _aplicar_rango_fecha(stmt, campo_fecha: str | None, fecha_desde: str | None, fecha_hasta: str | None):
