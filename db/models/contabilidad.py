@@ -118,6 +118,10 @@ class FacturaCausada(Base):
     razon_social: Mapped[str | None] = mapped_column(String(255))
     fecha_factura: Mapped[date | None] = mapped_column(Date)
     total: Mapped[float | None] = mapped_column(Numeric(18, 4))
+    # Suma de las bases de los ítems (sin IVA). Es la cifra que vale para
+    # costos/gastos/ingresos: el IVA descontable no es costo. Nula en registros
+    # anteriores a este campo (backfill en scripts/backfill_base_gravable.py).
+    base_gravable: Mapped[float | None] = mapped_column(Numeric(18, 4))
     consecutivo: Mapped[str | None] = mapped_column(String(20))
     tipo_comprobante: Mapped[str | None] = mapped_column(String(10))
     # Módulo de causación: "compras" | "nc" | "ventas" | "nc_ventas" | "soporte" |

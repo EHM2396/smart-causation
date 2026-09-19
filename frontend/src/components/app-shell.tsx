@@ -91,7 +91,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [esAdmin, empresaConfirmada, misEmpresas, setEmpresa]);
 
   // Rutas de causación (de causador). Si un admin cae aquí, lo mandamos a su panel.
-  const RUTAS_CAUSADOR = ["/inicio", "/causacion", "/historial", "/terceros", "/catalogos", "/empresas"];
+  // "/analitica" es la del causador; la del admin vive en "/admin/analitica", que
+  // no empieza por "/analitica", así que no se pisan.
+  const RUTAS_CAUSADOR = ["/inicio", "/causacion", "/historial", "/terceros", "/catalogos", "/empresas", "/analitica"];
   const enRutaCausador = RUTAS_CAUSADOR.some((p) => pathname.startsWith(p));
   useEffect(() => {
     if (_hydrated && token && esAdmin && enRutaCausador) {
