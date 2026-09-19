@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
 
 import re
@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.dependencies import ALGORITHM, SECRET_KEY, get_current_user
-from db.models.auth import Empresa, Plan, TokenEmail, Usuario, UsuarioEmpresa
+from db.models.auth import CuentaCliente, Empresa, Plan, TokenEmail, Usuario, UsuarioEmpresa
 from db.models.legal import Consentimiento
 from db.session import get_db
 from core.brand import APP_NAME
@@ -90,7 +90,7 @@ class MsgResponse(BaseModel):
 
 class PerfilUpdateRequest(BaseModel):
     nombre: str
-    nombre_empresa: str
+    nombre_empresa: str | None = None   # obsoleto: las empresas se gestionan aparte
     nit_empresa: str | None = None
 
 
@@ -229,15 +229,29 @@ def registro(body: RegistroRequest, request: Request, background_tasks: Backgrou
     email = body.email.lower().strip()
     if db.scalar(select(Usuario).where(Usuario.email == email)):
         raise HTTPException(status_code=409, detail="El email ya está registrado")
+    if not (body.nit_empresa or "").strip():
+        raise HTTPException(status_code=400, detail="El NIT de la empresa es obligatorio")
 
-    plan = db.scalar(select(Plan).where(Plan.nombre == "base", Plan.activo.is_(True)))
+    # El registro por el formulario crea una CUENTA DE PRUEBA (Free):
+    # 100 causaciones en total, 14 días de vigencia y 1 empresa. Al vencer, se bloquea.
+    plan_free = db.scalar(select(Plan).where(Plan.nombre == "Free", Plan.activo.is_(True)))
+    dias = plan_free.dias_prueba if (plan_free and plan_free.dias_prueba) else 14
+    cuenta = CuentaCliente(
+        nombre=body.nombre_empresa or body.nombre,
+        plan_id=plan_free.id if plan_free else None,
+        estado="activa",
+        es_prueba=True,
+        prueba_expira=date.today() + timedelta(days=dias),
+    )
+    db.add(cuenta)
+    db.flush()
 
     usuario = Usuario(
         email=email,
         password_hash=_hash_password(body.password),
         nombre=body.nombre,
-        rol="user",
-        plan_id=plan.id if plan else None,
+        rol="causador",
+        cuenta_id=cuenta.id,
         email_verificado=not EMAIL_ENABLED,
     )
     db.add(usuario)
@@ -245,8 +259,9 @@ def registro(body: RegistroRequest, request: Request, background_tasks: Backgrou
 
     empresa = Empresa(
         nombre=body.nombre_empresa,
-        nit=body.nit_empresa,
+        nit=body.nit_empresa.strip(),
         owner_id=usuario.id,
+        cuenta_id=cuenta.id,
     )
     db.add(empresa)
     db.flush()
@@ -361,6 +376,18 @@ def me(current_user: Annotated[Usuario, Depends(get_current_user)], db: DB):
     }
 
 
+@router.get("/mis-empresas", response_model=list[dict])
+def mis_empresas(current_user: Annotated[Usuario, Depends(get_current_user)], db: DB):
+    """Empresas activas a las que pertenece el usuario (para el selector de empresa)."""
+    rows = db.execute(
+        select(Empresa.id, Empresa.nombre, Empresa.nit)
+        .join(UsuarioEmpresa, UsuarioEmpresa.empresa_id == Empresa.id)
+        .where(UsuarioEmpresa.usuario_id == current_user.id, Empresa.activa.is_(True))
+        .order_by(Empresa.nombre)
+    ).all()
+    return [{"id": r.id, "nombre": r.nombre, "nit": r.nit} for r in rows]
+
+
 @router.put("/tutorial", response_model=MsgResponse)
 def actualizar_tutorial(
     body: TutorialRequest,
@@ -378,20 +405,13 @@ def actualizar_perfil(
     current_user: Annotated[Usuario, Depends(get_current_user)],
     db: DB,
 ):
+    # El perfil solo edita datos personales. Las empresas se gestionan en su
+    # propia sección (cada causador administra las que creó).
     nombre = body.nombre.strip()
     if not nombre:
         raise HTTPException(status_code=400, detail="El nombre no puede estar vacío")
 
     current_user.nombre = nombre
-
-    empresa = _empresa_del_usuario(db, current_user.id)
-    if empresa:
-        nombre_empresa = body.nombre_empresa.strip()
-        if not nombre_empresa:
-            raise HTTPException(status_code=400, detail="El nombre de empresa no puede estar vacío")
-        empresa.nombre = nombre_empresa
-        empresa.nit = body.nit_empresa.strip() if body.nit_empresa else None
-
     db.commit()
     return MsgResponse(message="Perfil actualizado correctamente.")
 

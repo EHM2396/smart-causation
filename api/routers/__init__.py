@@ -7,3 +7,5 @@ from api.routers.aprendizaje import router as aprendizaje_router      # noqa: F4
 from api.routers.consecutivos import router as consecutivos_router    # noqa: F401
 from api.routers.terceros import router as terceros_router            # noqa: F401
 from api.routers.dian import router as dian_router                    # noqa: F401
+from api.routers.admin import router as admin_router                  # noqa: F401
+from api.routers.empresas import router as empresas_router            # noqa: F401

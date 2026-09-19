@@ -39,6 +39,8 @@ from api.routers import (
     tipos_router,
     terceros_router,
     dian_router,
+    admin_router,
+    empresas_router,
 )
 from db.models import Base
 from db.session import engine
@@ -96,6 +98,8 @@ app.include_router(aprendizaje_router)
 app.include_router(consecutivos_router)
 app.include_router(terceros_router)
 app.include_router(dian_router)
+app.include_router(admin_router)
+app.include_router(empresas_router)
 
 
 @app.get("/", tags=["Health"])

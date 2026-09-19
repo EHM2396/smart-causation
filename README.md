@@ -7,6 +7,8 @@
 
 ### Automatiza tu causación contable en segundos
 
+[![Pruebas](https://github.com/EHM2396/smart-causation/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/EHM2396/smart-causation/actions/workflows/tests.yml)
+
 Plataforma que lee facturas electrónicas de la **DIAN**, sugiere las cuentas contables con **IA**
 y genera el archivo de importación para **SIIGO** — sin digitación manual.
 
@@ -187,12 +189,62 @@ En desarrollo y producción las migraciones se ejecutan automáticamente al inic
 
 ---
 
+## 🧪 Pruebas
+
+Pruebas unitarias de la lógica crítica: reglas contables (partida doble, IVA,
+tributos, descuentos), extracción del XML de la DIAN y clasificación de
+documentos. No necesitan base de datos ni red, así que corren en segundos.
+
+```bash
+# Todas (dentro del contenedor de la API)
+./scripts/test.sh
+
+# Filtrar
+./scripts/test.sh -m contable        # solo reglas contables
+./scripts/test.sh -k exporter        # por nombre
+./scripts/test.sh --cov=core         # con cobertura
+
+# Sin Docker (requiere las dependencias de desarrollo)
+pip install -r requirements_dev.txt
+pytest
+```
+
+Se ejecutan **automáticamente en cada push y pull request** vía GitHub Actions
+(`.github/workflows/tests.yml`), junto con el build de TypeScript del frontend.
+
+### Que corran antes de cada push (una sola vez por equipo)
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Con eso, `git push` corre las pruebas primero y **cancela el push si alguna falla**.
+Es la última barrera antes de que Vercel despliegue el frontend solo.
+Para saltarlo a propósito: `git push --no-verify`.
+
+Si el contenedor `api` no está arriba, el hook avisa pero no bloquea (no es que
+las pruebas fallen, es que no se pudieron correr); GitHub Actions las corre igual.
+
+---
+
 ## ☁️ Despliegue
 
 | Componente | Dónde |
 |------------|-------|
 | **Frontend** | Vercel — despliega automáticamente al hacer push a `main`. |
 | **Backend + BD** | VPS con **Docker + Portainer**, detrás de **Apache** (reverse proxy + HTTPS). Redeploy manual: *Pull and redeploy* (con rebuild de imagen). |
+
+### Antes de desplegar el backend en Portainer
+
+Como ese paso es manual, la verificación también lo es:
+
+1. Revisar que el badge de **Pruebas** (arriba) esté en verde para `main`, o abrir
+   la [pestaña Actions](https://github.com/EHM2396/smart-causation/actions/workflows/tests.yml)
+   y confirmar que el último commit pasó.
+2. Si la versión trae **migraciones**, tener respaldo de la base antes del redeploy
+   (las migraciones corren solas al arrancar la API).
+3. Hacer *Pull and redeploy* y revisar los logs del contenedor: debe verse
+   `Application startup complete` y, si aplicaban, las líneas `Running upgrade …`.
 
 ---
 

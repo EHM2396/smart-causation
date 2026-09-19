@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Corre las pruebas ANTES de cada push.
+#
+# Por qué acá: al subir a main, Vercel despliega el frontend automáticamente, así
+# que el push es el último momento para frenar algo roto. El backend igual se
+# despliega a mano en Portainer, pero conviene que lo que suba ya esté verde.
+#
+# Si necesitás saltarlo a propósito:  git push --no-verify
+set -uo pipefail
+
+RAIZ="$(git rev-parse --show-toplevel)"
+cd "$RAIZ"
+
+echo "→ Corriendo pruebas antes del push..."
+
+# 1) Preferido: dentro del contenedor de la API (mismo entorno que producción).
+if docker compose ps --status running api >/dev/null 2>&1; then
+  docker compose exec -T api sh -c "
+    python -c 'import pytest' 2>/dev/null || pip install --quiet pytest
+    cd /app && PYTHONPATH=/app python -m pytest -q
+  "
+  RESULTADO=$?
+
+# 2) Alternativa: pytest instalado en la máquina.
+elif command -v pytest >/dev/null 2>&1; then
+  pytest -q
+  RESULTADO=$?
+
+# 3) No se pudo probar. NO se bloquea (no es que las pruebas fallen, es que no se
+#    pudieron correr) pero se avisa fuerte: GitHub Actions las correrá igual.
+else
+  echo ""
+  echo "  ⚠  No se pudieron correr las pruebas: el contenedor 'api' no está"
+  echo "     arriba y no hay pytest instalado localmente."
+  echo "     Levantá el stack con 'docker compose up -d' para probarlas antes de subir."
+  echo "     El push continúa; GitHub Actions las va a correr de todas formas."
+  echo ""
+  exit 0
+fi
+
+if [ "$RESULTADO" -ne 0 ]; then
+  echo ""
+  echo "  ✗ Hay pruebas fallando. El push se canceló."
+  echo "    Revisá el detalle arriba, o corré:  ./scripts/test.sh -v"
+  echo "    Si sabés lo que hacés y querés subir igual:  git push --no-verify"
+  echo ""
+  exit 1
+fi
+
+echo "  ✓ Pruebas OK. Continuando con el push."
+exit 0

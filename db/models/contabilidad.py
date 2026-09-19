@@ -112,6 +112,7 @@ class FacturaCausada(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     empresa_id: Mapped[int | None] = mapped_column(ForeignKey("empresas.id"), nullable=True, index=True)
+    usuario_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"), nullable=True, index=True)  # quién causó (informes)
     numero_dian: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
     nit_proveedor: Mapped[str | None] = mapped_column(String(20), index=True)
     razon_social: Mapped[str | None] = mapped_column(String(255))

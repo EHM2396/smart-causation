@@ -4,8 +4,11 @@ import { Menu, X, LogOut, UserCircle } from "lucide-react";
 import { useState, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sidebar } from "@/components/sidebar";
+import { api } from "@/lib/api";
+import { EmpresaGate } from "@/components/empresa-switcher";
+import { TrialBanner } from "@/components/trial-banner";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useAuthStore } from "@/stores/auth";
 import { useWizardStore } from "@/stores/wizard";
@@ -18,6 +21,10 @@ import { BRAND } from "@/lib/brand";
 const AUTH_PATHS = ["/login", "/registro", "/legal", "/forgot-password", "/reset-password", "/verify-email"];
 
 const PAGE_META: Record<string, { title: string; description: string }> = {
+  "/inicio": {
+    title: "Inicio",
+    description: "Empresa activa y accesos a los módulos",
+  },
   "/importar": {
     title: "Importar DIAN",
     description: "Traé compras y ventas con un solo token",
@@ -36,7 +43,23 @@ const PAGE_META: Record<string, { title: string; description: string }> = {
   },
   "/perfil": {
     title: "Mi perfil",
-    description: "Información personal, empresa y contraseña",
+    description: "Información personal y contraseña",
+  },
+  "/empresas": {
+    title: "Mis empresas",
+    description: "Crea y edita tus empresas",
+  },
+  "/admin/dashboard": {
+    title: "Dashboard",
+    description: "Informes y control de causaciones",
+  },
+  "/admin/usuarios": {
+    title: "Usuarios",
+    description: "Administración de la cuenta",
+  },
+  "/admin/empresas": {
+    title: "Empresas",
+    description: "Administración de la cuenta",
   },
 };
 
@@ -45,10 +68,36 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { token, usuario, logout, _hydrated } = useAuthStore();
+  const { token, usuario, logout, _hydrated, empresaConfirmada, setEmpresa } = useAuthStore();
   const resetWizard = useWizardStore((s) => s.reset);
 
   const isAuthPage = pathname === "/" || AUTH_PATHS.some((p) => pathname.startsWith(p));
+
+  // El admin de la cuenta NO causa: solo administra. No usa empresa ni tutorial.
+  const esAdmin = usuario?.rol === "org_admin" || usuario?.rol === "admin";
+
+  // Empresas del usuario — para el selector y la pantalla de selección obligatoria.
+  const { data: misEmpresas } = useQuery({
+    queryKey: ["mis-empresas"],
+    queryFn: api.misEmpresas,
+    enabled: !!token && !isAuthPage && !esAdmin,
+  });
+
+  // Con una sola empresa se confirma sola (no molestamos con el gate).
+  useEffect(() => {
+    if (!esAdmin && !empresaConfirmada && misEmpresas && misEmpresas.length === 1) {
+      setEmpresa(misEmpresas[0].id, misEmpresas[0].nombre);
+    }
+  }, [esAdmin, empresaConfirmada, misEmpresas, setEmpresa]);
+
+  // Rutas de causación (de causador). Si un admin cae aquí, lo mandamos a su panel.
+  const RUTAS_CAUSADOR = ["/inicio", "/causacion", "/historial", "/terceros", "/catalogos", "/empresas"];
+  const enRutaCausador = RUTAS_CAUSADOR.some((p) => pathname.startsWith(p));
+  useEffect(() => {
+    if (_hydrated && token && esAdmin && enRutaCausador) {
+      router.replace("/admin/dashboard");
+    }
+  }, [_hydrated, token, esAdmin, enRutaCausador, router]);
 
   // Redirect only after hydration is complete to avoid F5 false-logout
   useEffect(() => {
@@ -100,6 +149,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const match = Object.entries(PAGE_META).find(([key]) => pathname.startsWith(key));
   const pageMeta = match ? match[1] : { title: "Ciolix", description: "" };
 
+  // El panel de administración y el perfil son a nivel de cuenta: no exigen empresa.
+  const empresaScoped = !pathname.startsWith("/admin") && !pathname.startsWith("/perfil") && !pathname.startsWith("/empresas");
+  const necesitaElegirEmpresa = !esAdmin && empresaScoped && !empresaConfirmada && (misEmpresas?.length ?? 0) > 1;
+
   return (
     <div
       className="flex h-screen flex-col overflow-hidden"
@@ -112,8 +165,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Desktop sidebar */}
-        <div className="hidden flex-shrink-0 lg:block">
+        {/* Desktop sidebar — h-full para que el sidebar ocupe exactamente el alto
+            disponible y su nav interno sea el que scrollea. */}
+        <div className="hidden h-full flex-shrink-0 lg:block">
           <Sidebar />
         </div>
 
@@ -229,10 +283,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
+        {/* Banner de prueba (solo cuentas Free, causadores) */}
+        {!esAdmin && empresaConfirmada && !necesitaElegirEmpresa && <TrialBanner />}
+
+        <main className="min-w-0 flex-1 overflow-y-auto">
+          {necesitaElegirEmpresa ? <EmpresaGate /> : children}
+        </main>
       </div>
       </div>
-      <Tutorial />
+      {/* El tutorial es solo para causadores; el admin no lo ve. */}
+      {!esAdmin && <Tutorial />}
     </div>
   );
 }

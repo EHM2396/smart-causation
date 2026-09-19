@@ -1,0 +1,59 @@
+name: Pruebas
+
+# Corre en cada push y en cada pull request: si algo rompe las reglas contables o
+# la extracción de la DIAN, se ve ANTES de desplegar a producción.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          # El repo no usa requirements.txt sino estos; sin esto, la caché falla.
+          cache-dependency-path: |
+            requirements_api.txt
+            requirements_dev.txt
+
+      - name: Instalar dependencias
+        run: pip install -r requirements_dev.txt
+
+      - name: Correr pruebas
+        run: pytest
+
+  frontend:
+    name: Frontend (build + TypeScript)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"   # misma mayor que en desarrollo, para evitar sorpresas
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # `npm ci` exige que package-lock.json esté perfectamente sincronizado, y el
+      # lockfile se genera en Windows mientras el CI corre en Linux: las
+      # dependencias opcionales por plataforma difieren y rompe. `npm install`
+      # resuelve eso sin bloquear el build.
+      - name: Instalar dependencias
+        working-directory: frontend
+        run: npm install --no-audit --no-fund
+
+      # El build de Next corre TypeScript: atrapa errores de tipos, que es donde
+      # más se rompe al fusionar ramas.
+      - name: Compilar
+        working-directory: frontend
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000

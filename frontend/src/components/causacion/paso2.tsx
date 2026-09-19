@@ -3,6 +3,7 @@ import { Fragment, useState, useEffect, useRef, useCallback, useMemo } from "rea
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWizardStore, esModoNC, esModoVenta, esModoSoporte } from "@/stores/wizard";
+import { useAuthStore } from "@/stores/auth";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
@@ -117,6 +118,7 @@ export function Paso2() {
   const [borradorEstado, setBorradorEstado] = useState<"idle" | "guardando" | "guardado" | "error">("idle");
   const [cufeCopiado, setCufeCopiado] = useState(false);
   const queryClient = useQueryClient();
+  const empresaId = useAuthStore((s) => s.empresaId);   // el borrador se aísla por empresa
 
   // Pre-cargar estado de demo cuando el tutorial está activo
   useEffect(() => {
@@ -498,14 +500,19 @@ export function Paso2() {
         await api.guardarBorrador(buildPayloadRef.current(), docTipoRef.current);
       } while (pendingRef.current);  // cambió mientras guardaba → re-guardar lo último
       setBorradorEstado("guardado");
-      // Mantener sincronizada la tarjeta "Tienes un borrador guardado" del paso 1.
-      void queryClient.invalidateQueries({ queryKey: ["borrador", docTipoRef.current] });
+      // Mantener sincronizada la tarjeta "Tienes un borrador guardado" del paso 1
+      // para que aparezca al volver sin tener que recargar la página. Se usa
+      // docTipoRef (no el docTipo en vivo) por la misma razón que el guardado.
+      void queryClient.invalidateQueries({ queryKey: ["borrador", docTipoRef.current, empresaId] });
     } catch {
       setBorradorEstado("error");
     } finally {
       savingRef.current = false;
     }
-  }, [queryClient]);
+    // Se mantiene ESTABLE a propósito (no depende del estado del formulario) para
+    // que autoguardado, flush y botón compartan el mismo single-flight. empresaId
+    // sí entra porque solo cambia al cambiar de empresa, no al editar.
+  }, [queryClient, empresaId]);
 
   // Autoguardado de respaldo: 2s tras el último cambio de configuración.
   const paso2Sig = JSON.stringify(buildPaso2Snapshot());
@@ -827,7 +834,7 @@ export function Paso2() {
                 )}
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={() => { setPaso2Cache(null); void queryClient.invalidateQueries({ queryKey: ["borrador", docTipo] }); setPaso(1); }}>← Volver</Button>
+            <Button variant="outline" size="sm" onClick={() => { setPaso2Cache(null); void queryClient.invalidateQueries({ queryKey: ["borrador", docTipo, empresaId] }); setPaso(1); }}>← Volver</Button>
             <Button
               data-tutorial="validar-partida-btn"
               size="sm"

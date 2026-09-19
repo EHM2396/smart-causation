@@ -3,6 +3,7 @@ import { useState, useCallback } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWizardStore, esModoNC, esModoVenta, esModoSoporte, modoParseo, tipoNCHermano } from "@/stores/wizard";
+import { useAuthStore } from "@/stores/auth";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle2, Loader2, TrendingDown, History, Trash2, ArrowRight, ExternalLink } from "lucide-react";
@@ -40,14 +41,17 @@ export function Paso1() {
   const [omitidas, setOmitidas] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
 
-  // ── Borrador guardado (guardado temporal, por tipo compras/nc) ───────────────
+  // ── Borrador guardado (guardado temporal, por tipo compras/nc Y por empresa) ──
+  // La empresa activa va en la queryKey: cada empresa tiene su propio borrador y al
+  // cambiar de empresa NUNCA se muestra el de otra (el backend ya aísla por empresa).
+  const empresaId = useAuthStore((s) => s.empresaId);
   const queryClient = useQueryClient();
   const [continuandoBorrador, setContinuandoBorrador] = useState(false);
   const [descartandoBorrador, setDescartandoBorrador] = useState(false);
   const { data: borrador } = useQuery({
-    queryKey: ["borrador", docTipo],
+    queryKey: ["borrador", docTipo, empresaId],
     queryFn: () => api.getBorrador(docTipo),
-    enabled: !tutorialActivo,
+    enabled: !tutorialActivo && empresaId != null,
     staleTime: 0,
   });
 
@@ -69,7 +73,7 @@ export function Paso1() {
     setDescartandoBorrador(true);
     try {
       await api.descartarBorrador(docTipo);
-      await queryClient.invalidateQueries({ queryKey: ["borrador", docTipo] });
+      await queryClient.invalidateQueries({ queryKey: ["borrador", docTipo, empresaId] });
     } catch {
       // silencioso: si falla, la tarjeta sigue visible y puede reintentar
     } finally {
@@ -104,7 +108,7 @@ export function Paso1() {
         total_verificadas: 0,
         tipo_comp: snapshot.tipoComp || null,
       }, tipoNC);
-      queryClient.invalidateQueries({ queryKey: ["borrador", tipoNC] });
+      queryClient.invalidateQueries({ queryKey: ["borrador", tipoNC, empresaId] });
     } catch {
       // Si falla el ruteo, igual se avisa al usuario que hay NC.
     }

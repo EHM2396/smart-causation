@@ -596,6 +596,7 @@ def registrar_factura_causada(
     archivo_origen: str = "",
     datos_json: str | None = None,
     empresa_id: int | None = None,
+    usuario_id: int | None = None,
     tipo_causacion: str | None = None,
 ) -> FacturaCausada:
     from sqlalchemy import select
@@ -642,6 +643,7 @@ def registrar_factura_causada(
         archivo_origen=archivo_origen,
         datos_json=datos_json,
         empresa_id=empresa_id,
+        usuario_id=usuario_id,
         tipo_causacion=tipo_causacion,
     )
     db.add(fc)

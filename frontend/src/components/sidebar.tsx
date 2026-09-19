@@ -4,9 +4,11 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { FileSpreadsheet, FileMinus2, BookOpen, History, UserCircle, Users, ReceiptText, DownloadCloud, Save, Loader2, FileCheck2, ChevronDown } from "lucide-react";
+import { FileSpreadsheet, FileMinus2, BookOpen, History, UserCircle, Users, ShieldCheck, Building2, LayoutDashboard, ReceiptText, DownloadCloud, Save, Loader2, FileCheck2, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/stores/auth";
 import { useWizardStore } from "@/stores/wizard";
+import { EmpresaSwitcher } from "@/components/empresa-switcher";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
@@ -48,10 +50,21 @@ const NAV: NavNode[] = [
   { href: "/catalogos", icon: BookOpen, label: "Catálogos", desc: "Impuestos, PUC, comprobantes" },
 ];
 
+// "Empresas" se muestra siempre (aunque aún no se elija una): ahí el causador crea
+// y elige las empresas con las que va a trabajar.
+const NAV_EMPRESAS: NavNode = { href: "/empresas", icon: Building2, label: "Empresas", desc: "Crear y editar tus empresas" };
+
 // Activo exacto: evita que "/causacion" quede activo estando en "/causacion-nc".
 function esActivo(path: string, href: string): boolean {
   return path === href || path.startsWith(href + "/");
 }
+
+// Sección solo para administradores de la cuenta (org_admin) y superadmin.
+const NAV_ADMIN: NavNode[] = [
+  { href: "/admin/dashboard", icon: LayoutDashboard, label: "Dashboard", desc: "Informes y control" },
+  { href: "/admin/usuarios", icon: Users, label: "Usuarios", desc: "Gestiona los usuarios" },
+  { href: "/admin/empresas", icon: Building2, label: "Empresas", desc: "Empresas de la cuenta" },
+];
 
 const NAV_BOTTOM: NavNode[] = [
   { href: "/perfil", icon: UserCircle, label: "Mi perfil", desc: "Cuenta y contraseña" },
@@ -174,6 +187,9 @@ function NavGroup({
 
 export function Sidebar({ onNavigate, className }: SidebarProps) {
   const path = usePathname();
+  const rol = useAuthStore((s) => s.usuario?.rol);
+  const empresaConfirmada = useAuthStore((s) => s.empresaConfirmada);
+  const esAdmin = rol === "org_admin" || rol === "admin";
   const router = useRouter();
   const guardarBorradorFn = useWizardStore((s) => s.guardarBorradorFn);
   const [navPendiente, setNavPendiente] = useState<string | null>(null);
@@ -201,17 +217,20 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
     router.push(dest);
   };
 
+  // h-full (no h-screen): el shell ya le da la altura disponible. Con h-screen el
+  // sidebar quedaba 3px más alto que su contenedor (por la franja de marca
+  // superior del shell) y el pie se recortaba.
   return (
     <aside
-      className={cn("flex h-screen w-64 flex-col", className)}
+      className={cn("flex h-full w-64 flex-col", className)}
       style={{
         backgroundColor: "var(--sidebar-bg)",
         borderRight: "1px solid var(--sidebar-border)",
       }}
     >
-      {/* Brand */}
+      {/* Brand — fijo arriba, nunca se comprime */}
       <div
-        className="flex items-center px-5 py-4"
+        className="flex shrink-0 items-center px-5 py-4"
         style={{ borderBottom: "1px solid var(--sidebar-border)" }}
       >
         <Image
@@ -234,30 +253,72 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
         />
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-1">
-        <p
-          className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-widest"
-          style={{ color: "var(--sidebar-label)" }}
-        >
-          Principal
-        </p>
+      {/* Selector de empresa — FUERA del área que scrollea, por dos razones:
+          su menú desplegable es `absolute` y quedaría recortado por el scroll, y
+          además es el contexto de trabajo: conviene tenerlo siempre a la vista.
+          El admin NO causa → no lo ve. */}
+      {!esAdmin && (
+        <div className="shrink-0 px-3 pt-3">
+          <EmpresaSwitcher onNavigate={onNavigate} />
+        </div>
+      )}
 
-        {NAV.map((node) => (
-          <NavGroup key={node.href} node={node} path={path} onNavigate={onNavigate} onIntercept={interceptar} />
-        ))}
+      {/* Nav — es la ÚNICA zona que scrollea. `min-h-0` es imprescindible: sin él,
+          un hijo flex no puede encogerse por debajo de su contenido y los módulos
+          empujarían "Mi perfil" y el pie fuera de la pantalla en pantallas bajas. */}
+      <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-4 space-y-1">
+        {/* Causadores: módulos de causación. */}
+        {!esAdmin && (
+          <>
+            {/* Empresas: siempre disponible, incluso antes de elegir una. */}
+            <NavLink node={NAV_EMPRESAS} active={esActivo(path, NAV_EMPRESAS.href)} onNavigate={onNavigate} onIntercept={interceptar} />
+            {/* Los módulos de trabajo solo aparecen cuando el causador ya eligió empresa. */}
+            {empresaConfirmada ? (
+              <>
+                <p
+                  className="mb-3 mt-2 px-3 text-[10px] font-semibold uppercase tracking-widest"
+                  style={{ color: "var(--sidebar-label)" }}
+                >
+                  Principal
+                </p>
+                {NAV.map((node) => (
+                  <NavGroup key={node.href} node={node} path={path} onNavigate={onNavigate} onIntercept={interceptar} />
+                ))}
+              </>
+            ) : (
+              <p className="px-3 py-2 text-xs" style={{ color: "var(--sidebar-label)" }}>
+                Elige una empresa para empezar.
+              </p>
+            )}
+          </>
+        )}
+
+        {/* Administración — solo org_admin / superadmin */}
+        {esAdmin && (
+          <>
+            <p
+              className="mb-3 flex items-center gap-1.5 px-3 text-[10px] font-semibold uppercase tracking-widest"
+              style={{ color: "var(--sidebar-label)" }}
+            >
+              <ShieldCheck className="h-3 w-3" /> Administración
+            </p>
+            {NAV_ADMIN.map((node) => (
+              <NavLink key={node.href} node={node} active={esActivo(path, node.href)} onNavigate={onNavigate} />
+            ))}
+          </>
+        )}
       </nav>
 
-      {/* Nav bottom */}
-      <nav className="px-3 pb-2 space-y-1" style={{ borderTop: "1px solid var(--sidebar-border)", paddingTop: "8px" }}>
+      {/* Nav bottom — anclado abajo, siempre visible */}
+      <nav className="shrink-0 px-3 pb-2 space-y-1" style={{ borderTop: "1px solid var(--sidebar-border)", paddingTop: "8px" }}>
         {NAV_BOTTOM.map((node) => (
           <NavLink key={node.href} node={node} active={esActivo(path, node.href)} onNavigate={onNavigate} onIntercept={interceptar} />
         ))}
       </nav>
 
-      {/* Footer */}
+      {/* Footer — anclado abajo, siempre visible */}
       <div
-        className="px-5 py-3 flex items-center gap-2"
+        className="shrink-0 px-5 py-3 flex items-center gap-2"
         style={{ borderTop: "1px solid var(--sidebar-border)" }}
       >
         <div
