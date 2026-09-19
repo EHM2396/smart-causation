@@ -403,6 +403,68 @@ export interface AdminUsuarioDetalle {
   detalle: { fecha: string; empresa: string; numero: string; proveedor: string; total: number }[];
 }
 
+// ─── Analítica (costos, gastos e ingresos por documento DIAN) ────────────────
+
+/** Naturaleza contable a la que aporta cada documento electrónico. */
+export type NaturalezaAnalitica = "ingresos" | "costos_gastos";
+
+/** Tipo de documento electrónico DIAN, por el módulo que lo causa. Mismos
+ * valores que BorradorTipo en api.ts; se repite acá porque api.ts importa de
+ * este archivo y al revés sería circular. */
+export type DocumentoTipo =
+  | "compras" | "nc" | "ventas" | "nc_ventas" | "soporte" | "nc_soporte";
+
+export interface AnaliticaPorTipo {
+  tipo: DocumentoTipo;
+  label: string;
+  naturaleza: NaturalezaAnalitica;
+  /** 1 = suma (facturas), -1 = resta (notas crédito). */
+  signo: 1 | -1;
+  documentos: number;
+  monto: number;
+}
+
+export interface AnaliticaMes {
+  mes: string;
+  ingresos: number;
+  costos_gastos: number;
+  resultado: number;
+}
+
+export interface AnaliticaEmpresa {
+  empresa_id: number | null;
+  nombre: string;
+  ingresos: number;
+  costos_gastos: number;
+  resultado: number;
+  documentos: number;
+}
+
+export interface AnaliticaTercero {
+  nit: string;
+  nombre: string;
+  documentos: number;
+  monto: number;
+}
+
+export interface AnaliticaResumen {
+  periodo: { desde: string; hasta: string };
+  /** "cuenta" = todas las empresas (admin); "empresa" = una sola. */
+  alcance: "cuenta" | "empresa";
+  empresas: number;
+  kpis: { ingresos: number; costos_gastos: number; resultado: number; documentos: number };
+  por_tipo: AnaliticaPorTipo[];
+  serie_mensual: AnaliticaMes[];
+  por_empresa: AnaliticaEmpresa[];
+  por_tercero: AnaliticaTercero[];
+}
+
+export interface AnaliticaEmpresaOpcion {
+  id: number;
+  nombre: string;
+  nit: string | null;
+}
+
 // ─── Wizard state ─────────────────────────────────────────────────────────────
 
 export type PasoWizard = 1 | 2 | 3 | 4;

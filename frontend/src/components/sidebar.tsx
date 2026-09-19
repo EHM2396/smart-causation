@@ -4,7 +4,7 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { FileSpreadsheet, FileMinus2, BookOpen, History, UserCircle, Users, ShieldCheck, Building2, LayoutDashboard, ReceiptText, DownloadCloud, Save, Loader2, FileCheck2, ChevronDown } from "lucide-react";
+import { FileSpreadsheet, FileMinus2, BookOpen, History, UserCircle, Users, ShieldCheck, Building2, LayoutDashboard, ReceiptText, DownloadCloud, Save, Loader2, FileCheck2, ChevronDown, ChartColumnBig } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/auth";
 import { useWizardStore } from "@/stores/wizard";
@@ -45,6 +45,7 @@ const NAV: NavNode[] = [
       { href: "/causacion-nc-soporte", icon: FileMinus2, label: "Ajuste Soporte", desc: "Notas de ajuste al DS" },
     ],
   },
+  { href: "/analitica", icon: ChartColumnBig, label: "Analítica", desc: "Costos, gastos e ingresos" },
   { href: "/historial", icon: History, label: "Historial", desc: "Facturas causadas" },
   { href: "/terceros", icon: Users, label: "Terceros", desc: "Proveedores y vendedores" },
   { href: "/catalogos", icon: BookOpen, label: "Catálogos", desc: "Impuestos, PUC, comprobantes" },
@@ -62,6 +63,7 @@ function esActivo(path: string, href: string): boolean {
 // Sección solo para administradores de la cuenta (org_admin) y superadmin.
 const NAV_ADMIN: NavNode[] = [
   { href: "/admin/dashboard", icon: LayoutDashboard, label: "Dashboard", desc: "Informes y control" },
+  { href: "/admin/analitica", icon: ChartColumnBig, label: "Analítica", desc: "Costos, gastos e ingresos" },
   { href: "/admin/usuarios", icon: Users, label: "Usuarios", desc: "Gestiona los usuarios" },
   { href: "/admin/empresas", icon: Building2, label: "Empresas", desc: "Empresas de la cuenta" },
 ];

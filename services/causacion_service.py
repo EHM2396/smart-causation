@@ -587,6 +587,18 @@ def derivar_tipo_causacion(factura: dict, es_venta: bool) -> str:
     return "nc" if td == "nota_credito" else "compras"
 
 
+def base_gravable_de(factura: dict) -> float | None:
+    """Suma de las bases de los ítems (sin IVA): la cifra que vale para
+    costos/gastos/ingresos. None si la factura no trae ítems con base."""
+    items = factura.get("items") or []
+    if not items:
+        return None
+    try:
+        return float(sum(float(it.get("base") or 0) for it in items))
+    except (TypeError, ValueError):
+        return None
+
+
 def registrar_factura_causada(
     db: Session,
     *,
@@ -602,6 +614,7 @@ def registrar_factura_causada(
     from sqlalchemy import select
     numero = factura.get("numero_dian") or factura.get("numero_factura", "")
     hoy = date.today()
+    base = base_gravable_de(factura)
 
     # Si ya existe para esta empresa...
     stmt = select(FacturaCausada).where(FacturaCausada.numero_dian == numero)
@@ -622,6 +635,7 @@ def registrar_factura_causada(
         existente.razon_social = factura.get("razon_social")
         existente.fecha_factura = _parse_date(factura.get("fecha", ""))
         existente.total = factura.get("total", 0.0)
+        existente.base_gravable = base
         existente.consecutivo = str(consecutivo)
         existente.tipo_comprobante = tipo_comprobante
         existente.fecha_causacion = hoy
@@ -637,6 +651,7 @@ def registrar_factura_causada(
         razon_social=factura.get("razon_social"),
         fecha_factura=_parse_date(factura.get("fecha", "")),
         total=factura.get("total", 0.0),
+        base_gravable=base,
         consecutivo=str(consecutivo),
         tipo_comprobante=tipo_comprobante,
         fecha_causacion=hoy,
