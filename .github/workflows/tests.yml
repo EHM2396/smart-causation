@@ -19,6 +19,10 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          # El repo no usa requirements.txt sino estos; sin esto, la caché falla.
+          cache-dependency-path: |
+            requirements_api.txt
+            requirements_dev.txt
 
       - name: Instalar dependencias
         run: pip install -r requirements_dev.txt
@@ -38,9 +42,13 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # `npm ci` exige que package-lock.json esté perfectamente sincronizado, y el
+      # lockfile se genera en Windows mientras el CI corre en Linux: las
+      # dependencias opcionales por plataforma difieren y rompe. `npm install`
+      # resuelve eso sin bloquear el build.
       - name: Instalar dependencias
         working-directory: frontend
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       # El build de Next corre TypeScript: atrapa errores de tipos, que es donde
       # más se rompe al fusionar ramas.
