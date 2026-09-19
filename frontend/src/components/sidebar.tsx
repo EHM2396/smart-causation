@@ -217,17 +217,20 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
     router.push(dest);
   };
 
+  // h-full (no h-screen): el shell ya le da la altura disponible. Con h-screen el
+  // sidebar quedaba 3px más alto que su contenedor (por la franja de marca
+  // superior del shell) y el pie se recortaba.
   return (
     <aside
-      className={cn("flex h-screen w-64 flex-col", className)}
+      className={cn("flex h-full w-64 flex-col", className)}
       style={{
         backgroundColor: "var(--sidebar-bg)",
         borderRight: "1px solid var(--sidebar-border)",
       }}
     >
-      {/* Brand */}
+      {/* Brand — fijo arriba, nunca se comprime */}
       <div
-        className="flex items-center px-5 py-4"
+        className="flex shrink-0 items-center px-5 py-4"
         style={{ borderBottom: "1px solid var(--sidebar-border)" }}
       >
         <Image
@@ -250,13 +253,23 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
         />
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-1">
-        {/* Causadores: selector de empresa + módulos de causación.
-            El admin NO causa → no ve esta sección ni el selector de empresa. */}
+      {/* Selector de empresa — FUERA del área que scrollea, por dos razones:
+          su menú desplegable es `absolute` y quedaría recortado por el scroll, y
+          además es el contexto de trabajo: conviene tenerlo siempre a la vista.
+          El admin NO causa → no lo ve. */}
+      {!esAdmin && (
+        <div className="shrink-0 px-3 pt-3">
+          <EmpresaSwitcher onNavigate={onNavigate} />
+        </div>
+      )}
+
+      {/* Nav — es la ÚNICA zona que scrollea. `min-h-0` es imprescindible: sin él,
+          un hijo flex no puede encogerse por debajo de su contenido y los módulos
+          empujarían "Mi perfil" y el pie fuera de la pantalla en pantallas bajas. */}
+      <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-4 space-y-1">
+        {/* Causadores: módulos de causación. */}
         {!esAdmin && (
           <>
-            <EmpresaSwitcher onNavigate={onNavigate} />
             {/* Empresas: siempre disponible, incluso antes de elegir una. */}
             <NavLink node={NAV_EMPRESAS} active={esActivo(path, NAV_EMPRESAS.href)} onNavigate={onNavigate} onIntercept={interceptar} />
             {/* Los módulos de trabajo solo aparecen cuando el causador ya eligió empresa. */}
@@ -296,16 +309,16 @@ export function Sidebar({ onNavigate, className }: SidebarProps) {
         )}
       </nav>
 
-      {/* Nav bottom */}
-      <nav className="px-3 pb-2 space-y-1" style={{ borderTop: "1px solid var(--sidebar-border)", paddingTop: "8px" }}>
+      {/* Nav bottom — anclado abajo, siempre visible */}
+      <nav className="shrink-0 px-3 pb-2 space-y-1" style={{ borderTop: "1px solid var(--sidebar-border)", paddingTop: "8px" }}>
         {NAV_BOTTOM.map((node) => (
           <NavLink key={node.href} node={node} active={esActivo(path, node.href)} onNavigate={onNavigate} onIntercept={interceptar} />
         ))}
       </nav>
 
-      {/* Footer */}
+      {/* Footer — anclado abajo, siempre visible */}
       <div
-        className="px-5 py-3 flex items-center gap-2"
+        className="shrink-0 px-5 py-3 flex items-center gap-2"
         style={{ borderTop: "1px solid var(--sidebar-border)" }}
       >
         <div

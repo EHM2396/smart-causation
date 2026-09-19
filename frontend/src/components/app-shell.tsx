@@ -21,6 +21,10 @@ import { BRAND } from "@/lib/brand";
 const AUTH_PATHS = ["/login", "/registro", "/legal", "/forgot-password", "/reset-password", "/verify-email"];
 
 const PAGE_META: Record<string, { title: string; description: string }> = {
+  "/inicio": {
+    title: "Inicio",
+    description: "Empresa activa y accesos a los módulos",
+  },
   "/importar": {
     title: "Importar DIAN",
     description: "Traé compras y ventas con un solo token",
@@ -87,7 +91,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [esAdmin, empresaConfirmada, misEmpresas, setEmpresa]);
 
   // Rutas de causación (de causador). Si un admin cae aquí, lo mandamos a su panel.
-  const RUTAS_CAUSADOR = ["/causacion", "/historial", "/terceros", "/catalogos", "/empresas"];
+  const RUTAS_CAUSADOR = ["/inicio", "/causacion", "/historial", "/terceros", "/catalogos", "/empresas"];
   const enRutaCausador = RUTAS_CAUSADOR.some((p) => pathname.startsWith(p));
   useEffect(() => {
     if (_hydrated && token && esAdmin && enRutaCausador) {
@@ -161,8 +165,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Desktop sidebar */}
-        <div className="hidden flex-shrink-0 lg:block">
+        {/* Desktop sidebar — h-full para que el sidebar ocupe exactamente el alto
+            disponible y su nav interno sea el que scrollea. */}
+        <div className="hidden h-full flex-shrink-0 lg:block">
           <Sidebar />
         </div>
 

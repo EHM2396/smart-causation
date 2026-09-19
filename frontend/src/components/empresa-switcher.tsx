@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
@@ -20,6 +21,7 @@ function errDetalle(e: unknown): string {
 /** Aplica el cambio de empresa: fija la empresa, limpia el wizard y recarga los datos. */
 function useCambiarEmpresa() {
   const qc = useQueryClient();
+  const router = useRouter();
   const setEmpresa = useAuthStore((s) => s.setEmpresa);
   const empresaId = useAuthStore((s) => s.empresaId);
   const resetWizard = useWizardStore((s) => s.reset);
@@ -30,6 +32,11 @@ function useCambiarEmpresa() {
       resetWizard();
       qc.invalidateQueries();      // recargar todo para la nueva empresa
     }
+    // Siempre se sale del módulo actual hacia la pantalla de inicio, que muestra
+    // en grande la empresa activa. Quedarse dentro del módulo al cambiar de
+    // empresa se presta a confusión (la única señal era el selector del sidebar)
+    // y con eso se puede terminar trabajando sobre la empresa equivocada.
+    router.push("/inicio");
   };
 }
 
