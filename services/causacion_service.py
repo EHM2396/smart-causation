@@ -566,6 +566,18 @@ def generar_siigo(
     return buf, consecutivo
 
 
+def columna_fecha(campo_fecha: str | None):
+    """Columna de FacturaCausada sobre la que aplica un rango de fechas:
+    'emision' = fecha de la factura (la que puso quien la emitió); 'causacion'
+    (por defecto) = fecha en que se causó en el sistema.
+
+    Vive acá, y no en un router, porque la usan el historial y la analítica: si
+    cada uno tuviera su copia, con el tiempo dejarían de filtrar igual y el mismo
+    rango de fechas daría resultados distintos en cada pantalla.
+    """
+    return FacturaCausada.fecha_factura if campo_fecha == "emision" else FacturaCausada.fecha_causacion
+
+
 # ── Registro de factura causada ───────────────────────────────────────────────
 
 def derivar_tipo_causacion(factura: dict, es_venta: bool) -> str:

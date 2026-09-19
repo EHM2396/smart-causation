@@ -54,6 +54,7 @@ def resumen(
     desde: str | None = None,
     hasta: str | None = None,
     empresa_id: int | None = None,
+    campo_fecha: str | None = None,
 ):
     d, h = _parse_rango(desde, hasta)
     visibles = analitica_service.empresas_visibles(db, current_user, current_user.cuenta_id)
@@ -63,10 +64,13 @@ def resumen(
             raise HTTPException(status_code=404, detail="Empresa no encontrada")
         visibles = [empresa_id]
 
-    datos = analitica_service.resumen(db, empresa_ids=visibles, desde=d, hasta=h)
+    datos = analitica_service.resumen(
+        db, empresa_ids=visibles, desde=d, hasta=h, campo_fecha=campo_fecha
+    )
     es_admin = current_user.rol in ("org_admin", "admin")
     return {
         "periodo": {"desde": d.isoformat(), "hasta": h.isoformat()},
+        "campo_fecha": "emision" if campo_fecha == "emision" else "causacion",
         "alcance": "cuenta" if es_admin and empresa_id is None else "empresa",
         "empresas": len(visibles),
         **datos,

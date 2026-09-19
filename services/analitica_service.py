@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 
 from db.models.auth import Empresa, Usuario
 from db.models.contabilidad import FacturaCausada
+from services import causacion_service
 
 # Signo con el que cada tipo entra a su naturaleza.
 SIGNO: dict[str, int] = {
@@ -93,9 +94,16 @@ def resumen(
     empresa_ids: list[int],
     desde: date,
     hasta: date,
+    campo_fecha: str | None = None,
 ) -> dict:
     """Consolidado del periodo: KPIs, desglose por documento, serie mensual,
-    por empresa y los terceros de mayor peso."""
+    por empresa y los terceros de mayor peso.
+
+    `campo_fecha` decide sobre qué fecha corre el rango: 'emision' (cuándo se
+    emitió el documento) o 'causacion' (cuándo se registró). No da lo mismo: una
+    factura de agosto causada en septiembre aparece en un mes o en el otro según
+    lo que se elija.
+    """
     vacio = {
         "kpis": {"ingresos": 0.0, "costos_gastos": 0.0, "resultado": 0.0, "documentos": 0},
         "por_tipo": [], "serie_mensual": [], "por_empresa": [], "por_tercero": [],
@@ -103,11 +111,12 @@ def resumen(
     if not empresa_ids:
         return vacio
 
+    columna = causacion_service.columna_fecha(campo_fecha)
     base = [
         FacturaCausada.empresa_id.in_(empresa_ids),
         FacturaCausada.eliminado.is_(False),
-        FacturaCausada.fecha_causacion >= desde,
-        FacturaCausada.fecha_causacion <= hasta,
+        columna >= desde,
+        columna <= hasta,
     ]
     valor = _valor()
 
@@ -143,7 +152,9 @@ def resumen(
     ]
 
     # ── Serie mensual ────────────────────────────────────────────────────────
-    mes = func.to_char(FacturaCausada.fecha_causacion, "YYYY-MM")
+    # La serie se agrupa por la MISMA fecha con la que se filtró: si no, el rango
+    # diría una cosa y las barras del gráfico otra.
+    mes = func.to_char(columna, "YYYY-MM")
     filas_mes = db.execute(
         select(mes, FacturaCausada.tipo_causacion, func.sum(valor))
         .where(*base).group_by(mes, FacturaCausada.tipo_causacion).order_by(mes)

@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import pytest
 
+from db.models.contabilidad import FacturaCausada
 from services.analitica_service import ETIQUETA, NATURALEZA, ORDEN, SIGNO
-from services.causacion_service import base_gravable_de
+from services.causacion_service import base_gravable_de, columna_fecha
 
 pytestmark = pytest.mark.analitica
 
@@ -94,3 +95,26 @@ def test_base_gravable_tolera_items_corruptos():
 
 def test_base_gravable_trata_el_item_sin_base_como_cero():
     assert base_gravable_de({"items": [{"base": 100.0}, {"descripcion": "sin base"}]}) == 100.0
+
+
+# ─── Sobre qué fecha corre el rango ──────────────────────────────────────────
+#
+# No da lo mismo: una factura emitida en agosto y causada en septiembre aparece
+# en un mes o en el otro según lo que se elija. El historial y la analítica deben
+# resolverlo IGUAL, o el mismo rango daría resultados distintos en cada pantalla.
+
+@pytest.mark.parametrize("campo,columna", [
+    ("emision", FacturaCausada.fecha_factura),
+    ("causacion", FacturaCausada.fecha_causacion),
+    (None, FacturaCausada.fecha_causacion),          # por defecto: causación
+    ("cualquier_cosa", FacturaCausada.fecha_causacion),
+])
+def test_columna_fecha(campo, columna):
+    assert columna_fecha(campo) is columna
+
+
+def test_historial_y_analitica_usan_la_misma_definicion_de_fecha():
+    """El helper del router debe delegar en el del servicio, no tener copia propia."""
+    from api.routers.causacion import _columna_fecha
+    for campo in ("emision", "causacion", None):
+        assert _columna_fecha(campo) is columna_fecha(campo)
