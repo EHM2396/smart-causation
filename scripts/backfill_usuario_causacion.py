@@ -42,6 +42,7 @@ from sqlalchemy import func, select, update
 from db.session import SessionLocal, DATABASE_URL
 from db.models.auth import Empresa, Usuario
 from db.models.contabilidad import FacturaCausada
+from scripts.respaldos import ruta_respaldo
 
 
 def main() -> None:
@@ -102,7 +103,7 @@ def main() -> None:
 
         # Respaldo del estado previo antes de tocar nada.
         sello = datetime.now().strftime("%Y%m%d_%H%M%S")
-        respaldo = f"backfill_usuario_causacion_{sello}.csv"
+        respaldo = ruta_respaldo(f"backfill_usuario_causacion_{sello}.csv")
         a_tocar = db.execute(
             select(FacturaCausada.id, FacturaCausada.empresa_id, Empresa.owner_id)
             .join(Empresa, Empresa.id == FacturaCausada.empresa_id)

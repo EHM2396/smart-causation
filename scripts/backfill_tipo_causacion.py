@@ -41,6 +41,7 @@ from sqlalchemy import func, select
 
 from db.session import SessionLocal, DATABASE_URL
 from db.models.contabilidad import FacturaCausada
+from scripts.respaldos import ruta_respaldo
 from services.causacion_service import derivar_tipo_causacion
 
 
@@ -120,7 +121,7 @@ def main() -> None:
 
         # ── Respaldo CSV ──
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = f"backup_tipo_causacion_{ts}.csv"
+        backup_path = ruta_respaldo(f"backup_tipo_causacion_{ts}.csv")
         with open(backup_path, "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
             w.writerow(["id", "numero_dian", "tipo_causacion_old", "tipo_causacion_new"])
