@@ -1,7 +1,7 @@
 """Cupos de causación por usuario/empresa + siembra de planes grandes
 
-Revision ID: 020
-Revises: 019
+Revision ID: 022
+Revises: 021
 Create Date: 2026-09-08
 
 - Tabla `cupos_causacion`: tope de causaciones/mes que el admin asigna a un
@@ -14,8 +14,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "020"
-down_revision = "019"
+revision = "022"
+down_revision = "021"
 branch_labels = None
 depends_on = None
 

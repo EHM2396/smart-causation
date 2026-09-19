@@ -21,6 +21,15 @@ import type {
 } from "./types";
 import { useAuthStore } from "@/stores/auth";
 
+// Tipo de borrador/causación: cada módulo del wizard tiene su propia bandeja.
+// También es el valor de tipo_causacion en el historial (mismo módulo).
+export type BorradorTipo = "compras" | "nc" | "ventas" | "nc_ventas" | "soporte" | "nc_soporte";
+// Grupos del importador unificado (destino de cada documento).
+type BucketKey = "compras" | "nc" | "ventas" | "nc_ventas" | "soporte" | "nc_soporte";
+
+// Historial: sobre qué fecha aplica el rango Desde/Hasta.
+export type CampoFechaHistorial = "causacion" | "emision";
+
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 function _handleUnauthorized(): never {
@@ -210,6 +219,7 @@ export const api = {
 
   // Cuentas
   getCuentasGasto: () => req<CuentaOpcion[]>("/cuentas/gasto"),
+  getCuentasIngreso: () => req<CuentaOpcion[]>("/cuentas/ingreso"),
   getCuentasPago: () => req<CuentaOpcion[]>("/cuentas/pago"),
   getCuentasTodas: () => req<CuentaOpcion[]>("/cuentas/todas"),
   crearCuenta: (body: { codigo: string; nombre: string; fiscal?: boolean }) =>
@@ -226,6 +236,9 @@ export const api = {
     tipo_impuesto?: string;
     tarifa?: number;
     cta_compras?: string;
+    cta_ventas?: string;
+    cta_dev_compras?: string;
+    cta_dev_ventas?: string;
   }) => req<ImpuestoOut>("/impuestos", { method: "POST", body: JSON.stringify(body) }),
 
   // Tipos comprobante
@@ -242,15 +255,15 @@ export const api = {
       body: JSON.stringify({ nuevo_valor: nuevoValor }),
     }),
 
-  // Parseo de facturas
-  parsearFacturas: async (file: File) => {
+  // Parseo de facturas. `modo`: "compras" (default) | "ventas".
+  parsearFacturas: async (file: File, modo: "compras" | "ventas" | "soporte" = "compras") => {
     const { token, empresaId } = useAuthStore.getState();
     const form = new FormData();
     form.append("archivo", file);
     const headers: Record<string, string> = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
     if (empresaId != null) headers["X-Empresa-Id"] = String(empresaId);
-    const res = await fetch(`${BASE}/causacion/parsear`, {
+    const res = await fetch(`${BASE}/causacion/parsear?modo=${modo}`, {
       method: "POST",
       headers,
       body: form,
@@ -270,8 +283,9 @@ export const api = {
       body: JSON.stringify({ numeros_dian }),
     }),
 
-  // DIAN — consultar facturas recibidas del rango (sin descargar XML)
-  dianConsultar: (body: { auth_url: string; fecha_desde: string; fecha_hasta: string }) =>
+  // DIAN — consultar facturas del rango (sin descargar XML).
+  // `modo`: "compras" (recibidas) | "ventas" (emitidas).
+  dianConsultar: (body: { auth_url: string; fecha_desde: string; fecha_hasta: string; modo?: "compras" | "ventas" | "soporte" }) =>
     req<{ success: boolean; total: number; documents: DianDocumento[] }>("/dian/consultar", {
       method: "POST",
       body: JSON.stringify(body),
@@ -281,7 +295,7 @@ export const api = {
   // Lee la respuesta en streaming (NDJSON) e informa el progreso real de descarga
   // vía onProgress(done, total). Devuelve las facturas ya parseadas.
   dianImportarStream: async (
-    body: { auth_url: string; ids: string[] },
+    body: { auth_url: string; ids: string[]; modo?: "compras" | "ventas" | "soporte" },
     onProgress: (done: number, total: number) => void,
   ): Promise<Factura[]> => {
     const { token, empresaId } = useAuthStore.getState();
@@ -327,9 +341,83 @@ export const api = {
     return facturas;
   },
 
-  // Sugerencia batch (reemplaza múltiples llamadas a sugerirCuenta)
+  // DIAN unificado — consultar TODO (recibidos + emitidos + soporte) con un solo token.
+  dianConsultarTodo: (body: { auth_url: string; fecha_desde: string; fecha_hasta: string }) =>
+    req<{
+      compras: { success: boolean; total: number; documents: DianDocumento[] };
+      ventas: { success: boolean; total: number; documents: DianDocumento[] };
+      soporte: { success: boolean; total: number; documents: DianDocumento[] };
+      soporte_ajuste: { success: boolean; total: number; documents: DianDocumento[] };
+    }>("/dian/consultar-todo", { method: "POST", body: JSON.stringify(body) }),
+
+  // DIAN unificado — traer y clasificar en 6 grupos (compras, nc, ventas, nc_ventas, soporte, nc_soporte).
+  // Resiliente a un corte de conexión A MITAD del lote: cada factura llega en su
+  // propia línea (no solo al final), así que si la conexión se cae en el
+  // documento 350 de 400, las 350 ya traídas NO se pierden — se devuelven junto
+  // con `conexionError` para que el llamador las guarde y ofrezca reintentar solo
+  // lo que faltó, en vez de descartar todo y empezar de cero.
+  dianImportarTodoStream: async (
+    body: { auth_url: string; ids_compras: string[]; ids_ventas: string[]; ids_soporte: string[]; ids_soporte_ajuste: string[] },
+    onProgress: (done: number, total: number) => void,
+  ): Promise<{ buckets: Record<BucketKey, Factura[]>; errores: number; conexionError?: string }> => {
+    const { token, empresaId } = useAuthStore.getState();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (empresaId != null) headers["X-Empresa-Id"] = String(empresaId);
+
+    const res = await fetch(`${BASE}/dian/importar-todo`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+    if (res.status === 401) _handleUnauthorized();
+    if (!res.ok || !res.body) {
+      // Sin datos parciales posibles: la conexión ni siquiera abrió el stream.
+      const text = await res.text().catch(() => res.statusText);
+      throw new Error(`API ${res.status}: ${text}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const buckets: Record<BucketKey, Factura[]> = { compras: [], nc: [], ventas: [], nc_ventas: [], soporte: [], nc_soporte: [] };
+    let errores = 0;
+
+    const procesarLinea = (t: string) => {
+      let msg: { type: string; done?: number; total?: number; destino?: BucketKey; factura?: Factura; errores?: number; message?: string };
+      try { msg = JSON.parse(t); } catch { return; }
+      if (msg.type === "start") onProgress(0, msg.total ?? 0);
+      else if (msg.type === "progress") onProgress(msg.done ?? 0, msg.total ?? 0);
+      else if (msg.type === "factura" && msg.destino && msg.factura) buckets[msg.destino].push(msg.factura);
+      else if (msg.type === "done") errores = msg.errores ?? 0;
+      else if (msg.type === "error") throw new Error(msg.message || "Error al traer de la DIAN.");
+    };
+
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const t = line.trim();
+          if (t) procesarLinea(t);
+        }
+      }
+    } catch (e) {
+      // Conexión cortada (o error de sesión) A MITAD del lote: lo ya recibido en
+      // `buckets` queda intacto y se devuelve igual, en vez de perderse.
+      return { buckets, errores, conexionError: (e as Error).message || "Se perdió la conexión con la DIAN." };
+    }
+    return { buckets, errores };
+  },
+
+  // Sugerencia batch (reemplaza múltiples llamadas a sugerirCuenta).
+  // `esVenta`: en ventas la contrapartida a crédito es Clientes (1305), no Proveedores.
   sugerirCuentasBatch: (
-    items: { key: string; nit: string | null; descripcion: string; tipo_proveedor: string | null; nombre_proveedor?: string | null }[]
+    items: { key: string; nit: string | null; descripcion: string; tipo_proveedor: string | null; nombre_proveedor?: string | null }[],
+    esVenta = false,
   ) =>
     req<{
       resultados: Record<string, {
@@ -342,7 +430,7 @@ export const api = {
       }>;
     }>("/causacion/sugerir-cuentas-batch", {
       method: "POST",
-      body: JSON.stringify({ items }),
+      body: JSON.stringify({ items, es_venta: esVenta }),
     }),
 
   // Sugerencia de cuenta (individual — mantenido para compatibilidad)
@@ -364,6 +452,7 @@ export const api = {
     items: { factura: object; mapeos_confirmados: object[] }[];
     tipo_comprobante: string;
     centro_costo: string;
+    es_venta?: boolean;
   }) =>
     req<BatchValidacionResponse>("/causacion/batch/validar", {
       method: "POST",
@@ -376,6 +465,7 @@ export const api = {
     tipo_comprobante: string;
     centro_costo: string;
     confirmar: boolean;
+    es_venta?: boolean;
   }): Promise<Blob> =>
     reqBlob("/causacion/batch/generar", {
       method: "POST",
@@ -384,10 +474,15 @@ export const api = {
     }),
 
   // Historial de causaciones
-  getHistorial: (params?: { fechaDesde?: string; fechaHasta?: string; buscar?: string }) => {
+  // campoFecha: sobre qué fecha aplica el rango Desde/Hasta — "causacion" (cuándo
+  // se causó en el sistema, por defecto) o "emision" (fecha de la factura DIAN).
+  // tipoCausacion: módulo (compras/nc/ventas/nc_ventas/soporte/nc_soporte).
+  getHistorial: (params?: { fechaDesde?: string; fechaHasta?: string; campoFecha?: CampoFechaHistorial; tipoCausacion?: BorradorTipo; buscar?: string }) => {
     const qp = new URLSearchParams();
     if (params?.fechaDesde) qp.set("fecha_desde", params.fechaDesde);
     if (params?.fechaHasta) qp.set("fecha_hasta", params.fechaHasta);
+    if (params?.campoFecha) qp.set("campo_fecha", params.campoFecha);
+    if (params?.tipoCausacion) qp.set("tipo_causacion", params.tipoCausacion);
     if (params?.buscar) qp.set("buscar", params.buscar);
     const qs = qp.toString();
     return req<HistorialItem[]>(`/causacion/historial${qs ? `?${qs}` : ""}`);
@@ -396,18 +491,25 @@ export const api = {
   regenerarHistorial: (id: number): Promise<Blob> =>
     reqBlob(`/causacion/historial/${id}/regenerar`, { method: "POST" }),
 
-  limpiarHistorial: (params?: { fechaDesde?: string; fechaHasta?: string }) => {
+  limpiarHistorial: (params?: { fechaDesde?: string; fechaHasta?: string; campoFecha?: CampoFechaHistorial; tipoCausacion?: BorradorTipo }) => {
     const qp = new URLSearchParams();
     if (params?.fechaDesde) qp.set("fecha_desde", params.fechaDesde);
     if (params?.fechaHasta) qp.set("fecha_hasta", params.fechaHasta);
+    if (params?.campoFecha) qp.set("campo_fecha", params.campoFecha);
+    if (params?.tipoCausacion) qp.set("tipo_causacion", params.tipoCausacion);
     const qs = qp.toString();
     return req<{ eliminados: number }>(`/causacion/historial${qs ? `?${qs}` : ""}`, { method: "DELETE" });
   },
 
-  exportarLoteHistorial: (params?: { fechaDesde?: string; fechaHasta?: string }): Promise<Blob> => {
+  eliminarRegistroHistorial: (id: number) =>
+    req<{ ok: boolean }>(`/causacion/historial/${id}`, { method: "DELETE" }),
+
+  exportarLoteHistorial: (params?: { fechaDesde?: string; fechaHasta?: string; campoFecha?: CampoFechaHistorial; tipoCausacion?: BorradorTipo }): Promise<Blob> => {
     const qp = new URLSearchParams();
     if (params?.fechaDesde) qp.set("fecha_desde", params.fechaDesde);
     if (params?.fechaHasta) qp.set("fecha_hasta", params.fechaHasta);
+    if (params?.campoFecha) qp.set("campo_fecha", params.campoFecha);
+    if (params?.tipoCausacion) qp.set("tipo_causacion", params.tipoCausacion);
     const qs = qp.toString();
     return reqBlob(`/causacion/historial/exportar-lote${qs ? `?${qs}` : ""}`);
   },
@@ -418,19 +520,19 @@ export const api = {
     total_facturas: number;
     total_verificadas: number;
     tipo_comp: string | null;
-  }, tipo: "compras" | "nc" = "compras") =>
+  }, tipo: BorradorTipo = "compras") =>
     req<BorradorResumen>(`/causacion/borrador?tipo=${tipo}`, {
       method: "PUT",
       body: JSON.stringify(payload),
     }),
 
-  getBorrador: (tipo: "compras" | "nc" = "compras") =>
+  getBorrador: (tipo: BorradorTipo = "compras") =>
     req<BorradorResumen | null>(`/causacion/borrador?tipo=${tipo}`),
 
-  getBorradorCompleto: (tipo: "compras" | "nc" = "compras") =>
+  getBorradorCompleto: (tipo: BorradorTipo = "compras") =>
     req<BorradorCompleto | null>(`/causacion/borrador/completo?tipo=${tipo}`),
 
-  descartarBorrador: (tipo: "compras" | "nc" = "compras") =>
+  descartarBorrador: (tipo: BorradorTipo = "compras") =>
     req<{ descartado: boolean }>(`/causacion/borrador/descartar?tipo=${tipo}`, { method: "POST" }),
 
   // Aprendizaje / IA

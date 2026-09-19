@@ -1,6 +1,6 @@
 "use client";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { useWizardStore } from "@/stores/wizard";
+import { useWizardStore, esModoVenta } from "@/stores/wizard";
 import { api } from "@/lib/api";
 import { fmt } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,8 @@ const TUTORIAL_REPORTE: BatchValidacionResponse = {
 };
 
 export function Paso3() {
-  const { facturasParaCausar, mapeos, tipoComp, centroCosto, setPaso, setReporte, setXlsxBlob, setFacturasParaCausar, setMapeos } = useWizardStore();
+  const { docTipo, facturasParaCausar, mapeos, tipoComp, centroCosto, setPaso, setReporte, setXlsxBlob, setFacturasParaCausar, setMapeos } = useWizardStore();
+  const esVenta = esModoVenta(docTipo);
   const [reporte, setLocalReporte] = useState<BatchValidacionResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -56,7 +57,7 @@ export function Paso3() {
           factura: f,
           mapeos_confirmados: mapeos.filter((m) => m.idx_factura === idx),
         }));
-        const r = await api.batchValidar({ items, tipo_comprobante: tipoComp, centro_costo: centroCosto });
+        const r = await api.batchValidar({ items, tipo_comprobante: tipoComp, centro_costo: centroCosto, es_venta: esVenta });
         setLocalReporte(r);
         setReporte(r);
       } catch (e) {
@@ -111,7 +112,7 @@ export function Paso3() {
         factura: f,
         mapeos_confirmados: tandaMapeos.filter((m) => m.idx_factura === idx),
       }));
-      const blob = await api.batchGenerar({ items, tipo_comprobante: tipoComp, centro_costo: centroCosto, confirmar: false });
+      const blob = await api.batchGenerar({ items, tipo_comprobante: tipoComp, centro_costo: centroCosto, confirmar: false, es_venta: esVenta });
 
       // Fijar la tanda como el set exacto a confirmar en paso4 + reporte recortado
       setFacturasParaCausar(tandaFacturas);

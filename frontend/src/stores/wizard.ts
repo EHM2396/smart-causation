@@ -36,7 +36,22 @@ interface Paso2Cache {
   baseOverride: Record<string, string>;
 }
 
-export type DocTipo = "compras" | "nc";
+// Modos del wizard: compras y sus NC, ventas y sus NC (devoluciones), y documento
+// soporte y su nota de ajuste. Cada uno tiene su propia bandeja de borrador.
+export type DocTipo = "compras" | "nc" | "ventas" | "nc_ventas" | "soporte" | "nc_soporte";
+
+/** ¿El módulo es de ventas (factura de venta o devolución en ventas)? */
+export const esModoVenta = (t: DocTipo): boolean => t === "ventas" || t === "nc_ventas";
+/** ¿El módulo es de documento soporte (DS o su nota de ajuste)? Contablemente = compra. */
+export const esModoSoporte = (t: DocTipo): boolean => t === "soporte" || t === "nc_soporte";
+/** ¿El módulo procesa notas crédito/ajuste? (NC compras, NC ventas o ajuste soporte) */
+export const esModoNC = (t: DocTipo): boolean => t === "nc" || t === "nc_ventas" || t === "nc_soporte";
+/** Bandeja NC/ajuste hermana del módulo base (compras→nc, ventas→nc_ventas, soporte→nc_soporte). */
+export const tipoNCHermano = (t: DocTipo): DocTipo =>
+  esModoSoporte(t) ? "nc_soporte" : esModoVenta(t) ? "nc_ventas" : "nc";
+/** Modo para /causacion/parsear y /dian según el módulo. */
+export const modoParseo = (t: DocTipo): "compras" | "ventas" | "soporte" =>
+  esModoSoporte(t) ? "soporte" : esModoVenta(t) ? "ventas" : "compras";
 
 interface WizardState {
   docTipo: DocTipo;
@@ -57,6 +72,10 @@ interface WizardState {
   facturasOmitidas: FacturaOmitida[];
   tutorialActivo: boolean;
   tutorialMockMapeo: TutorialMockMapeo | null;
+  // Función de guardado del borrador que registra el paso 2 mientras está activo,
+  // para que el sidebar pueda guardar antes de cambiar de módulo. null = no hay
+  // wizard con trabajo en curso.
+  guardarBorradorFn: (() => Promise<void>) | null;
 
   setDocTipo: (t: DocTipo) => void;
   setNcRuteadas: (n: number) => void;
@@ -76,6 +95,7 @@ interface WizardState {
   setFacturasOmitidas: (items: FacturaOmitida[]) => void;
   setTutorialActivo: (v: boolean) => void;
   setTutorialMockMapeo: (m: TutorialMockMapeo | null) => void;
+  setGuardarBorradorFn: (fn: (() => Promise<void>) | null) => void;
   hydrateBorrador: (snapshot: BorradorSnapshot) => void;
   reset: () => void;
 }
@@ -103,6 +123,8 @@ const initial = {
 
 export const useWizardStore = create<WizardState>((set) => ({
   ...initial,
+  guardarBorradorFn: null,  // fuera de `initial`: lo maneja el paso 2, no lo borra reset()
+  setGuardarBorradorFn: (guardarBorradorFn) => set({ guardarBorradorFn }),
   setDocTipo: (docTipo) => set({ docTipo }),
   setNcRuteadas: (ncRuteadas) => set({ ncRuteadas }),
   setPaso: (paso) => set({ paso }),

@@ -1,7 +1,7 @@
 """Capa de Cuentas (multiempresa por plan): CuentaCliente, cupos y backfill
 
-Revision ID: 018
-Revises: 017
+Revision ID: 020
+Revises: 019
 Create Date: 2026-09-08
 
 B1 del plan de Cuentas/Planes:
@@ -21,8 +21,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "018"
-down_revision = "017"
+revision = "020"
+down_revision = "019"
 branch_labels = None
 depends_on = None
 

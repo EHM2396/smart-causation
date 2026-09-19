@@ -4,6 +4,7 @@ Router: /terceros – gestión de terceros (proveedores) por empresa.
 
 from __future__ import annotations
 
+import re
 from io import BytesIO
 from typing import Annotated
 
@@ -91,6 +92,25 @@ _REGIMEN_SIIGO: dict[str, str] = {
 _RESPONSABILIDADES_VALIDAS = {"O-13", "O-15", "O-23", "O-47", "R-99-PN"}
 
 
+def _tel_siigo(v: str | None) -> str:
+    """Teléfono válido para SIIGO: solo dígitos y MÁXIMO 10 (restricción de SIIGO).
+    Si trae más de 10 dígitos (código de país/indicativo incrustado), conserva los
+    últimos 10 — los prefijos van al inicio del número."""
+    d = re.sub(r"\D", "", str(v or ""))
+    return d[-10:] if len(d) > 10 else d
+
+
+def _depto_coherente(codigo_departamento: str | None, codigo_ciudad: str | None) -> str:
+    """El código de municipio DANE codifica el departamento en sus 2 primeros
+    dígitos. Cuando hay municipio, el departamento SIEMPRE se deriva de él, para no
+    dejar combinaciones inconsistentes (p. ej. departamento 17 con municipio 76001 =
+    Cali) que SIIGO rechaza. Si no hay municipio, se conserva el departamento dado."""
+    ciudad = re.sub(r"\D", "", str(codigo_ciudad or ""))
+    if len(ciudad) >= 2:
+        return ciudad[:2]
+    return str(codigo_departamento or "")
+
+
 def _prov_to_siigo_row(p: Proveedor) -> list:
     es_natural = p.tipo_persona == "natural"
     # Columna E "Tipo": solo acepta "Empresa" o "Es persona"
@@ -124,6 +144,11 @@ def _prov_to_siigo_row(p: Proveedor) -> list:
     # Correo: preferir email_contacto, caer en email principal si no hay
     correo_contacto = p.email_contacto or p.email or ""
 
+    # Geo coherente: el municipio manda sobre el departamento (evita depto 17 +
+    # municipio 76001). Teléfonos limitados a 10 dígitos (restricción SIIGO).
+    codigo_ciudad = p.codigo_ciudad_siigo or ""
+    codigo_depto = _depto_coherente(p.codigo_departamento, codigo_ciudad)
+
     return [
         p.nit,
         p.digito_verificacion if p.digito_verificacion is not None else "",
@@ -136,10 +161,10 @@ def _prov_to_siigo_row(p: Proveedor) -> list:
         p.nombre_comercial or "",
         p.direccion or "",
         p.codigo_pais or "Col",
-        p.codigo_departamento or "",
-        p.codigo_ciudad_siigo or "",
+        codigo_depto,
+        codigo_ciudad,
         p.indicativo_tel or "",
-        p.telefono or "",
+        _tel_siigo(p.telefono),
         p.extension_tel or "",
         regimen_siigo,
         responsabilidad,
@@ -147,7 +172,7 @@ def _prov_to_siigo_row(p: Proveedor) -> list:
         p.nombres_contacto or "",
         p.apellidos_contacto or "",
         p.indicativo_tel_contacto or "",
-        p.telefono_contacto or "",
+        _tel_siigo(p.telefono_contacto),
         p.extension_tel_contacto or "",
         correo_contacto,
         "",  # Clientes: el usuario lo completa en Siigo

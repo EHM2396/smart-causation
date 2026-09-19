@@ -64,13 +64,19 @@ def _cuenta_pago_por_forma_pago(
     forma_pago: str | None,
     medio_pago: str | None,
     cuentas_pago: list[dict] | None,
+    es_venta: bool = False,
 ) -> tuple[str | None, str | None]:
     """
-    Determina cuenta de pago y su origen basado en la forma/medio de pago.
+    Determina cuenta de contrapartida y su origen según la forma/medio de pago.
     Retorna (codigo_cuenta | None, origen | None).
 
-    Reglas (orden de prioridad):
+    COMPRAS (lo que debes / cómo pagaste):
       CRÉDITO de cualquier medio            → 2205x (proveedores nacionales)
+      CONTADO + efectivo                    → 1105x (caja general)
+      CONTADO + transferencia/débito/tarjeta→ 1110x (bancos)
+
+    VENTAS (lo que te deben / cómo cobraste):
+      CRÉDITO de cualquier medio            → 1305x (clientes nacionales)
       CONTADO + efectivo                    → 1105x (caja general)
       CONTADO + transferencia/débito/tarjeta→ 1110x (bancos)
     """
@@ -78,7 +84,7 @@ def _cuenta_pago_por_forma_pago(
     mp = (medio_pago or "").lower()
 
     if "crédit" in fp or "credit" in fp:
-        prefix = "2205"
+        prefix = "1305" if es_venta else "2205"
     elif "efect" in mp:
         prefix = "1105"
     elif any(kw in mp for kw in ("transfer", "débit", "debit", "tarjeta")):
@@ -202,11 +208,12 @@ def sugerir_cuenta_gasto(
             cuenta_pago_origen="aprendizaje" if cp_anterior else None,
         )
 
-    # 2. Mapeo aprendido
-    cuenta = aprendizaje_service.obtener_mapeo(db, nit, descripcion, empresa_id=empresa_id, usuario_id=usuario_id)
-    if cuenta:
+    # 2. Mapeo aprendido (propio del tercero o del mismo ítem en otro proveedor)
+    mapeo = aprendizaje_service.obtener_mapeo(db, nit, descripcion, empresa_id=empresa_id, usuario_id=usuario_id)
+    if mapeo:
+        cuenta, es_otro = mapeo
         return ResultadoSugerencia(
-            cuenta=cuenta, origen="aprendizaje",
+            cuenta=cuenta, origen="aprendizaje_otro" if es_otro else "aprendizaje",
             cuenta_pago=cp_anterior,
             cuenta_pago_origen="aprendizaje" if cp_anterior else None,
         )
@@ -332,6 +339,7 @@ def sugerir_cuentas_batch(
     empresa_id: int | None = None,
     usuario_id: int | None = None,
     cuentas_pago: list[dict] | None = None,
+    es_venta: bool = False,
 ) -> dict[str, ResultadoSugerencia]:
     """
     Sugiere cuentas para múltiples ítems en una sola operación.
@@ -362,9 +370,12 @@ def sugerir_cuentas_batch(
             db, sin_regla, empresa_id=empresa_id, usuario_id=usuario_id
         )
         for item in sin_regla:
-            cuenta = mapeos.get(item["key"])
-            if cuenta:
-                resultados[item["key"]] = ResultadoSugerencia(cuenta=cuenta, origen="aprendizaje")
+            mapeo = mapeos.get(item["key"])
+            if mapeo:
+                cuenta, es_otro = mapeo
+                resultados[item["key"]] = ResultadoSugerencia(
+                    cuenta=cuenta, origen="aprendizaje_otro" if es_otro else "aprendizaje",
+                )
             else:
                 sin_aprendizaje.append(item)
 
@@ -378,7 +389,7 @@ def sugerir_cuentas_batch(
     for item in items:
         k = item["key"]
         codigo, origen = _cuenta_pago_por_forma_pago(
-            item.get("forma_pago"), item.get("medio_pago"), cuentas_pago
+            item.get("forma_pago"), item.get("medio_pago"), cuentas_pago, es_venta=es_venta
         )
         if codigo:
             cp_por_key[k] = (codigo, origen)
@@ -557,6 +568,25 @@ def generar_siigo(
 
 # ── Registro de factura causada ───────────────────────────────────────────────
 
+def derivar_tipo_causacion(factura: dict, es_venta: bool) -> str:
+    """
+    Módulo de causación al que pertenece una factura ya parseada, según su
+    tipo_documento + si la operación es una venta. Mismos valores que DocTipo en
+    el frontend: "compras" | "nc" | "ventas" | "nc_ventas" | "soporte" |
+    "nc_soporte". Espejo de _bucket_de() en api/routers/dian.py (ahí también
+    interviene el ORIGEN de la consulta DIAN; acá solo se tiene la factura ya
+    causada, así que basta con tipo_documento).
+    """
+    td = (factura.get("tipo_documento") or "factura").lower()
+    if td == "documento_soporte":
+        return "soporte"
+    if td == "nota_ajuste_soporte":
+        return "nc_soporte"
+    if es_venta:
+        return "nc_ventas" if td == "nota_credito" else "ventas"
+    return "nc" if td == "nota_credito" else "compras"
+
+
 def registrar_factura_causada(
     db: Session,
     *,
@@ -567,17 +597,38 @@ def registrar_factura_causada(
     datos_json: str | None = None,
     empresa_id: int | None = None,
     usuario_id: int | None = None,
+    tipo_causacion: str | None = None,
 ) -> FacturaCausada:
     from sqlalchemy import select
     numero = factura.get("numero_dian") or factura.get("numero_factura", "")
     hoy = date.today()
 
-    # Si ya existe para esta empresa, devolver el registro existente sin error
+    # Si ya existe para esta empresa...
     stmt = select(FacturaCausada).where(FacturaCausada.numero_dian == numero)
     if empresa_id is not None:
         stmt = stmt.where(FacturaCausada.empresa_id == empresa_id)
     existente = db.scalar(stmt)
     if existente is not None:
+        if not existente.eliminado:
+            # ...y sigue activa: devolver el registro existente sin duplicar.
+            return existente
+        # ...pero el usuario la ELIMINÓ del historial: se reutiliza la misma fila
+        # (nunca se borra de la BD) con los datos de esta nueva causación, en vez
+        # de bloquearla como "ya causada". Así "eliminar del historial" permite
+        # volver a causar la factura, como espera el usuario.
+        existente.eliminado = False
+        existente.eliminado_at = None
+        existente.nit_proveedor = factura.get("nit")
+        existente.razon_social = factura.get("razon_social")
+        existente.fecha_factura = _parse_date(factura.get("fecha", ""))
+        existente.total = factura.get("total", 0.0)
+        existente.consecutivo = str(consecutivo)
+        existente.tipo_comprobante = tipo_comprobante
+        existente.fecha_causacion = hoy
+        existente.archivo_origen = archivo_origen
+        existente.datos_json = datos_json
+        existente.tipo_causacion = tipo_causacion
+        db.flush()
         return existente
 
     fc = FacturaCausada(
@@ -593,6 +644,7 @@ def registrar_factura_causada(
         datos_json=datos_json,
         empresa_id=empresa_id,
         usuario_id=usuario_id,
+        tipo_causacion=tipo_causacion,
     )
     db.add(fc)
     db.flush()
@@ -601,7 +653,12 @@ def registrar_factura_causada(
 
 def esta_causada(db: Session, numero_dian: str, empresa_id: int | None = None) -> bool:
     from sqlalchemy import select
-    stmt = select(FacturaCausada.id).where(FacturaCausada.numero_dian == numero_dian)
+    # Una factura eliminada del historial NO cuenta como "ya causada": eliminarla
+    # es precisamente cómo el usuario libera el número para volver a causarla.
+    stmt = select(FacturaCausada.id).where(
+        FacturaCausada.numero_dian == numero_dian,
+        FacturaCausada.eliminado.is_(False),
+    )
     if empresa_id is not None:
         stmt = stmt.where(FacturaCausada.empresa_id == empresa_id)
     return db.scalar(stmt) is not None

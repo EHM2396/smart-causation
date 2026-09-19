@@ -6,13 +6,13 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from io import BytesIO
-from sqlalchemy import delete, select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_current_user, get_empresa_activa
@@ -37,6 +37,7 @@ from db.session import get_db
 from services import causacion_service, consecutivos_service, cuentas_service
 from services import terceros_service, planes_service
 from core import exporter, validator
+from core.parser import usar_cliente_como_tercero
 
 
 def _exigir_cupo(db: Session, empresa: Empresa, usuario: Usuario, n: int = 1) -> None:
@@ -68,6 +69,48 @@ def _exigir_cupo(db: Session, empresa: Empresa, usuario: Usuario, n: int = 1) ->
 
 router = APIRouter(prefix="/causacion", tags=["Causación"])
 
+# Documentos que REVERSAN la partida (nota crédito): la nota crédito normal y la
+# nota de ajuste al documento soporte (tipo 95), que se comporta como una NC.
+_TIPOS_NOTA_REVERSA = ("nota_credito", "nota_ajuste_soporte")
+
+
+def _es_nota_reversa(factura: dict | None) -> bool:
+    return (factura or {}).get("tipo_documento") in _TIPOS_NOTA_REVERSA
+
+
+def _columna_fecha(campo_fecha: str | None):
+    """Columna de FacturaCausada sobre la que aplica el rango de fechas del
+    historial: 'emision' = fecha de la factura (la que emitió el proveedor/
+    cliente); 'causacion' (por defecto) = fecha en que se causó en el sistema."""
+    return FacturaCausada.fecha_factura if campo_fecha == "emision" else FacturaCausada.fecha_causacion
+
+
+def _aplicar_rango_fecha(stmt, campo_fecha: str | None, fecha_desde: str | None, fecha_hasta: str | None):
+    columna = _columna_fecha(campo_fecha)
+    if fecha_desde:
+        try:
+            stmt = stmt.where(columna >= date.fromisoformat(fecha_desde))
+        except ValueError:
+            pass
+    if fecha_hasta:
+        try:
+            stmt = stmt.where(columna <= date.fromisoformat(fecha_hasta))
+        except ValueError:
+            pass
+    return stmt
+
+
+def _aplicar_filtro_tipo_causacion(stmt, tipo_causacion: str | None):
+    """Filtra por módulo de causación. Acepta un valor único o varios separados
+    por coma (ej. "compras,nc")."""
+    if not tipo_causacion:
+        return stmt
+    valores = [v.strip() for v in tipo_causacion.split(",") if v.strip()]
+    if valores:
+        stmt = stmt.where(FacturaCausada.tipo_causacion.in_(valores))
+    return stmt
+
+
 DB = Annotated[Session, Depends(get_db)]
 EmpresaActiva = Annotated[Empresa, Depends(get_empresa_activa)]
 CurrentUser = Annotated[Usuario, Depends(get_current_user)]
@@ -82,48 +125,107 @@ def consumo_causacion(db: DB, empresa: EmpresaActiva):
 @router.post("/parsear", response_model=list[dict])
 async def parsear_facturas(
     archivo: UploadFile = File(..., description="Archivo XLSX de facturas DIAN"),
+    modo: str = "compras",
     empresa: Empresa = Depends(get_empresa_activa),
 ):
     """
-    Paso 1: Recibe el archivo XLSX de facturas electrónicas DIAN y retorna
-    la lista de facturas parseadas en formato dict.
+    Paso 1: Recibe el archivo de facturas electrónicas DIAN y retorna la lista
+    de facturas parseadas en formato dict.
+
+    ``modo``:
+      - ``compras`` (por defecto): conserva las facturas de COMPRA (emisor ≠ tu
+        empresa) y omite las de venta.
+      - ``ventas``: conserva las facturas de VENTA (emisor = tu empresa) y omite
+        las de compra.
+    Una factura es "de venta" cuando el NIT emisor coincide con el NIT de la
+    empresa activa.
     """
+    modo = (modo or "compras").lower()
+    es_modo_ventas = modo == "ventas"
+    es_modo_soporte = modo == "soporte"
+
     contenido = await archivo.read()
     try:
         facturas = causacion_service.parsear_archivo(contenido, archivo.filename or "")
     except Exception as exc:
         raise HTTPException(400, f"Error al parsear el archivo: {exc}") from exc
 
-    # Detectar facturas de venta: el NIT emisor coincide con el NIT de la empresa.
-    if empresa.nit:
-        nit_empresa = re.sub(r"[^\d]", "", empresa.nit)
-        if nit_empresa:
-            compras, ventas_nums = [], []
-            for fac in facturas:
-                nit_emisor = re.sub(r"[^\d]", "", fac.get("nit", "") or "")
-                if nit_emisor and nit_empresa == nit_emisor:
-                    ventas_nums.append(fac.get("numero_dian") or archivo.filename or "desconocida")
-                else:
-                    compras.append(fac)
+    def _es_soporte(f: dict) -> bool:
+        return (f.get("tipo_documento") or "") in ("documento_soporte", "nota_ajuste_soporte")
 
-            if ventas_nums and not compras:
-                # Archivo es 100% ventas → error para que el frontend lo registre como venta
+    # Los documentos soporte (tipo 05) son su propio módulo: se separan primero para
+    # que NO se mezclen con compras/ventas (aunque el NIT del vendedor no sea el de
+    # la empresa, un DS no es una compra normal).
+    soporte = [f for f in facturas if _es_soporte(f)]
+    no_soporte = [f for f in facturas if not _es_soporte(f)]
+
+    if es_modo_soporte:
+        nums = [f.get("numero_dian") or archivo.filename or "desconocido" for f in no_soporte]
+        if nums and not soporte:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"[NO_SOPORTE] {nums[0]}: Este documento no es un Documento Soporte (tipo 05). "
+                    "Úsalo en el módulo de Compras o Ventas según corresponda."
+                ),
+            )
+        if nums and soporte:
+            soporte[0].setdefault("advertencias", []).append(
+                f"[NO_SOPORTE] {nums[0]}: {len(nums)} documento(s) que no son soporte omitido(s)."
+            )
+        return soporte
+
+    # Compras/ventas: separar por NIT emisor SOBRE los que NO son soporte.
+    nit_empresa = re.sub(r"[^\d]", "", empresa.nit or "") if empresa.nit else ""
+    if not nit_empresa:
+        facturas = no_soporte
+    else:
+        compras, ventas = [], []
+        for fac in no_soporte:
+            nit_emisor = re.sub(r"[^\d]", "", fac.get("nit", "") or "")
+            if nit_emisor and nit_empresa == nit_emisor:
+                ventas.append(fac)
+            else:
+                compras.append(fac)
+
+        if es_modo_ventas:
+            nums_omitidas = [f.get("numero_dian") or archivo.filename or "desconocida" for f in compras]
+            if nums_omitidas and not ventas:
                 raise HTTPException(
                     status_code=400,
                     detail=(
-                        f"[VENTA] {ventas_nums[0]}: Esta factura electrónica es una VENTA de tu empresa, "
-                        "no una compra. El módulo actual solo procesa facturas de compra. "
-                        "La causación de ventas estará disponible próximamente."
+                        f"[COMPRA] {nums_omitidas[0]}: Esta factura electrónica es una COMPRA "
+                        "(otro proveedor te la emitió), no una venta de tu empresa. "
+                        "Úsala en el módulo de Causación Compras."
                     ),
                 )
-
-            if ventas_nums:
-                # Mezcla: retornar solo las compras; agregar advertencia en la primera
+            if nums_omitidas:
+                ventas[0].setdefault("advertencias", []).append(
+                    f"[COMPRA] {nums_omitidas[0]}: {len(nums_omitidas)} factura(s) de compra omitida(s) de este archivo."
+                )
+            # En ventas el tercero es el cliente (receptor), no la empresa emisora.
+            facturas = [usar_cliente_como_tercero(f) for f in ventas]
+        else:
+            nums_omitidas = [f.get("numero_dian") or archivo.filename or "desconocida" for f in ventas]
+            if nums_omitidas and not compras:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"[VENTA] {nums_omitidas[0]}: Esta factura electrónica es una VENTA de tu empresa, "
+                        "no una compra. Úsala en el módulo de Causación Ventas."
+                    ),
+                )
+            if nums_omitidas:
                 compras[0].setdefault("advertencias", []).append(
-                    f"[VENTA] {ventas_nums[0]}: {len(ventas_nums)} factura(s) de venta omitida(s) de este archivo."
+                    f"[VENTA] {nums_omitidas[0]}: {len(nums_omitidas)} factura(s) de venta omitida(s) de este archivo."
                 )
             facturas = compras
 
+    # Aviso si se omitieron documentos soporte en un módulo de compras/ventas.
+    if soporte and facturas:
+        facturas[0].setdefault("advertencias", []).append(
+            f"[SOPORTE] {len(soporte)} documento(s) soporte omitido(s). Úsalos en el módulo de Documento Soporte."
+        )
     return facturas
 
 
@@ -135,6 +237,7 @@ def verificar_causadas(body: VerificarCausadasRequest, db: DB, empresa: EmpresaA
         .where(
             FacturaCausada.numero_dian.in_(body.numeros_dian),
             FacturaCausada.empresa_id == empresa.id,
+            FacturaCausada.eliminado.is_(False),
         )
     )
     rows = db.scalars(stmt).all()
@@ -206,6 +309,7 @@ def sugerir_cuentas_batch(body: SugerenciaBatchRequest, db: DB, empresa: Empresa
         empresa_id=empresa.id,
         usuario_id=current_user.id,
         cuentas_pago=cuentas_pago,
+        es_venta=body.es_venta,
     )
     return SugerenciaBatchResponse(
         resultados={
@@ -271,6 +375,7 @@ def generar_causacion(body: CausacionRequest, db: DB, empresa: EmpresaActiva, cu
         tipo_comprobante=body.tipo_comprobante,
         empresa_id=empresa.id,
         usuario_id=current_user.id,
+        tipo_causacion=causacion_service.derivar_tipo_causacion(body.factura, False),
     )
 
     db.commit()
@@ -331,6 +436,7 @@ def generar_y_descargar(body: CausacionRequest, db: DB, empresa: EmpresaActiva, 
         tipo_comprobante=body.tipo_comprobante,
         empresa_id=empresa.id,
         usuario_id=current_user.id,
+        tipo_causacion=causacion_service.derivar_tipo_causacion(body.factura, False),
     )
 
     db.commit()
@@ -360,6 +466,7 @@ class BatchRequest(BaseModel):
     tipo_comprobante: str = "12"
     centro_costo: str = ""
     confirmar: bool = False  # True = persistir aprendizaje + consecutivos
+    es_venta: bool = False   # True = módulo de ventas (partida invertida)
 
 
 class ValidacionComprobante(BaseModel):
@@ -397,7 +504,8 @@ def batch_validar(body: BatchRequest, db: DB, empresa: EmpresaActiva):
             mapeos_confirmados=item.mapeos_confirmados,
             tipo_comprobante=body.tipo_comprobante,
             centro_costo=body.centro_costo,
-            es_nota_credito=(item.factura or {}).get("tipo_documento") == "nota_credito",
+            es_nota_credito=_es_nota_reversa(item.factura),
+            es_venta=body.es_venta,
         )
         filas_por_consecutivo[consecutivo] = len(movs)
         todos_movs.extend(movs)
@@ -450,7 +558,8 @@ def batch_generar(body: BatchRequest, db: DB, empresa: EmpresaActiva, current_us
             mapeos_confirmados=item.mapeos_confirmados,
             tipo_comprobante=body.tipo_comprobante,
             centro_costo=body.centro_costo,
-            es_nota_credito=(item.factura or {}).get("tipo_documento") == "nota_credito",
+            es_nota_credito=_es_nota_reversa(item.factura),
+            es_venta=body.es_venta,
         )
         todos_movs.extend(movs)
 
@@ -491,12 +600,14 @@ def batch_generar(body: BatchRequest, db: DB, empresa: EmpresaActiva, current_us
                 archivo_origen=item.factura.get("_archivo", ""),
                 empresa_id=empresa.id,
                 usuario_id=current_user.id,
+                tipo_causacion=causacion_service.derivar_tipo_causacion(item.factura, body.es_venta),
                 datos_json=json.dumps(
                     {
                         "factura": item.factura,
                         "mapeos": item.mapeos_confirmados,
                         "tipo_comprobante": body.tipo_comprobante,
                         "centro_costo": body.centro_costo,
+                        "es_venta": body.es_venta,
                     },
                     ensure_ascii=False,
                     default=str,
@@ -526,24 +637,22 @@ def exportar_lote_historial(
     empresa: EmpresaActiva,
     fecha_desde: str | None = None,
     fecha_hasta: str | None = None,
+    campo_fecha: str = "causacion",  # 'causacion' (por defecto) | 'emision'
+    tipo_causacion: str | None = None,
     tipo_comprobante: str | None = None,
 ):
     """Genera un único XLSX SIIGO con todas las facturas del período que tienen datos almacenados."""
     stmt = (
         select(FacturaCausada)
-        .where(FacturaCausada.datos_json.is_not(None), FacturaCausada.empresa_id == empresa.id)
+        .where(
+            FacturaCausada.datos_json.is_not(None),
+            FacturaCausada.empresa_id == empresa.id,
+            FacturaCausada.eliminado.is_(False),
+        )
         .order_by(FacturaCausada.id)
     )
-    if fecha_desde:
-        try:
-            stmt = stmt.where(FacturaCausada.fecha_causacion >= date.fromisoformat(fecha_desde))
-        except ValueError:
-            pass
-    if fecha_hasta:
-        try:
-            stmt = stmt.where(FacturaCausada.fecha_causacion <= date.fromisoformat(fecha_hasta))
-        except ValueError:
-            pass
+    stmt = _aplicar_rango_fecha(stmt, campo_fecha, fecha_desde, fecha_hasta)
+    stmt = _aplicar_filtro_tipo_causacion(stmt, tipo_causacion)
     if tipo_comprobante:
         stmt = stmt.where(FacturaCausada.tipo_comprobante == tipo_comprobante)
 
@@ -564,7 +673,8 @@ def exportar_lote_historial(
             mapeos_confirmados=data["mapeos"],
             tipo_comprobante=fc.tipo_comprobante or data.get("tipo_comprobante", "12"),
             centro_costo=data.get("centro_costo", ""),
-            es_nota_credito=data["factura"].get("tipo_documento") == "nota_credito",
+            es_nota_credito=_es_nota_reversa(data["factura"]),
+            es_venta=bool(data.get("es_venta", False)),
         )
         todos_movs.extend(movs)
 
@@ -585,27 +695,27 @@ def get_historial_causadas(
     empresa: EmpresaActiva,
     fecha_desde: str | None = None,
     fecha_hasta: str | None = None,
+    campo_fecha: str = "causacion",  # 'causacion' (por defecto) | 'emision'
+    tipo_causacion: str | None = None,  # 'compras' | 'nc' | 'ventas' | 'nc_ventas' | 'soporte' | 'nc_soporte' (o varios separados por coma)
     buscar: str | None = None,
     tipo_comprobante: str | None = None,
     limit: int = 500,
 ):
-    """Listado filtrable de facturas causadas, orden descendente por fecha."""
+    """Listado filtrable de facturas causadas.
+
+    El rango de fechas (fecha_desde/fecha_hasta) aplica sobre la fecha de
+    CAUSACIÓN o sobre la fecha de EMISIÓN de la factura según `campo_fecha`.
+    `tipo_causacion` filtra por módulo (compras/ventas/soporte/sus NC).
+    """
+    columna_orden = _columna_fecha(campo_fecha)
     stmt = (
         select(FacturaCausada)
-        .where(FacturaCausada.empresa_id == empresa.id)
-        .order_by(FacturaCausada.fecha_causacion.desc(), FacturaCausada.id.desc())
+        .where(FacturaCausada.empresa_id == empresa.id, FacturaCausada.eliminado.is_(False))
+        .order_by(columna_orden.desc(), FacturaCausada.id.desc())
         .limit(limit)
     )
-    if fecha_desde:
-        try:
-            stmt = stmt.where(FacturaCausada.fecha_causacion >= date.fromisoformat(fecha_desde))
-        except ValueError:
-            pass
-    if fecha_hasta:
-        try:
-            stmt = stmt.where(FacturaCausada.fecha_causacion <= date.fromisoformat(fecha_hasta))
-        except ValueError:
-            pass
+    stmt = _aplicar_rango_fecha(stmt, campo_fecha, fecha_desde, fecha_hasta)
+    stmt = _aplicar_filtro_tipo_causacion(stmt, tipo_causacion)
     if tipo_comprobante:
         stmt = stmt.where(FacturaCausada.tipo_comprobante == tipo_comprobante)
     if buscar:
@@ -641,6 +751,7 @@ def get_historial_causadas(
             "subtotal": _subtotal(r.datos_json),
             "total": float(r.total or 0),
             "tipo_comprobante": r.tipo_comprobante,
+            "tipo_causacion": r.tipo_causacion,
             "archivo_origen": r.archivo_origen,
             "tiene_datos": r.datos_json is not None,
         }
@@ -652,7 +763,7 @@ def get_historial_causadas(
 def regenerar_historial(registro_id: int, db: DB, empresa: EmpresaActiva):
     """Re-genera el xlsx de una factura causada previamente a partir de datos almacenados."""
     fc = db.get(FacturaCausada, registro_id)
-    if not fc or fc.empresa_id != empresa.id:
+    if not fc or fc.empresa_id != empresa.id or fc.eliminado:
         raise HTTPException(404, "Registro no encontrado")
     if not fc.datos_json:
         raise HTTPException(
@@ -668,7 +779,8 @@ def regenerar_historial(registro_id: int, db: DB, empresa: EmpresaActiva):
         mapeos_confirmados=data["mapeos"],
         tipo_comprobante=fc.tipo_comprobante or data.get("tipo_comprobante", "12"),
         centro_costo=data.get("centro_costo", ""),
-        es_nota_credito=data["factura"].get("tipo_documento") == "nota_credito",
+        es_nota_credito=_es_nota_reversa(data["factura"]),
+        es_venta=bool(data.get("es_venta", False)),
     )
     xlsx_buf = exporter.generar_xlsx(movimientos)
     nombre = f"regenerado_SIIGO_{fc.numero_dian}.xlsx"
@@ -679,25 +791,43 @@ def regenerar_historial(registro_id: int, db: DB, empresa: EmpresaActiva):
     )
 
 
+@router.delete("/historial/{registro_id}", response_model=dict)
+def eliminar_registro_historial(registro_id: int, db: DB, empresa: EmpresaActiva):
+    """
+    Quita UN registro puntual del historial (soft-delete: nunca se borra la fila
+    de la base de datos, se marca como eliminado y se filtra de los listados).
+    La factura sigue contando como "ya causada" para no duplicarla en SIIGO.
+    """
+    fc = db.get(FacturaCausada, registro_id)
+    if not fc or fc.empresa_id != empresa.id or fc.eliminado:
+        raise HTTPException(404, "Registro no encontrado")
+    fc.eliminado = True
+    fc.eliminado_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"ok": True}
+
+
 @router.delete("/historial", response_model=dict)
 def limpiar_historial(
     db: DB,
     empresa: EmpresaActiva,
     fecha_desde: str | None = None,
     fecha_hasta: str | None = None,
+    campo_fecha: str = "causacion",  # 'causacion' (por defecto) | 'emision'
+    tipo_causacion: str | None = None,
 ):
-    """Elimina registros del historial, opcionalmente filtrados por rango de fechas."""
-    stmt = delete(FacturaCausada).where(FacturaCausada.empresa_id == empresa.id)
-    if fecha_desde:
-        try:
-            stmt = stmt.where(FacturaCausada.fecha_causacion >= date.fromisoformat(fecha_desde))
-        except ValueError:
-            pass
-    if fecha_hasta:
-        try:
-            stmt = stmt.where(FacturaCausada.fecha_causacion <= date.fromisoformat(fecha_hasta))
-        except ValueError:
-            pass
+    """
+    Quita del historial los registros del período (soft-delete: nunca se borra la
+    fila de la base de datos, se marcan como eliminados y se filtran de los
+    listados).
+    """
+    stmt = (
+        update(FacturaCausada)
+        .where(FacturaCausada.empresa_id == empresa.id, FacturaCausada.eliminado.is_(False))
+        .values(eliminado=True, eliminado_at=datetime.now(timezone.utc))
+    )
+    stmt = _aplicar_rango_fecha(stmt, campo_fecha, fecha_desde, fecha_hasta)
+    stmt = _aplicar_filtro_tipo_causacion(stmt, tipo_causacion)
     result = db.execute(stmt)
     db.commit()
     return {"eliminados": result.rowcount}

@@ -2,7 +2,7 @@
 import { Fragment, useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useWizardStore } from "@/stores/wizard";
+import { useWizardStore, esModoNC, esModoVenta, esModoSoporte } from "@/stores/wizard";
 import { useAuthStore } from "@/stores/auth";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -14,9 +14,9 @@ import { OmitidasModal } from "@/components/causacion/omitidas-modal";
 import { fmt } from "@/lib/utils";
 import {
   AlertTriangle, Plus, Sparkles, Loader2,
-  ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search, History, X, Trash2, Save, Scissors, Layers,
+  ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search, History, X, Trash2, Save, Scissors, Layers, Copy, Check,
 } from "lucide-react";
-import type { MapeoItem, CuentaOpcion, ImpuestoOut, FuenteMapeo, Sugerencia, ItemFactura, Paso2Snapshot, BorradorSnapshot } from "@/lib/types";
+import type { MapeoItem, CuentaOpcion, ImpuestoOut, FuenteMapeo, Sugerencia, ItemFactura, Factura, Paso2Snapshot, BorradorSnapshot } from "@/lib/types";
 
 // SIIGO acepta máx. 500 líneas por archivo, incluyendo el encabezado → 499 de
 // datos. Debe coincidir con core/exporter.MAX_FILAS_ARCHIVO en el backend.
@@ -35,7 +35,8 @@ function impOpts(imps: ImpuestoOut[], tipos?: string[]) {
 }
 
 const ORIGEN_BADGE: Record<string, { label: string; variant: "success" | "info" | "purple" | "warning" | "default" }> = {
-  aprendizaje:  { label: "Aprendido",      variant: "success" },
+  aprendizaje:      { label: "Aprendido",              variant: "success" },
+  aprendizaje_otro: { label: "Aprendido (otro prov.)", variant: "warning" },
   regla:        { label: "Regla",          variant: "info" },
   forma_pago:   { label: "Forma pago",     variant: "info" },
   ia_alta:      { label: "IA · Alta",      variant: "purple" },
@@ -47,6 +48,7 @@ const ORIGEN_BADGE: Record<string, { label: string; variant: "success" | "info" 
 
 function origenToFuente(origen: string | null): FuenteMapeo {
   if (origen === "aprendizaje") return "aprendido";
+  if (origen === "aprendizaje_otro") return "aprendido_otro";
   if (origen === "regla") return "regla";
   if (origen === "ia") return "ia_alta";
   return "manual";
@@ -71,12 +73,17 @@ function DataField({ label, value, mono = false }: { label: string; value: strin
 
 export function Paso2() {
   const { docTipo, facturas, facturasYaCausadas, tipoComp, centroCosto, setPaso, setFacturas, setFacturasParaCausar, setMapeos, suggestions, setSuggestions, pdfUrls, paso2Cache, setPaso2Cache, filesProcesando, setFilesProcesando, tutorialActivo, tutorialMockMapeo, facturasOmitidas, setFacturasOmitidas } = useWizardStore();
-  const esNC = docTipo === "nc";
+  const esNC = esModoNC(docTipo);
+  const esVenta = esModoVenta(docTipo);
+  // En ventas el tercero es el cliente; en compras, el proveedor.
+  const terceroLabel = esVenta ? "Cliente" : esModoSoporte(docTipo) ? "Vendedor" : "Proveedor";
   const [modalCausadasOpen, setModalCausadasOpen] = useState(false);
   const [modalOmitidasOpen, setModalOmitidasOpen] = useState(false);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
 
   const { data: cuentasGasto = [] } = useQuery({ queryKey: ["cuentas-gasto"], queryFn: api.getCuentasGasto });
+  // En ventas la "cuenta" es de INGRESO (clase 4), no de gasto.
+  const { data: cuentasIngreso = [] } = useQuery({ queryKey: ["cuentas-ingreso"], queryFn: api.getCuentasIngreso });
   const { data: cuentasPago = [] } = useQuery({ queryKey: ["cuentas-pago"], queryFn: api.getCuentasPago });
   const { data: todasCuentas = [] } = useQuery({ queryKey: ["cuentas-todas"], queryFn: api.getCuentasTodas });
   const { data: impuestosRaw = [], refetch: refetchImps } = useQuery({ queryKey: ["impuestos"], queryFn: api.getImpuestos });
@@ -109,6 +116,7 @@ export function Paso2() {
 
   // Borrador (guardado temporal): "idle" | "guardando" | "guardado" | "error"
   const [borradorEstado, setBorradorEstado] = useState<"idle" | "guardando" | "guardado" | "error">("idle");
+  const [cufeCopiado, setCufeCopiado] = useState(false);
   const queryClient = useQueryClient();
   const empresaId = useAuthStore((s) => s.empresaId);   // el borrador se aísla por empresa
 
@@ -242,7 +250,7 @@ export function Paso2() {
         allItems.forEach(({ key }) => {
           const sug = sugs[key];
           if (!sug) return;
-          const esAutoconfiable = sug.origen === "regla" || sug.origen === "aprendizaje";
+          const esAutoconfiable = sug.origen === "regla" || sug.origen === "aprendizaje" || sug.origen === "aprendizaje_otro";
           if (!next[key] && sug.cuenta && esAutoconfiable) next[key] = sug.cuenta;
         });
         return next;
@@ -310,7 +318,7 @@ export function Paso2() {
       return () => clearTimeout(t);
     }
 
-    api.sugerirCuentasBatch(pendientes)
+    api.sugerirCuentasBatch(pendientes, esVenta)
       .then(({ resultados }) => {
         const nuevas: Record<string, Sugerencia> = {};
         Object.entries(resultados).forEach(([key, r]) => {
@@ -343,7 +351,10 @@ export function Paso2() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [facturas]);
 
-  const gastoOpts = cuentaOpts(cuentasGasto);
+  // En ventas se mapea contra cuentas de INGRESO (clase 4); en compras, gasto/costo.
+  const cuentasParaMapeo = esVenta ? cuentasIngreso : cuentasGasto;
+  const cuentaLabel = esVenta ? "Cuenta de ingreso" : "Cuenta gasto/costo";
+  const gastoOpts = cuentaOpts(cuentasParaMapeo);
   const pagoOpts  = cuentaOpts(cuentasPago);
   const rfOpts    = impOpts(impuestosRaw, ["retefuente"]);
   const riOpts    = impOpts(impuestosRaw, ["reteica"]);
@@ -368,6 +379,62 @@ export function Paso2() {
     return soloDev?.codigo ?? "";
   };
 
+  // Cuenta de IVA (u otro impuesto sobre ventas/compras) por defecto para un
+  // impuesto, según el módulo actual:
+  //   compras factura → cta_compras         · compras NC → devolución en compras (PUC)
+  //   ventas  factura → cta_ventas          · ventas  NC → cta_dev_ventas (o devolución PUC)
+  const cuentaIvaDeImpuesto = (
+    impInfo?: { tarifa: number | null; cta_compras: string | null; cta_ventas: string | null; cta_dev_ventas: string | null } | null,
+  ): string => {
+    if (!impInfo) return "";
+    if (esVenta) {
+      if (esNC) return impInfo.cta_dev_ventas || recomendarCuentaIvaDevolucion(impInfo.tarifa ?? 0) || impInfo.cta_ventas || "";
+      return impInfo.cta_ventas ?? "";
+    }
+    if (esNC) return recomendarCuentaIvaDevolucion(impInfo.tarifa ?? 0);
+    return impInfo.cta_compras ?? "";
+  };
+
+  // Cuenta de la retención según el módulo: en compras es la "retención por pagar"
+  // (cta_compras del impuesto de retención); en ventas es la "retención que te
+  // practican / anticipo" (cta_ventas). El signo (débito/crédito) lo ajusta el
+  // backend al invertir la partida de la venta.
+  const ctaRetencion = (imp?: { cta_compras: string | null; cta_ventas: string | null } | null): string =>
+    esVenta ? (imp?.cta_ventas ?? "") : (imp?.cta_compras ?? "");
+
+  // Palabras clave para emparejar un tributo DIAN con un impuesto del catálogo.
+  const TRIBUTO_KEYWORDS: Record<string, string[]> = {
+    "02": ["inc", "consumo"], "04": ["inc", "consumo"], "08": ["inc", "consumo"],
+    "22": ["bolsa"],
+    "33": ["inpp", "plastic", "plástic"],
+    "34": ["ibua", "azucarad"],
+    "35": ["icui", "ultraprocesad"],
+  };
+  const _n = (s: string | null | undefined) =>
+    (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const esImpRetencion = (i: ImpuestoOut) =>
+    ["retefuente", "reteica", "reteiva"].some((r) => _n(i.tipo_impuesto).includes(r));
+
+  // Busca en el catálogo de impuestos el que corresponde a un tributo DIAN y
+  // devuelve su cuenta (según módulo) y código SIIGO. Solo se NECESITA cuenta para
+  // los tributos "independientes" en VENTAS (INC / bolsas por pagar); en compras y
+  // en los de grupo "costo" el tributo va a la cuenta de gasto/ingreso del ítem.
+  const resolverCuentaTributo = (
+    trib: { cod_dian: string; nombre: string },
+  ): { cuenta: string; cod_impuesto: string; encontrado: boolean } => {
+    const kws = TRIBUTO_KEYWORDS[trib.cod_dian] ?? _n(trib.nombre).split(/\s+/).filter((w) => w.length > 3);
+    const imp = impuestosRaw.find((i) => {
+      if (esImpRetencion(i)) return false;
+      const texto = `${_n(i.tipo_impuesto)} ${_n(i.nombre)}`;
+      return kws.some((k) => texto.includes(k));
+    });
+    if (!imp) return { cuenta: "", cod_impuesto: "", encontrado: false };
+    const cuenta = esVenta
+      ? (esNC ? imp.cta_dev_ventas || imp.cta_ventas || "" : imp.cta_ventas || "")
+      : (esNC ? imp.cta_dev_compras || imp.cta_compras || "" : imp.cta_compras || "");
+    return { cuenta, cod_impuesto: imp.codigo, encontrado: true };
+  };
+
   const getImpInfo = (cod: string) => impuestosRaw.find((i) => i.codigo === cod);
   const getEffBase = (key: string, item: ItemFactura): number => {
     const v = Number(baseOverride[key]);
@@ -389,37 +456,119 @@ export function Paso2() {
     verificadas, baseOverride,
   }), [facturas.length, cuentaPago, tipoProveedor, nitEdit, cuentaGastoGlobal, rfGlobal, riGlobal, codImpuestoGlobal, cuentaIvaGlobal, cuentaGastoItem, rfItem, riItem, codImpuestoItem, cuentaIvaItem, verificadas, baseOverride]);
 
+  // Constructor del payload del borrador, SIEMPRE con el estado más reciente. Se
+  // guarda en un ref para que el guardado (single-flight, abajo) nunca use un
+  // closure viejo.
+  const buildPayload = useCallback(() => {
+    const snapshot: BorradorSnapshot = {
+      facturas, tipoComp, centroCosto,
+      facturasYaCausadas, facturasOmitidas, suggestions,
+      paso2: buildPaso2Snapshot(),
+    };
+    return {
+      datos: snapshot as unknown as Record<string, unknown>,
+      total_facturas: facturas.length,
+      total_verificadas: Object.values(verificadas).filter(Boolean).length,
+      tipo_comp: tipoComp || null,
+    };
+  }, [facturas, tipoComp, centroCosto, facturasYaCausadas, facturasOmitidas, suggestions, buildPaso2Snapshot, verificadas]);
+  const buildPayloadRef = useRef(buildPayload);
+  buildPayloadRef.current = buildPayload;
+  // docTipo capturado UNA sola vez al montar el paso 2: este paso 2 pertenece a UN
+  // módulo y SIEMPRE debe guardar en el borrador de ESE módulo. NO se sigue el
+  // docTipo del store en vivo, porque durante la transición entre módulos el store
+  // cambia antes de que este paso 2 se desmonte, y un guardado tardío (flush/
+  // debounce) terminaría escribiendo en el borrador del OTRO módulo (contaminación
+  // cruzada simétrica: guardar ventas borraba compras y viceversa).
+  const docTipoRef = useRef(docTipo);
+
+  // Guardado del borrador con "single-flight": nunca corren dos guardados a la vez
+  // (así un guardado viejo no puede pisar a uno nuevo por terminar fuera de orden).
+  // Si el estado cambia mientras se está guardando, al terminar se re-guarda con lo
+  // ÚLTIMO. Resultado: SIEMPRE queda persistido el estado más reciente. La función
+  // es estable (no depende del estado) para que autoguardado, flush y botón usen
+  // siempre la misma y coordinen el single-flight.
+  const savingRef = useRef(false);
+  const pendingRef = useRef(false);
   const guardarBorrador = useCallback(async () => {
+    if (savingRef.current) { pendingRef.current = true; return; }  // hay uno en curso: se re-guardará
+    savingRef.current = true;
     setBorradorEstado("guardando");
     try {
-      const snapshot: BorradorSnapshot = {
-        facturas, tipoComp, centroCosto,
-        facturasYaCausadas, facturasOmitidas, suggestions,
-        paso2: buildPaso2Snapshot(),
-      };
-      await api.guardarBorrador({
-        datos: snapshot as unknown as Record<string, unknown>,
-        total_facturas: facturas.length,
-        total_verificadas: Object.values(verificadas).filter(Boolean).length,
-        tipo_comp: tipoComp || null,
-      }, docTipo);
+      do {
+        pendingRef.current = false;
+        await api.guardarBorrador(buildPayloadRef.current(), docTipoRef.current);
+      } while (pendingRef.current);  // cambió mientras guardaba → re-guardar lo último
       setBorradorEstado("guardado");
       // Mantener sincronizada la tarjeta "Tienes un borrador guardado" del paso 1
-      // para que aparezca al volver sin tener que recargar la página.
-      void queryClient.invalidateQueries({ queryKey: ["borrador", docTipo, empresaId] });
+      // para que aparezca al volver sin tener que recargar la página. Se usa
+      // docTipoRef (no el docTipo en vivo) por la misma razón que el guardado.
+      void queryClient.invalidateQueries({ queryKey: ["borrador", docTipoRef.current, empresaId] });
     } catch {
       setBorradorEstado("error");
+    } finally {
+      savingRef.current = false;
     }
-  }, [facturas, tipoComp, centroCosto, facturasYaCausadas, facturasOmitidas, suggestions, buildPaso2Snapshot, verificadas, queryClient, docTipo, empresaId]);
+    // Se mantiene ESTABLE a propósito (no depende del estado del formulario) para
+    // que autoguardado, flush y botón compartan el mismo single-flight. empresaId
+    // sí entra porque solo cambia al cambiar de empresa, no al editar.
+  }, [queryClient, empresaId]);
 
-  // Autoguardado de respaldo: 4s tras el último cambio de configuración.
+  // Autoguardado de respaldo: 2s tras el último cambio de configuración.
   const paso2Sig = JSON.stringify(buildPaso2Snapshot());
   useEffect(() => {
     if (tutorialActivo || facturas.length === 0) return;
-    const t = setTimeout(() => { void guardarBorrador(); }, 4000);
+    const t = setTimeout(() => { void guardarBorrador(); }, 2000);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paso2Sig]);
+
+  // Respaldo adicional: guarda el borrador al SALIR del paso 2 (ir a validación o
+  // navegar a otra página) y cuando la pestaña pasa a segundo plano o se cierra.
+  // Cierra la ventana en la que la última configuración podría perderse si la
+  // sesión se interrumpe (el navegador congela la pestaña, cierre inesperado…).
+  const guardarRef = useRef(guardarBorrador);
+  guardarRef.current = guardarBorrador;
+  useEffect(() => {
+    const flush = () => {
+      const s = useWizardStore.getState();
+      if (!s.tutorialActivo && s.facturas.length > 0) void guardarRef.current();
+    };
+    const onVisibility = () => { if (document.visibilityState === "hidden") flush(); };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", flush);
+      flush(); // al desmontar el paso 2 (navegar, cambiar de módulo…)
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Registrar el guardado en el store para que el sidebar pueda GUARDAR antes de
+  // cambiar de módulo (aviso al salir). Se limpia al desmontar el paso 2.
+  useEffect(() => {
+    if (tutorialActivo) return;
+    useWizardStore.getState().setGuardarBorradorFn(async () => { await guardarRef.current(); });
+    return () => useWizardStore.getState().setGuardarBorradorFn(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Guardado INMEDIATO al cargar (o cambiar la cantidad de) facturas, sin esperar
+  // el debounce de 2s. Así, si el usuario carga facturas y cambia de módulo enseguida
+  // (p. ej. de Compras a NC o Ventas), no se pierden: quedan ya en el borrador del
+  // módulo y reaparecen en la tarjeta "Continuar" al volver.
+  const nFacturas = facturas.length;
+  useEffect(() => {
+    if (tutorialActivo || nFacturas === 0) return;
+    // Si venimos de RESTAURAR un borrador (hay cache de paso 2 que calza), NO
+    // re-guardar aquí: la config aún no se aplicó y guardaríamos vacío, pisando el
+    // borrador. Ese borrador ya está guardado; el debounce/flush cubren lo demás.
+    const cache = useWizardStore.getState().paso2Cache;
+    if (cache && cache.facturaCount === nFacturas) return;
+    void guardarBorrador();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nFacturas]);
 
   // Construye los mapeos contables de UNA factura (misma lógica de la partida
   // doble). Extraído para poder contar filas en vivo sin duplicar la lógica.
@@ -456,9 +605,7 @@ export function Paso2() {
       // "descontable" del catálogo de impuesto.
       const cuentaIvaGlobalVal = cuentaIvaGlobal[idx];
       const cuentaIvaItemVal = cuentaIvaItem[key];
-      const cuentaIvaPorDefecto = esNC
-        ? recomendarCuentaIvaDevolucion(impInfo?.tarifa ?? 0)
-        : (impInfo?.cta_compras ?? "");
+      const cuentaIvaPorDefecto = cuentaIvaDeImpuesto(impInfo);
       const cuentaIvaFinal = (cuentaIvaItemVal && cuentaIvaItemVal !== "") ? cuentaIvaItemVal
                            : (cuentaIvaGlobalVal && cuentaIvaGlobalVal !== "") ? cuentaIvaGlobalVal
                            : cuentaIvaPorDefecto;
@@ -466,6 +613,17 @@ export function Paso2() {
       const effBase = getEffBase(key, item);
       const tarifa = impInfo?.tarifa ?? item.porcentaje ?? 0;
       const valorIva = tarifa > 0 ? Math.round(effBase * tarifa / 100) : item.valor_impuesto;
+
+      // Otros tributos de la línea (INC, bolsas, IBUA, ICUI, INPP, otros). Solo los
+      // "independientes" en ventas necesitan cuenta propia del catálogo; el resto va
+      // a la cuenta de gasto/ingreso del ítem (cuenta vacía → el exporter usa esa).
+      const otrosTributos = (item.otros_tributos ?? []).map((t) => {
+        if (esVenta && t.grupo === "independiente") {
+          const r = resolverCuentaTributo(t);
+          return { ...t, cuenta: r.cuenta, cod_impuesto: r.cod_impuesto };
+        }
+        return { ...t, cuenta: "", cod_impuesto: "" };
+      });
 
       mapeos.push({
         idx_factura: newIdx, descripcion: item.descripcion, base: effBase,
@@ -476,6 +634,7 @@ export function Paso2() {
         cuenta_impuesto_deb: cuentaIvaFinal,
         cuenta_impuesto_cre: "", es_retencion: false,
         cuenta_pago: pago, cuenta_pago_nombre: pagoNombre,
+        otros_tributos: otrosTributos,
       });
 
       if (!globalRetActiva) {
@@ -486,7 +645,7 @@ export function Paso2() {
             base: effBase, cod_impuesto: rf.codigo, porcentaje: rf.tarifa ?? 0,
             valor_impuesto: Math.round((effBase * (rf.tarifa ?? 0)) / divisorTarifa(rf)),
             cuenta_gasto: "", fuente: "manual",
-            cuenta_impuesto_deb: "", cuenta_impuesto_cre: rf.cta_compras ?? "",
+            cuenta_impuesto_deb: "", cuenta_impuesto_cre: ctaRetencion(rf),
             es_retencion: true, cuenta_pago: pago, cuenta_pago_nombre: pagoNombre,
           });
         }
@@ -497,7 +656,7 @@ export function Paso2() {
             base: effBase, cod_impuesto: ri.codigo, porcentaje: ri.tarifa ?? 0,
             valor_impuesto: Math.round((effBase * (ri.tarifa ?? 0)) / divisorTarifa(ri)),
             cuenta_gasto: "", fuente: "manual",
-            cuenta_impuesto_deb: "", cuenta_impuesto_cre: ri.cta_compras ?? "",
+            cuenta_impuesto_deb: "", cuenta_impuesto_cre: ctaRetencion(ri),
             es_retencion: true, cuenta_pago: pago, cuenta_pago_nombre: pagoNombre,
           });
         }
@@ -512,7 +671,7 @@ export function Paso2() {
         base: totalBase, cod_impuesto: rf.codigo, porcentaje: rf.tarifa ?? 0,
         valor_impuesto: Math.round((totalBase * (rf.tarifa ?? 0)) / divisorTarifa(rf)),
         cuenta_gasto: "", fuente: "manual",
-        cuenta_impuesto_deb: "", cuenta_impuesto_cre: rf.cta_compras ?? "",
+        cuenta_impuesto_deb: "", cuenta_impuesto_cre: ctaRetencion(rf),
         es_retencion: true, cuenta_pago: cuentaPago[idx] ?? "", cuenta_pago_nombre: "",
       });
     }
@@ -523,7 +682,7 @@ export function Paso2() {
         base: totalBase, cod_impuesto: ri.codigo, porcentaje: ri.tarifa ?? 0,
         valor_impuesto: Math.round((totalBase * (ri.tarifa ?? 0)) / divisorTarifa(ri)),
         cuenta_gasto: "", fuente: "manual",
-        cuenta_impuesto_deb: "", cuenta_impuesto_cre: ri.cta_compras ?? "",
+        cuenta_impuesto_deb: "", cuenta_impuesto_cre: ctaRetencion(ri),
         es_retencion: true, cuenta_pago: cuentaPago[idx] ?? "", cuenta_pago_nombre: "",
       });
     }
@@ -535,7 +694,7 @@ export function Paso2() {
   // deduplican ítems idénticos: cada línea de la factura produce sus propias
   // filas, así el conteo cuadra con el archivo real y el batching de 500 filas
   // de SIIGO no se queda corto.
-  const contarFilas = (ms: MapeoItem[]): number => {
+  const contarFilas = (ms: MapeoItem[], factura?: Factura): number => {
     let filas = 0, deb = 0, cred = 0;
     for (const m of ms) {
       const base = m.base || 0;
@@ -544,6 +703,17 @@ export function Paso2() {
       if (base && m.cuenta_gasto) { filas++; deb += base; }
       if (val && m.cuenta_impuesto_deb && !esRet) { filas++; deb += val; }
       if (val && m.cuenta_impuesto_cre && esRet) { filas++; cred += val; }
+      // Otros tributos (INC, bolsas, IBUA, ICUI, INPP, otros): una fila débito c/u.
+      for (const t of (m.otros_tributos ?? [])) {
+        const vt = t.valor || 0;
+        if (vt && (t.cuenta || m.cuenta_gasto)) { filas++; deb += vt; }
+      }
+    }
+    // Descuento / recargo globales de la factura (una fila c/u).
+    const cgRepr = ms.find((m) => m.cuenta_gasto)?.cuenta_gasto || "";
+    if (factura && cgRepr) {
+      if (factura.descuento_global) { filas++; cred += factura.descuento_global; }
+      if (factura.recargo_global)  { filas++; deb  += factura.recargo_global; }
     }
     if (Math.round((deb - cred) * 100) / 100 !== 0) filas++; // fila de pago
     return filas;
@@ -556,7 +726,7 @@ export function Paso2() {
     let excede = false, verificadasCount = 0;
     for (let idx = 0; idx < facturas.length; idx++) {
       if (!verificadas[idx] || estaCausada(idx)) continue;
-      const filas = contarFilas(construirMapeosFactura(idx, verificadasCount));
+      const filas = contarFilas(construirMapeosFactura(idx, verificadasCount), facturas[idx]);
       verificadasCount++;
       total += filas;
       if (acum + filas <= MAX_FILAS) {
@@ -578,7 +748,7 @@ export function Paso2() {
       if (!verificadas[idx] || estaCausada(idx)) continue;
       const newIdx = facturasVerificadas.length;
       const mFactura = construirMapeosFactura(idx, newIdx);
-      const filas = contarFilas(mFactura);
+      const filas = contarFilas(mFactura, facturas[idx]);
       // Tope SIIGO: no pasar de MAX_FILAS en un archivo. Siempre entra ≥1.
       if (facturasVerificadas.length > 0 && filasAcum + filas > MAX_FILAS) break;
       filasAcum += filas;
@@ -649,7 +819,7 @@ export function Paso2() {
                 variant="outline"
                 size="sm"
                 onClick={() => { void guardarBorrador(); }}
-                disabled={facturas.length === 0 || borradorEstado === "guardando"}
+                disabled={facturas.length === 0}
                 title="Guarda un borrador para retomar más tarde desde donde quedaste"
                 className="gap-1.5"
               >
@@ -713,10 +883,13 @@ export function Paso2() {
                 </span>
                 {(() => {
                   const v = facturasOmitidas.filter(o => o.motivo === "venta").length;
+                  const cp = facturasOmitidas.filter(o => o.motivo === "compra").length;
                   const c = facturasOmitidas.filter(o => o.motivo === "ya_causada").length;
-                  if (v > 0 && c > 0) return ` — ${v} de venta, ${c} ya causada${c !== 1 ? "s" : ""}`;
-                  if (v > 0) return " — facturas de venta (próximamente disponible)";
-                  return " — ya causadas anteriormente";
+                  const partes: string[] = [];
+                  if (v > 0) partes.push(`${v} de venta`);
+                  if (cp > 0) partes.push(`${cp} de compra`);
+                  if (c > 0) partes.push(`${c} ya causada${c !== 1 ? "s" : ""}`);
+                  return partes.length ? ` — ${partes.join(", ")}` : "";
                 })()}
               </p>
             </div>
@@ -927,7 +1100,7 @@ export function Paso2() {
           <table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
-                {["#", "N° Factura", "Proveedor / NIT", "Fecha", "Subtotal", "Total", "Estado", ""].map((h) => (
+                {["#", "N° Factura", `${terceroLabel} / NIT`, "Fecha", "Subtotal", "Total", "Estado", ""].map((h) => (
                   <th
                     key={h}
                     className={`px-4 py-3 text-xs font-semibold uppercase tracking-wide${h === "Total" ? " text-right" : " text-left"}`}
@@ -1075,6 +1248,14 @@ export function Paso2() {
   // ── DETAIL VIEW ──────────────────────────────────────────────────────────────
   const factura = facturas[selectedIdx];
   const esPdf = !["xlsx", "xls"].some(ext => (factura._archivo ?? "").toLowerCase().endsWith(`.${ext}`));
+  const copiarCufe = async () => {
+    if (!factura.cufe) return;
+    try {
+      await navigator.clipboard.writeText(factura.cufe);
+      setCufeCopiado(true);
+      setTimeout(() => setCufeCopiado(false), 1800);
+    } catch { /* portapapeles no disponible: no-op */ }
+  };
   const totalCalculado = factura.items.reduce((sum, item, jdx) => {
     const k = `${selectedIdx}_${jdx}`;
     const effBase = getEffBase(k, item);
@@ -1084,8 +1265,21 @@ export function Paso2() {
     const ivaInfo = codIva ? getImpInfo(codIva) : null;
     const tarifa = ivaInfo?.tarifa ?? 0;
     const valorIva = tarifa > 0 ? Math.round(effBase * tarifa / 100) : item.valor_impuesto;
-    return sum + effBase + valorIva;
-  }, 0);
+    const otros = (item.otros_tributos ?? []).reduce((s, t) => s + (t.valor || 0), 0);
+    return sum + effBase + valorIva + otros;
+  }, 0) - (factura.descuento_global || 0) + (factura.recargo_global || 0);
+
+  // Alerta: un tributo "independiente" en VENTAS sin cuenta configurada en el
+  // catálogo no se puede desglosar (INC / bolsas por pagar a la DIAN).
+  const alertasTributo = [...new Set(
+    esVenta
+      ? factura.items.flatMap((item) =>
+          (item.otros_tributos ?? [])
+            .filter((t) => t.grupo === "independiente" && !resolverCuentaTributo(t).cuenta)
+            .map((t) => `El tributo "${t.nombre}" no tiene una cuenta configurada en Catálogos → Impuestos; configúrala para poder desglosarlo en la venta.`),
+        )
+      : [],
+  )];
   const isFirst = selectedIdx === 0;
   const isLast  = selectedIdx === facturas.length - 1;
   const retGlobalActiva = !!(rfGlobal[selectedIdx] || riGlobal[selectedIdx]);
@@ -1196,11 +1390,28 @@ export function Paso2() {
             )}
           </div>
         )}
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-6">
           <DataField label={esNC ? "N° Nota crédito" : "N° Factura DIAN"} value={factura.numero_dian} mono />
           <DataField label="Fecha emisión" value={factura.fecha} />
           <div className="col-span-2">
-            <DataField label="Proveedor" value={factura.razon_social} />
+            <DataField label={terceroLabel} value={factura.razon_social} />
+          </div>
+          {/* CUFE: botón para copiarlo al portapapeles y buscar la factura en la DIAN */}
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>CUFE</p>
+            {factura.cufe ? (
+              <button
+                type="button"
+                onClick={() => { void copiarCufe(); }}
+                title={`Copiar CUFE para buscar la factura en la DIAN\n${factura.cufe}`}
+                className="mt-1 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-opacity hover:opacity-80"
+                style={{ borderColor: "var(--border-soft)", color: cufeCopiado ? "var(--success)" : "var(--text-secondary)", backgroundColor: "var(--bg-elevated)" }}
+              >
+                {cufeCopiado ? <><Check className="h-3.5 w-3.5" /> Copiado</> : <><Copy className="h-3.5 w-3.5" /> Copiar CUFE</>}
+              </button>
+            ) : (
+              <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>—</p>
+            )}
           </div>
           <div>
             <p className="text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Total factura</p>
@@ -1213,16 +1424,26 @@ export function Paso2() {
                 Calculado: {fmt(totalCalculado)}
               </p>
             )}
+            {(factura.descuento_global ?? 0) > 0 && (
+              <p className="mt-0.5 text-[11px] font-medium tabular-nums" style={{ color: "var(--success)" }}>
+                Descuento global: −{fmt(factura.descuento_global ?? 0)} <span style={{ color: "var(--text-muted)" }}>(menor valor {esVenta ? "de la venta" : "del gasto"})</span>
+              </p>
+            )}
+            {(factura.recargo_global ?? 0) > 0 && (
+              <p className="mt-0.5 text-[11px] font-medium tabular-nums" style={{ color: "var(--text-secondary)" }}>
+                Recargo global: +{fmt(factura.recargo_global ?? 0)} <span style={{ color: "var(--text-muted)" }}>({esVenta ? "cobro al cliente" : "mayor valor del gasto"})</span>
+              </p>
+            )}
           </div>
         </div>
-        {factura.advertencias && factura.advertencias.length > 0 && (
+        {((factura.advertencias?.length ?? 0) > 0 || alertasTributo.length > 0) && (
           <div
             className="mt-3 flex items-start gap-2 rounded-lg px-3 py-2 text-xs"
             style={{ backgroundColor: "var(--warning-bg)", border: "1px solid var(--warning-border)", color: "var(--warning-text)" }}
           >
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <ul className="flex-1 space-y-0.5">
-              {factura.advertencias.map((w, i) => <li key={i}>{w}</li>)}
+              {[...(factura.advertencias ?? []), ...alertasTributo].map((w, i) => <li key={i}>{w}</li>)}
             </ul>
             {factura._archivo && pdfUrls[factura._archivo] && (
               <button
@@ -1374,7 +1595,7 @@ export function Paso2() {
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1.5">
               <label className="text-xs font-medium flex items-center gap-1.5" style={{ color: "var(--info-text)", opacity: 0.85 }}>
-                Cuenta gasto/costo
+                {cuentaLabel}
                 {cuentaGastoGlobalVacia && <span className="require-badge">O por ítem</span>}
               </label>
               <div className={cuentaGastoGlobalVacia ? "require-pulse rounded-lg" : ""}>
@@ -1515,7 +1736,7 @@ export function Paso2() {
                 <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)", minWidth: "220px" }}>Descripción</th>
                 <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Base</th>
                 <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Impuesto</th>
-                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)", minWidth: "260px" }}>Cuenta gasto/costo</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)", minWidth: "260px" }}>{cuentaLabel}</th>
                 {!retGlobalActiva && (
                   <>
                     <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Retefuente</th>
@@ -1586,6 +1807,30 @@ export function Paso2() {
                       <p className="text-sm break-words whitespace-normal" style={{ color: "var(--text-secondary)" }}>
                         {item.descripcion}
                       </p>
+                      {/* Otros tributos y descuento de la línea (informativo) */}
+                      {((item.otros_tributos?.length ?? 0) > 0 || (item.descuento_item ?? 0) > 0) && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {(item.otros_tributos ?? []).map((t, ti) => (
+                            <span
+                              key={ti}
+                              title={`${t.nombre}${esVenta && t.grupo === "independiente" ? " · se desglosa aparte" : " · mayor valor del " + (esVenta ? "ingreso" : "gasto")}`}
+                              className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium"
+                              style={{ backgroundColor: "var(--brand-soft, var(--warning-bg))", color: "var(--brand, var(--warning-text))" }}
+                            >
+                              {t.nombre.replace(/\s*\(.*\)/, "")}: {fmt(t.valor)}
+                            </span>
+                          ))}
+                          {(item.descuento_item ?? 0) > 0 && (
+                            <span
+                              className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium"
+                              style={{ backgroundColor: "var(--success-bg, var(--warning-bg))", color: "var(--success, var(--warning-text))" }}
+                              title="Descuento del ítem (ya incluido en la base)"
+                            >
+                              Dcto ítem: {fmt(item.descuento_item ?? 0)}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </td>
 
                     {/* Base — editable solo si viene de PDF (extracción imprecisa) */}
@@ -1630,8 +1875,7 @@ export function Paso2() {
                         const cuentaIvaGlobalActiva = !!(cuentaIvaGlobal[selectedIdx] && cuentaIvaGlobal[selectedIdx] !== "");
                         const cuentaIvaEfectiva = (cuentaIvaItem[key] && cuentaIvaItem[key] !== "") ? cuentaIvaItem[key]
                           : cuentaIvaGlobalActiva ? cuentaIvaGlobal[selectedIdx]
-                          : esNC ? recomendarCuentaIvaDevolucion(ivaEfectivoInfo?.tarifa ?? 0)
-                          : ivaEfectivoInfo?.cta_compras ?? "";
+                          : cuentaIvaDeImpuesto(ivaEfectivoInfo);
                         return (
                           <>
                             <Combobox
@@ -1679,7 +1923,7 @@ export function Paso2() {
                         {/* Sugerencia IA pendiente: tarjeta con botón para aceptar */}
                         {iaSugerencia && (() => {
                           const iaBadge = ORIGEN_BADGE[iaSugerencia.origen ?? "ia"] ?? ORIGEN_BADGE.ia;
-                          const nombreCuenta = cuentasGasto.find(c => c.codigo === iaSugerencia.cuenta)?.nombre ?? iaSugerencia.cuenta;
+                          const nombreCuenta = cuentasParaMapeo.find(c => c.codigo === iaSugerencia.cuenta)?.nombre ?? iaSugerencia.cuenta;
                           return (
                             <div
                               className="rounded-lg px-3 py-2 space-y-1.5"

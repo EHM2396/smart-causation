@@ -121,6 +121,83 @@ def _limpiar_telefono(raw: str) -> str:
     return max(validas, key=len)
 
 
+# Campos de tercero que se intercambian emisor↔cliente al causar una venta.
+_CAMPOS_TERCERO = (
+    "nit", "razon_social", "nombre_comercial", "tipo_proveedor",
+    "tipo_identificacion_codigo", "ciudad", "departamento", "direccion",
+    "codigo_postal", "telefono", "email", "nombres_tercero", "apellidos_tercero",
+)
+
+
+def _extraer_party_xml(party) -> dict:
+    """Extrae los datos de un ``cac:Party`` (proveedor o cliente) del XML UBL.
+
+    Es el espejo de la extracción del ``AccountingSupplierParty``, reutilizable
+    para el ``AccountingCustomerParty``: al causar una VENTA el tercero es el
+    CLIENTE (receptor), no el emisor (que es la propia empresa)."""
+    d = {c: "" for c in _CAMPOS_TERCERO}
+    d["tipo_proveedor"] = "juridica"
+    if party is None:
+        return d
+
+    tax_scheme = party.find("cac:PartyTaxScheme", _NS)
+    if tax_scheme is not None:
+        nit_el = tax_scheme.find("cbc:CompanyID", _NS)
+        if nit_el is not None and nit_el.text:
+            d["nit"] = re.sub(r"[^\d\-]", "", nit_el.text.strip())
+            scheme_id = (nit_el.get("schemeID") or "").strip()
+            d["tipo_identificacion_codigo"] = scheme_id
+            if scheme_id in ("13", "22"):
+                d["tipo_proveedor"] = "natural"
+            elif scheme_id == "31":
+                d["tipo_proveedor"] = "juridica"
+
+    legal = party.find("cac:PartyLegalEntity", _NS)
+    if legal is not None:
+        d["razon_social"] = _xml_text(legal.find("cbc:RegistrationName", _NS))
+    pname = party.find("cac:PartyName", _NS)
+    if pname is not None:
+        candidate = _xml_text(pname.find("cbc:Name", _NS))
+        if not d["razon_social"]:
+            d["razon_social"] = candidate
+        elif candidate and candidate.upper() != d["razon_social"].upper():
+            d["nombre_comercial"] = candidate
+
+    addr = party.find("cac:PhysicalLocation/cac:Address", _NS)
+    if addr is None:
+        addr = party.find("cac:PostalAddress", _NS)
+    if addr is not None:
+        d["ciudad"] = _xml_text(addr.find("cbc:CityName", _NS))
+        d["departamento"] = _xml_text(addr.find("cbc:CountrySubentity", _NS))
+        d["codigo_postal"] = _xml_text(addr.find("cbc:PostalZone", _NS))
+        addr_line = addr.find("cac:AddressLine", _NS)
+        if addr_line is not None:
+            d["direccion"] = _xml_text(addr_line.find("cbc:Line", _NS))
+
+    contact = party.find("cac:Contact", _NS)
+    if contact is not None:
+        d["telefono"] = _limpiar_telefono(_xml_text(contact.find("cbc:Telephone", _NS)))
+        d["email"] = _xml_text(contact.find("cbc:ElectronicMail", _NS))
+
+    person = party.find("cac:Person", _NS)
+    if person is not None:
+        d["nombres_tercero"] = _xml_text(person.find("cbc:FirstName", _NS))
+        d["apellidos_tercero"] = _xml_text(person.find("cbc:FamilyName", _NS))
+    return d
+
+
+def usar_cliente_como_tercero(factura: dict) -> dict:
+    """Para causar una VENTA el tercero es el CLIENTE (receptor), no el emisor
+    (que es la propia empresa). Sustituye los campos de tercero por los del
+    comprador (``comprador_*``) extraídos del XML. Si no hay datos de cliente
+    (no debería ocurrir en una venta real), no toca nada."""
+    if not factura.get("comprador_nit"):
+        return factura
+    for c in _CAMPOS_TERCERO:
+        factura[c] = factura.get(f"comprador_{c}", "") or ""
+    return factura
+
+
 def _detectar_cols_token(df: pd.DataFrame) -> dict[str, str | None]:
     cols_norm = {_norm(c): c for c in df.columns}
     asignadas: set[str] = set()
@@ -309,6 +386,59 @@ def _inferir_cod_impuesto(porcentaje: float) -> str:
         if abs(porcentaje - rate) < 0.5:
             return cod
     return ""   # Tarifa no reconocida — usuario debe seleccionar manualmente
+
+
+# ── Tributos DIAN (cac:TaxScheme/cbc:ID) y su tratamiento contable ───────────
+# El IVA (01) se maneja aparte (descontable/generado). Las retenciones (05/06/07)
+# NO se toman del XML: se aplican con los selectores de la interfaz. El resto de
+# tributos se clasifican en dos grupos según cómo deben contabilizarse:
+#   "independiente" → INC / impuesto al consumo (02, 04, 08) e impuesto a las
+#       bolsas (22). En compra y documento soporte va como MAYOR VALOR DEL GASTO
+#       (no descontable); en venta se DESGLOSA en línea aparte (impuesto por pagar
+#       a la DIAN / cobro adicional al cliente) con su propia cuenta del catálogo.
+#   "costo" → IBUA (34), ICUI (35), INPP (33) y demás consumos: se suman al costo
+#       (compra/DS) o al ingreso (venta) — no son independientes por sí solos.
+# code → (nombre, grupo)
+_TRIBUTOS_DIAN: dict[str, tuple[str, str]] = {
+    "01": ("IVA", "iva"),
+    "05": ("ReteIVA", "retencion"),
+    "06": ("Retefuente", "retencion"),
+    "07": ("ReteICA", "retencion"),
+    "02": ("Impuesto al consumo", "independiente"),
+    "04": ("Impuesto Nacional al Consumo (INC)", "independiente"),
+    "08": ("Impuesto al consumo (porcentual)", "independiente"),
+    "22": ("Impuesto a las bolsas", "independiente"),
+    "33": ("Impuesto Nacional a Productos Plásticos (INPP)", "costo"),
+    "34": ("Impuesto a bebidas azucaradas (IBUA)", "costo"),
+    "35": ("Impuesto a comestibles ultraprocesados (ICUI)", "costo"),
+}
+# Tributos que la DIAN tiene clasificados pero SIN un tratamiento explícito en la
+# plataforma. Se contabilizan por defecto como "costo" (mayor valor del gasto /
+# ingreso), pero se marca una ALERTA sobre la factura para que el contador revise.
+_TRIBUTOS_DIAN_OTROS: dict[str, str] = {
+    "03": "ICA",
+    "23": "Impuesto nacional al carbono",
+    "24": "Impuesto a los combustibles",
+    "25": "Sobretasa a los combustibles",
+    "26": "Contribución Sordicom",
+    "30": "Impuesto al consumo de datos",
+    "32": "Impuesto al consumo de licores (ICL)",
+    "36": "Impuesto Ad Valórem",
+    "ZZ": "Otros tributos",
+}
+
+
+def clasificar_tributo_dian(cod_dian: str) -> tuple[str, str, bool]:
+    """Devuelve (nombre, grupo, conocido) para un código de tributo DIAN.
+
+    ``conocido`` es False cuando el tributo no tiene un tratamiento explícito
+    (está en _TRIBUTOS_DIAN_OTROS o es totalmente desconocido) → dispara alerta.
+    """
+    info = _TRIBUTOS_DIAN.get(cod_dian)
+    if info is not None:
+        return info[0], info[1], True
+    nombre = _TRIBUTOS_DIAN_OTROS.get(cod_dian, f"Tributo DIAN {cod_dian}")
+    return nombre, "costo", False
 
 
 def parsear_archivo(archivo: BytesIO | str, nombre_archivo: str = "") -> list[dict]:
@@ -792,9 +922,16 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
     cufe = _xml_text(find("cbc:UUID"))
     fecha = _to_fecha(_xml_text(find("cbc:IssueDate")))
 
-    # ── Tipo de documento: factura / nota crédito / nota débito ──
+    # ── Tipo de documento: factura / nota crédito / nota débito / soporte ──
     root_local = root.tag.rsplit("}", 1)[-1]
-    if root_local == "CreditNote" or _xml_text(find("cbc:CreditNoteTypeCode")):
+    customization = (_xml_text(find("cbc:CustomizationID")) or "").strip()
+    es_credito = root_local == "CreditNote" or bool(_xml_text(find("cbc:CreditNoteTypeCode")))
+    if customization == "05":
+        # Documento Soporte en adquisiciones a no obligados a facturar (tipo 05).
+        # Su nota de ajuste usa la estructura de nota crédito. En ambos el tercero
+        # es el VENDEDOR (AccountingSupplierParty), igual que una compra.
+        tipo_documento = "nota_ajuste_soporte" if es_credito else "documento_soporte"
+    elif es_credito:
         tipo_documento = "nota_credito"
     elif root_local == "DebitNote" or _xml_text(find("cbc:DebitNoteTypeCode")):
         tipo_documento = "nota_debito"
@@ -903,15 +1040,11 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
         if issue_date and due_date:
             forma_pago = "CONTADO" if issue_date == due_date else "CRÉDITO"
 
-    # ── Comprador (buyer) — solo para validación compra vs venta ──
-    nit_comprador = ""
-    customer = find("cac:AccountingCustomerParty/cac:Party")
-    if customer is not None:
-        tax_scheme_c = customer.find("cac:PartyTaxScheme", _NS)
-        if tax_scheme_c is not None:
-            nit_c_el = tax_scheme_c.find("cbc:CompanyID", _NS)
-            if nit_c_el is not None and nit_c_el.text:
-                nit_comprador = re.sub(r"[^\d\-]", "", nit_c_el.text.strip())
+    # ── Comprador (cliente / receptor) — es el TERCERO al causar una VENTA ──
+    # Se extraen todos sus datos (no solo el NIT) para poder usarlo como tercero
+    # en ventas vía usar_cliente_como_tercero().
+    _comprador = _extraer_party_xml(find("cac:AccountingCustomerParty/cac:Party"))
+    nit_comprador = _comprador["nit"]
 
     # ── Total ──
     monetary = find("cac:LegalMonetaryTotal")
@@ -925,6 +1058,7 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
 
     # ── Ítems ──
     items: list[dict] = []
+    _tributos_alertados: set[str] = set()  # evita repetir la alerta de un tributo
 
     # Una factura usa cac:InvoiceLine; una nota crédito cac:CreditNoteLine y una
     # nota débito cac:DebitNoteLine. Todas comparten la misma estructura interna
@@ -950,9 +1084,13 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
         # Base (LineExtensionAmount = base sin impuestos)
         base = _xml_float(line.find("cbc:LineExtensionAmount", _NS))
 
-        # IVA: buscar en TaxTotal los subtotales con TaxScheme 01 (IVA)
+        # Tributos de la línea. El IVA (01) se acumula aparte; el resto de tributos
+        # (INC, bolsas, IBUA, ICUI, INPP, otros) se guardan en `otros_tributos`
+        # con su código DIAN, grupo y valor, para contabilizarlos según el módulo.
+        # Las retenciones (05/06/07) se ignoran aquí (se aplican en la interfaz).
         valor_impuesto = 0.0
         porcentaje = 0.0
+        otros_tributos: list[dict] = []
 
         for tax_total in line.findall("cac:TaxTotal", _NS):
             for sub in tax_total.findall("cac:TaxSubtotal", _NS):
@@ -964,24 +1102,63 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
                 if scheme is not None:
                     scheme_id = _xml_text(scheme.find("cbc:ID", _NS))
 
-                # Incluir solo IVA (01); excluir retenciones (04=ICA, 05=RetICA, 06=Retefuente)
+                monto = _xml_float(sub.find("cbc:TaxAmount", _NS))
+                pct   = _xml_float(cat.find("cbc:Percent", _NS))
+
+                # IVA (01) — o sin código, que asumimos IVA por compatibilidad.
                 if scheme_id in ("01", ""):
-                    valor_impuesto += _xml_float(sub.find("cbc:TaxAmount", _NS))
+                    valor_impuesto += monto
                     if porcentaje == 0.0:
-                        porcentaje = _xml_float(cat.find("cbc:Percent", _NS))
+                        porcentaje = pct
+                    continue
+
+                nombre, grupo, conocido = clasificar_tributo_dian(scheme_id)
+                if grupo == "retencion":
+                    continue  # las retenciones se aplican con los selectores de la UI
+                if monto == 0.0 and pct == 0.0:
+                    continue
+
+                taxable = _xml_float(sub.find("cbc:TaxableAmount", _NS))
+                otros_tributos.append({
+                    "cod_dian":    scheme_id,
+                    "nombre":      nombre,
+                    "grupo":       grupo,
+                    "base":        round(taxable or base, 2),
+                    "valor":       round(monto, 2),
+                    "porcentaje":  pct,
+                })
+                if not conocido and scheme_id not in _tributos_alertados:
+                    _tributos_alertados.add(scheme_id)
+                    advertencias.append(
+                        f"Se detectó el tributo DIAN {scheme_id} ({nombre}), que no tiene "
+                        "un tratamiento contable definido: se sumó al costo/ingreso. "
+                        "Revisa la causación de esta factura."
+                    )
+
+        # Descuento por ítem (cac:AllowanceCharge con ChargeIndicator=false). La base
+        # (LineExtensionAmount) YA viene neta del descuento; se guarda solo como
+        # información para que el contador tenga control de cada descuento.
+        descuento_item = 0.0
+        for ac in line.findall("cac:AllowanceCharge", _NS):
+            indicador = _xml_text(ac.find("cbc:ChargeIndicator", _NS)).lower()
+            if indicador == "false":
+                descuento_item += _xml_float(ac.find("cbc:Amount", _NS))
 
         # Saltar líneas vacías (base=0 y sin impuesto — no hay valores a causar)
-        if base == 0.0 and valor_impuesto == 0.0:
+        if base == 0.0 and valor_impuesto == 0.0 and not otros_tributos:
             continue
 
         cod_impuesto = _inferir_cod_impuesto(porcentaje)
+        valor_otros = round(sum(t["valor"] for t in otros_tributos), 2)
         items.append({
             "descripcion":    desc,
             "base":           round(base, 2),
             "cod_impuesto":   cod_impuesto,
             "porcentaje":     porcentaje,
             "valor_impuesto": round(valor_impuesto, 2),
-            "total_linea":    round(base + valor_impuesto, 2),
+            "otros_tributos": otros_tributos,
+            "descuento_item": round(descuento_item, 2),
+            "total_linea":    round(base + valor_impuesto + valor_otros, 2),
         })
 
     if not items:
@@ -991,12 +1168,47 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
     if total == 0.0 and items:
         total = round(sum(i["total_linea"] for i in items), 2)
 
+    # ── Descuentos / recargos GLOBALES (a nivel de documento) ──
+    # Los AllowanceCharge que cuelgan directamente del documento (no de una línea)
+    # aplican a toda la factura. ChargeIndicator=true → recargo (mayor valor);
+    # false → descuento (menor valor). No están incluidos en el LineExtensionAmount
+    # de las líneas, por eso se contabilizan como una línea aparte.
+    descuento_global = 0.0
+    recargo_global = 0.0
+    for ac in findall("cac:AllowanceCharge"):
+        indicador = _xml_text(ac.find("cbc:ChargeIndicator", _NS)).lower()
+        monto = _xml_float(ac.find("cbc:Amount", _NS))
+        if indicador == "true":
+            recargo_global += monto
+        else:
+            descuento_global += monto
+    # Fallback a los totales del LegalMonetaryTotal si no había AllowanceCharge.
+    if monetary is not None:
+        if descuento_global == 0.0:
+            descuento_global = _xml_float(monetary.find("cbc:AllowanceTotalAmount", _NS))
+        if recargo_global == 0.0:
+            recargo_global = _xml_float(monetary.find("cbc:ChargeTotalAmount", _NS))
+
     return {
         "numero_dian":              numero_dian,
         "cufe":                     cufe,
         "fecha":                    fecha,
         "nit":                      nit,
         "nit_comprador":            nit_comprador,
+        # Datos completos del cliente (receptor) para usarlo como tercero en ventas.
+        "comprador_nit":            _comprador["nit"],
+        "comprador_razon_social":   _comprador["razon_social"],
+        "comprador_nombre_comercial": _comprador["nombre_comercial"],
+        "comprador_tipo_proveedor": _comprador["tipo_proveedor"],
+        "comprador_tipo_identificacion_codigo": _comprador["tipo_identificacion_codigo"],
+        "comprador_ciudad":         _comprador["ciudad"],
+        "comprador_departamento":   _comprador["departamento"],
+        "comprador_direccion":      _comprador["direccion"],
+        "comprador_codigo_postal":  _comprador["codigo_postal"],
+        "comprador_telefono":       _comprador["telefono"],
+        "comprador_email":          _comprador["email"],
+        "comprador_nombres_tercero": _comprador["nombres_tercero"],
+        "comprador_apellidos_tercero": _comprador["apellidos_tercero"],
         "razon_social":             razon_social,
         "nombre_comercial":         nombre_comercial,
         "tipo_proveedor":           tipo_proveedor,
@@ -1017,6 +1229,8 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
         "forma_pago":               forma_pago,
         "tipo_documento":           tipo_documento,
         "factura_referencia":       factura_referencia,
+        "descuento_global":         round(descuento_global, 2),
+        "recargo_global":           round(recargo_global, 2),
         "total":                    total,
         "items":                    items,
         "advertencias":             advertencias,

@@ -1,6 +1,7 @@
 "use client";
 import { createPortal } from "react-dom";
-import { X, TrendingDown, CheckCircle2, FileText } from "lucide-react";
+import Link from "next/link";
+import { X, TrendingDown, CheckCircle2, FileText, ArrowRight } from "lucide-react";
 import type { FacturaOmitida } from "@/lib/types";
 
 interface Props {
@@ -16,6 +17,13 @@ const MOTIVO_CONFIG = {
     border: "rgba(99,102,241,0.3)",
     Icon: TrendingDown,
   },
+  compra: {
+    label: "Factura de compra",
+    color: "rgb(217,119,6)",
+    bg: "rgba(217,119,6,0.12)",
+    border: "rgba(217,119,6,0.3)",
+    Icon: TrendingDown,
+  },
   ya_causada: {
     label: "Ya causada",
     color: "var(--success)",
@@ -27,6 +35,8 @@ const MOTIVO_CONFIG = {
 
 export function OmitidasModal({ omitidas, onClose }: Props) {
   const ventas = omitidas.filter((o) => o.motivo === "venta");
+  const compras = omitidas.filter((o) => o.motivo === "compra");
+  const excluidas = ventas.length + compras.length; // documentos del tipo opuesto al módulo
   const causadas = omitidas.filter((o) => o.motivo === "ya_causada");
 
   const modal = (
@@ -50,8 +60,8 @@ export function OmitidasModal({ omitidas, onClose }: Props) {
             </h2>
             <p className="mt-0.5 text-xs" style={{ color: "var(--text-primary)" }}>
               {omitidas.length} factura{omitidas.length !== 1 ? "s" : ""} no procesada{omitidas.length !== 1 ? "s" : ""}
-              {ventas.length > 0 && causadas.length > 0 && (
-                <> · {ventas.length} venta{ventas.length !== 1 ? "s" : ""}, {causadas.length} ya causada{causadas.length !== 1 ? "s" : ""}</>
+              {excluidas > 0 && causadas.length > 0 && (
+                <> · {excluidas} de otro tipo, {causadas.length} ya causada{causadas.length !== 1 ? "s" : ""}</>
               )}
             </p>
           </div>
@@ -147,15 +157,39 @@ export function OmitidasModal({ omitidas, onClose }: Props) {
         </div>
 
         {/* Footer fijo — leyenda explicativa */}
-        {(ventas.length > 0 || causadas.length > 0) && (
+        {(excluidas > 0 || causadas.length > 0) && (
           <div
             className="shrink-0 border-t px-6 py-4 space-y-1.5"
             style={{ borderColor: "var(--border-soft)" }}
           >
             {ventas.length > 0 && (
-              <p className="text-xs" style={{ color: "var(--text-primary)" }}>
-                <span className="font-semibold" style={{ color: "rgb(99,102,241)" }}>Facturas de venta</span>
-                {" "}— emitidas por tu empresa. Este módulo solo procesa compras; la causación de ventas estará disponible próximamente.
+              <p className="flex flex-wrap items-center gap-1.5 text-xs" style={{ color: "var(--text-primary)" }}>
+                <span>
+                  <span className="font-semibold" style={{ color: "rgb(99,102,241)" }}>Facturas de venta</span>
+                  {" "}— emitidas por tu empresa. Este módulo procesa compras.
+                </span>
+                <Link
+                  href="/causacion-ventas"
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold transition-opacity hover:opacity-80"
+                  style={{ backgroundColor: "rgba(99,102,241,0.12)", color: "rgb(99,102,241)", border: "1px solid rgba(99,102,241,0.3)" }}
+                >
+                  Ir a Causación Ventas <ArrowRight className="h-3 w-3" />
+                </Link>
+              </p>
+            )}
+            {compras.length > 0 && (
+              <p className="flex flex-wrap items-center gap-1.5 text-xs" style={{ color: "var(--text-primary)" }}>
+                <span>
+                  <span className="font-semibold" style={{ color: "rgb(217,119,6)" }}>Facturas de compra</span>
+                  {" "}— emitidas por un proveedor. Este módulo procesa ventas.
+                </span>
+                <Link
+                  href="/causacion"
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold transition-opacity hover:opacity-80"
+                  style={{ backgroundColor: "rgba(217,119,6,0.12)", color: "rgb(217,119,6)", border: "1px solid rgba(217,119,6,0.3)" }}
+                >
+                  Ir a Causación Compras <ArrowRight className="h-3 w-3" />
+                </Link>
               </p>
             )}
             {causadas.length > 0 && (

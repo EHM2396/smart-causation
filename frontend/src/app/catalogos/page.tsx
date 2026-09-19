@@ -635,7 +635,10 @@ function ImpuestosTab({
   const [nombre, setNombre] = useState("");
   const [tipo, setTipo] = useState("");
   const [tarifa, setTarifa] = useState("0");
-  const [cuentaCre, setCuentaCre] = useState("");
+  const [cuentaCre, setCuentaCre] = useState("");      // cta_compras (IVA descontable / retención por pagar)
+  const [cuentaVen, setCuentaVen] = useState("");      // cta_ventas (IVA generado / retención practicada)
+  const [cuentaDevCom, setCuentaDevCom] = useState(""); // cta_dev_compras
+  const [cuentaDevVen, setCuentaDevVen] = useState(""); // cta_dev_ventas
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
   const [toast, setToast] = useState<string | null>(null);
@@ -680,8 +683,8 @@ function ImpuestosTab({
   };
 
   const handleAdd = async () => {
-    if (!codigo.trim() || !cuentaCre) {
-      setErr("Código y cuenta crédito son obligatorios.");
+    if (!codigo.trim() || (!cuentaCre && !cuentaVen)) {
+      setErr("El código y al menos una cuenta (compras o ventas) son obligatorios.");
       return;
     }
     setSaving(true);
@@ -692,10 +695,14 @@ function ImpuestosTab({
         nombre: nombre.trim() || undefined,
         tipo_impuesto: tipo.trim() || undefined,
         tarifa: parseFloat(tarifa) || 0,
-        cta_compras: cuentaCre,
+        cta_compras: cuentaCre || undefined,
+        cta_ventas: cuentaVen || undefined,
+        cta_dev_compras: cuentaDevCom || undefined,
+        cta_dev_ventas: cuentaDevVen || undefined,
       });
       qc.invalidateQueries({ queryKey: ["impuestos"] });
-      setCodigo(""); setNombre(""); setTipo(""); setTarifa("0"); setCuentaCre("");
+      setCodigo(""); setNombre(""); setTipo(""); setTarifa("0");
+      setCuentaCre(""); setCuentaVen(""); setCuentaDevCom(""); setCuentaDevVen("");
       setModalOpen(false);
       setToast("Impuesto guardado correctamente");
     } catch (e) {
@@ -826,15 +833,29 @@ function ImpuestosTab({
                 <Input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="ej. IVA 19%" />
               </div>
             </div>
-            <div className="space-y-1.5">
-              <Label>Cuenta crédito / compras (PUC) *</Label>
-              <Combobox
-                options={cuentaOpts}
-                value={cuentaCre}
-                onChange={setCuentaCre}
-                placeholder="Buscar por código o nombre..."
-                portal={false}
-              />
+            <div className="rounded-lg border p-3 space-y-3" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
+              <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                Cuentas PUC del impuesto. En <strong>compras</strong> se usan las de compras; en <strong>ventas</strong>, las de ventas.
+                Para IVA: compras = descontable, ventas = generado. Las de devolución se usan en las notas crédito.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Cuenta compras (PUC)</Label>
+                  <Combobox options={cuentaOpts} value={cuentaCre} onChange={setCuentaCre} placeholder="IVA descontable / retención por pagar…" portal={false} clearable />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Cuenta ventas (PUC)</Label>
+                  <Combobox options={cuentaOpts} value={cuentaVen} onChange={setCuentaVen} placeholder="IVA generado / retención practicada…" portal={false} clearable />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Cuenta devolución compras</Label>
+                  <Combobox options={cuentaOpts} value={cuentaDevCom} onChange={setCuentaDevCom} placeholder="Devolución en compras…" portal={false} clearable />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Cuenta devolución ventas</Label>
+                  <Combobox options={cuentaOpts} value={cuentaDevVen} onChange={setCuentaDevVen} placeholder="Devolución en ventas…" portal={false} clearable />
+                </div>
+              </div>
             </div>
             {err && <ErrBanner msg={err} />}
             <div className="flex justify-end gap-2 pt-1">

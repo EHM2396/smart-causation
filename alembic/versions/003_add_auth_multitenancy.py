@@ -8,9 +8,10 @@ Crea tablas de auth (planes, usuarios, empresas, usuario_empresa),
 agrega empresa_id a las tablas operacionales y sembrar 2 usuarios +
 1 empresa asignando los datos existentes.
 
-Credenciales semilla:
-  admin@smartcausacion.com  /  Admin2024!   (rol: admin)
-  causacion@smartcausacion.com  /  Causar2024!   (rol: user)
+Credenciales semilla: las contraseñas se toman de las variables de entorno
+SEED_ADMIN_PASSWORD y SEED_CAUSADOR_PASSWORD (no se guardan en el repositorio).
+  admin@smartcausacion.com       (rol: admin)
+  causacion@smartcausacion.com   (rol: user)
 """
 from __future__ import annotations
 
@@ -128,9 +129,15 @@ def upgrade() -> None:
     """), {"nombre": "base", "max_e": 1, "max_u": 1})
 
     # ── 5. Seed usuarios ──────────────────────────────────────────────────────
+    import os
     import bcrypt as _bcrypt
-    admin_hash = _bcrypt.hashpw(b"Admin2024!", _bcrypt.gensalt()).decode()
-    causacion_hash = _bcrypt.hashpw(b"Causar2024!", _bcrypt.gensalt()).decode()
+    # Las contraseñas de las cuentas semilla se leen de variables de entorno para
+    # NO dejarlas en el repositorio. Si no están definidas, se usa un placeholder
+    # que DEBE cambiarse tras el primer arranque.
+    admin_pw = os.getenv("SEED_ADMIN_PASSWORD", "CHANGE_ME")
+    causacion_pw = os.getenv("SEED_CAUSADOR_PASSWORD", "CHANGE_ME")
+    admin_hash = _bcrypt.hashpw(admin_pw.encode(), _bcrypt.gensalt()).decode()
+    causacion_hash = _bcrypt.hashpw(causacion_pw.encode(), _bcrypt.gensalt()).decode()
 
     conn.execute(sa.text("""
         INSERT INTO usuarios (email, password_hash, nombre, rol, activo)

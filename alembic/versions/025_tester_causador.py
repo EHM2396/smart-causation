@@ -1,7 +1,7 @@
 """El plan Tester es de usuarios CAUSADORES (tope ilimitado), no administradores
 
-Revision ID: 023
-Revises: 022
+Revision ID: 025
+Revises: 024
 Create Date: 2026-09-09
 
 La migración 019 marcó como org_admin a los dueños de empresa, incluyendo a los
@@ -14,8 +14,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "023"
-down_revision = "022"
+revision = "025"
+down_revision = "024"
 branch_labels = None
 depends_on = None
 

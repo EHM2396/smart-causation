@@ -1,7 +1,7 @@
 """Rol org_admin: marca a los dueños de cada Cuenta como administradores
 
-Revision ID: 019
-Revises: 018
+Revision ID: 021
+Revises: 020
 Create Date: 2026-09-08
 
 B3: introduce el rol `org_admin` (administrador de la Cuenta). Marca como
@@ -14,8 +14,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "019"
-down_revision = "018"
+revision = "021"
+down_revision = "020"
 branch_labels = None
 depends_on = None
 

@@ -1,7 +1,7 @@
 """Plan Free de prueba (100 causaciones / 14 días / 1 empresa) + campos de prueba
 
-Revision ID: 022
-Revises: 021
+Revision ID: 024
+Revises: 023
 Create Date: 2026-09-08
 
 - planes: + max_causaciones_total (cupo total, no mensual) + dias_prueba.
@@ -14,8 +14,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "022"
-down_revision = "021"
+revision = "024"
+down_revision = "023"
 branch_labels = None
 depends_on = None
 

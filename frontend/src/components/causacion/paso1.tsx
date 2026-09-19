@@ -1,24 +1,14 @@
 "use client";
 import { useState, useCallback } from "react";
+import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useWizardStore } from "@/stores/wizard";
+import { useWizardStore, esModoNC, esModoVenta, esModoSoporte, modoParseo, tipoNCHermano } from "@/stores/wizard";
 import { useAuthStore } from "@/stores/auth";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle2, Loader2, TrendingDown, Clock, History, Trash2, ArrowRight, Building2 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { fmt } from "@/lib/utils";
-import { DianPanel } from "@/components/causacion/dian-panel";
+import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle2, Loader2, TrendingDown, History, Trash2, ArrowRight, ExternalLink } from "lucide-react";
+import { cn, fmt, ordenarPorFechaEmision } from "@/lib/utils";
 import type { Factura } from "@/lib/types";
-
-// Clave de orden cronológico a partir de la fecha de emisión "DD/MM/YYYY".
-// Devuelve YYYYMMDD (número); fechas inválidas van al final.
-function fechaEmisionKey(fecha: string): number {
-  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec((fecha || "").trim());
-  if (!m) return Number.POSITIVE_INFINITY;
-  const [, d, mo, y] = m;
-  return Number(y) * 10000 + Number(mo) * 100 + Number(d);
-}
 
 function fechaBorrador(iso: string): string {
   try {
@@ -32,14 +22,24 @@ function fechaBorrador(iso: string): string {
 
 export function Paso1() {
   const { docTipo, ncRuteadas, setNcRuteadas, setFacturas, setFacturasYaCausadas, setPaso, facturas: stored, setPdfUrls, pdfUrls, setFilesProcesando, setSuggestions, setPaso2Cache, setFacturasOmitidas, hydrateBorrador, tutorialActivo } = useWizardStore();
-  const esNC = docTipo === "nc";
+  const esNC = esModoNC(docTipo);
+  const esVenta = esModoVenta(docTipo);
+  const esSoporte = esModoSoporte(docTipo);
+  // Etiqueta de lo que se EXCLUYE en este módulo. El backend marca esas omisiones
+  // con [VENTA]/[COMPRA] (compras/ventas) o [NO_SOPORTE] (documento soporte).
+  const tagExcluido = esSoporte ? "[NO_SOPORTE]" : esVenta ? "[COMPRA]" : "[VENTA]";
+  const nombreExcluido = esSoporte ? "otro tipo" : esVenta ? "compra" : "venta";
+  // Módulo al que redirigir un documento excluido. En soporte el tipo real es
+  // ambiguo (puede ser compra o venta), así que no hay una ruta única a dónde
+  // mandarlo — se deja sin botón y con un mensaje genérico.
+  const rutaExcluido = esSoporte ? null : esVenta ? "/causacion" : "/causacion-ventas";
+  const labelExcluido = esVenta ? "Causación Compras" : "Causación Ventas";
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [ventasDetectadas, setVentasDetectadas] = useState<{ filename: string; numero: string }[]>([]);
   const [omitidas, setOmitidas] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
-  const [modo, setModo] = useState<"archivos" | "dian">("archivos");
 
   // ── Borrador guardado (guardado temporal, por tipo compras/nc Y por empresa) ──
   // La empresa activa va en la queryKey: cada empresa tiene su propio borrador y al
@@ -81,12 +81,14 @@ export function Paso1() {
     }
   };
 
-  // Envía notas crédito detectadas en el módulo de Compras al borrador de NC
-  // (bandeja), para que aparezcan en "NC Compras" sin re-cargarlas.
+  // Envía notas crédito detectadas en el módulo base (Compras o Ventas) a la
+  // bandeja de NC hermana (NC Compras o NC Ventas), para que aparezcan allí sin
+  // re-cargarlas.
   const rutearANC = async (ncs: Factura[]) => {
     if (!ncs.length) return;
+    const tipoNC = tipoNCHermano(docTipo);
     try {
-      const completo = await api.getBorradorCompleto("nc");
+      const completo = await api.getBorradorCompleto(tipoNC);
       const prev = (completo?.datos ?? {}) as Record<string, unknown>;
       const existentes = (prev.facturas as Factura[]) ?? [];
       const nums = new Set(existentes.map((f) => f.numero_dian));
@@ -105,8 +107,8 @@ export function Paso1() {
         total_facturas: merged.length,
         total_verificadas: 0,
         tipo_comp: snapshot.tipoComp || null,
-      }, "nc");
-      queryClient.invalidateQueries({ queryKey: ["borrador", "nc", empresaId] });
+      }, tipoNC);
+      queryClient.invalidateQueries({ queryKey: ["borrador", tipoNC, empresaId] });
     } catch {
       // Si falla el ruteo, igual se avisa al usuario que hay NC.
     }
@@ -141,19 +143,24 @@ export function Paso1() {
     errs: string[],
   ) => {
     setNcRuteadas(0);
-    // Separar por tipo de documento según el módulo actual (compras vs NC).
-    const esNotaCredito = (f: Factura) => (f as { tipo_documento?: string }).tipo_documento === "nota_credito";
-    const esNotaDebito = (f: Factura) => (f as { tipo_documento?: string }).tipo_documento === "nota_debito";
+    // Separar por tipo de documento según el módulo actual. La "nota" del módulo:
+    // en soporte es la nota de AJUSTE; en compras/ventas, la nota CRÉDITO.
+    const tdOf = (f: Factura) => (f as { tipo_documento?: string }).tipo_documento;
+    const esNotaModulo = (f: Factura) =>
+      esSoporte ? tdOf(f) === "nota_ajuste_soporte" : tdOf(f) === "nota_credito";
+    const esNotaDebito = (f: Factura) => tdOf(f) === "nota_debito";
+    const nombreNota = esSoporte ? "nota de ajuste" : "nota crédito";
     let ncCount = 0;
 
     if (esNC) {
-      // Módulo NC: solo notas crédito; lo demás se omite.
-      const otras = parsed.filter((f) => !esNotaCredito(f));
-      if (otras.length) errs.push(`${otras.length} documento(s) que no son nota crédito se omitieron (van en Causación Compras).`);
-      parsed = parsed.filter(esNotaCredito);
+      // Módulo NC/ajuste: solo notas del módulo; lo demás se omite.
+      const otras = parsed.filter((f) => !esNotaModulo(f));
+      if (otras.length) errs.push(`${otras.length} documento(s) que no son ${nombreNota} se omitieron (van en el módulo base).`);
+      parsed = parsed.filter(esNotaModulo);
     } else {
-      // Módulo Compras: NC se rutean a NC Compras; ND aún no soportadas.
-      const ncs = parsed.filter(esNotaCredito);
+      // Módulo base (Compras/Ventas/Soporte): las notas se rutean a su bandeja
+      // hermana (NC / ajuste); las notas débito aún no se soportan.
+      const ncs = parsed.filter(esNotaModulo);
       const nds = parsed.filter(esNotaDebito);
       if (ncs.length) {
         await rutearANC(ncs);
@@ -161,7 +168,7 @@ export function Paso1() {
         setNcRuteadas(ncs.length);
       }
       if (nds.length) errs.push(`${nds.length} nota(s) débito omitidas (aún no soportadas).`);
-      parsed = parsed.filter((f) => !esNotaCredito(f) && !esNotaDebito(f));
+      parsed = parsed.filter((f) => !esNotaModulo(f) && !esNotaDebito(f));
     }
 
     if (!parsed.length) {
@@ -198,7 +205,7 @@ export function Paso1() {
 
     // Hay compras válidas → construir omisiones y avanzar a paso2
     const omisionesParaPaso2: import("@/lib/types").FacturaOmitida[] = [
-      ...ventas.map((v) => ({ filename: v.filename, numero: v.numero, motivo: "venta" as const })),
+      ...ventas.map((v) => ({ filename: v.filename, numero: v.numero, motivo: (esVenta ? "compra" : "venta") as "compra" | "venta" })),
       ...causadasInfo.map((c) => ({
         filename: parsed.find((f) => f.numero_dian === c.numero_dian)?._archivo ?? "",
         numero: c.numero_dian,
@@ -214,7 +221,7 @@ export function Paso1() {
     // Ordenar cronológicamente por fecha de emisión: la más antigua primero, para
     // que los consecutivos SIIGO se asignen en ese orden (los asigna el backend
     // según el orden en que se envían las facturas).
-    const nuevasOrdenadas = [...nuevas].sort((a, b) => fechaEmisionKey(a.fecha) - fechaEmisionKey(b.fecha));
+    const nuevasOrdenadas = ordenarPorFechaEmision(nuevas);
     setFacturas(nuevasOrdenadas);
     setLoading(false);
     // Avanzar a paso2 — filesProcesando activa el overlay mientras cargan las sugerencias IA
@@ -244,15 +251,17 @@ export function Paso1() {
         newPdfUrls[file.name] = URL.createObjectURL(file);
       }
       try {
-        const result: Factura[] = await api.parsearFacturas(file);
+        const result: Factura[] = await api.parsearFacturas(file, modoParseo(docTipo));
         for (const f of result) {
           parsed.push({ ...f, _archivo: file.name });
           for (const adv of f.advertencias ?? []) errs.push(`${file.name}: ${adv}`);
         }
       } catch (e) {
         const msg = (e as Error).message;
-        if (msg.includes("[VENTA]")) {
-          const match = msg.match(/\[VENTA\]\s*([^:]+):/);
+        if (msg.includes(tagExcluido)) {
+          // El backend rechazó un archivo del tipo opuesto ([VENTA] en compras,
+          // [COMPRA] en ventas). Se muestra como documento excluido, no como error.
+          const match = msg.match(/\[(?:VENTA|COMPRA)\]\s*([^:]+):/);
           ventas.push({ filename: file.name, numero: match?.[1]?.trim() ?? file.name });
         } else {
           errs.push(`${file.name}: ${msg}`);
@@ -264,29 +273,18 @@ export function Paso1() {
     await finalizarYAvanzar(parsed, ventas, errs);
   };
 
-  // Facturas traídas de la DIAN (ya parseadas y sin ventas): reutiliza el mismo
-  // post-procesado que la carga manual.
-  const importarDeDian = async (facturas: Factura[]) => {
-    setLoading(true);
-    setErrors([]);
-    setVentasDetectadas([]);
-    setOmitidas([]);
-    setFacturas([]);
-    setSuggestions({});
-    setPaso2Cache(null);
-    const errs: string[] = [];
-    for (const f of facturas) for (const adv of f.advertencias ?? []) errs.push(adv);
-    await finalizarYAvanzar(facturas, [], errs);
-  };
-
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-[var(--text-primary)]">{esNC ? "Cargar notas crédito DIAN" : "Cargar facturas DIAN"}</h2>
+        <h2 className="text-xl font-semibold text-[var(--text-primary)]">
+          {esNC
+            ? `Cargar notas crédito${esVenta ? " de venta" : ""} DIAN`
+            : `Cargar facturas${esVenta ? " de venta" : ""} DIAN`}
+        </h2>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
           {esNC
-            ? "Módulo exclusivo de notas crédito. También puedes subir XML/ZIP/PDF de notas crédito; las facturas de compra van en el otro módulo."
-            : <>Sube archivos <code className="text-[var(--brand)] font-medium">.xlsx</code> del portal DIAN, archivos <code className="text-[var(--brand)] font-medium">.zip</code>, <code className="text-[var(--brand)] font-medium">.xml</code> o <code className="text-[var(--brand)] font-medium">.pdf</code> de factura electrónica DIAN. Puedes subir varios a la vez.</>}
+            ? `Módulo exclusivo de notas crédito${esVenta ? " de venta (devoluciones)" : ""}. También puedes subir XML/ZIP/PDF de notas crédito; las facturas ${esVenta ? "de venta" : "de compra"} van en el otro módulo.`
+            : <>Sube archivos <code className="text-[var(--brand)] font-medium">.xlsx</code> del portal DIAN, archivos <code className="text-[var(--brand)] font-medium">.zip</code>, <code className="text-[var(--brand)] font-medium">.xml</code> o <code className="text-[var(--brand)] font-medium">.pdf</code> de factura electrónica {esVenta ? "de venta " : ""}DIAN. Puedes subir varios a la vez.</>}
         </p>
       </div>
 
@@ -337,33 +335,24 @@ export function Paso1() {
         </div>
       )}
 
-      {/* Selector de origen: carga manual o traer de la DIAN por token */}
-      <div className="flex gap-1 rounded-xl border p-1" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
-        {([
-          { id: "archivos", label: "Cargar archivos", icon: <Upload className="h-4 w-4" /> },
-          { id: "dian", label: "Traer de la DIAN", icon: <Building2 className="h-4 w-4" /> },
-        ] as const).map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setModo(t.id)}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
-            style={{
-              backgroundColor: modo === t.id ? "var(--bg-surface)" : "transparent",
-              color: modo === t.id ? "var(--brand)" : "var(--text-muted)",
-              boxShadow: modo === t.id ? "var(--shadow-sm)" : "none",
-            }}
-          >
-            {t.icon} {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* ── Traer de la DIAN ── */}
-      {modo === "dian" && <DianPanel onImportadas={importarDeDian} />}
+      {/* Traer de la DIAN por token: ahora es solo desde el importador unificado
+          (un único token trae y reparte todo a sus módulos), para no tener dos
+          lugares distintos donde pegar el token. */}
+      <Link
+        href="/importar"
+        className="flex items-center justify-between gap-3 rounded-xl border p-4 transition-colors hover:opacity-90"
+        style={{ borderColor: "var(--info-border)", backgroundColor: "var(--info-bg)" }}
+      >
+        <span className="text-sm" style={{ color: "var(--info-text)" }}>
+          ¿Quieres traer facturas de la DIAN con un token? Usa <strong>Importar DIAN</strong>: con un
+          solo token trae todo y lo reparte automáticamente a cada módulo.
+        </span>
+        <span className="flex shrink-0 items-center gap-1.5 text-sm font-semibold" style={{ color: "var(--info-text)" }}>
+          Ir a Importar DIAN <ExternalLink className="h-4 w-4" />
+        </span>
+      </Link>
 
       {/* ── Carga manual de archivos ── */}
-      {modo === "archivos" && (
       <label
         data-tutorial="dropzone"
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
@@ -429,10 +418,9 @@ export function Paso1() {
           </div>
         )}
       </label>
-      )}
 
-      {/* Overlay de análisis (solo carga manual) */}
-      {modo === "archivos" && loading && (
+      {/* Overlay de análisis */}
+      {loading && (
         <div
           className="flex flex-col items-center gap-4 py-10 rounded-xl border"
           style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}
@@ -454,8 +442,8 @@ export function Paso1() {
         </div>
       )}
 
-      {/* Lista de archivos (solo carga manual) */}
-      {modo === "archivos" && !loading && files.length > 0 && (
+      {/* Lista de archivos */}
+      {!loading && files.length > 0 && (
             <div className="overflow-hidden rounded-xl border" style={{ borderColor: "var(--border-soft)" }}>
               {/* Header */}
               <div
@@ -499,7 +487,7 @@ export function Paso1() {
             </div>
           )}
 
-          {/* Facturas de VENTA detectadas — Próximamente */}
+          {/* Documentos de OTRO módulo detectados: llevan a su módulo correcto */}
           {!loading && ventasDetectadas.length > 0 && (
             <div
               className="rounded-xl border p-4 space-y-3"
@@ -513,24 +501,19 @@ export function Paso1() {
                   <TrendingDown className="h-4 w-4 text-white" />
                 </div>
                 <div className="flex-1 space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-semibold" style={{ color: "var(--brand-btn)" }}>
-                      {ventasDetectadas.length === 1
-                        ? "1 factura de venta excluida"
-                        : `${ventasDetectadas.length} facturas de venta excluidas`}
-                    </p>
-                    <span
-                      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold"
-                      style={{ backgroundColor: "color-mix(in srgb, var(--brand-btn) 15%, transparent)", color: "var(--brand-btn)", border: "1px solid color-mix(in srgb, var(--brand-btn) 35%, transparent)" }}
-                    >
-                      <Clock className="h-3 w-3" /> Próximamente
-                    </span>
-                  </div>
+                  <p className="text-sm font-semibold" style={{ color: "var(--brand-btn)" }}>
+                    {ventasDetectadas.length === 1
+                      ? `1 documento de otro módulo`
+                      : `${ventasDetectadas.length} documentos de otro módulo`}
+                  </p>
                   <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
                     {ventasDetectadas.length === 1
-                      ? "Esta factura corresponde a una venta de tu empresa y no puede causarse en este módulo."
-                      : "Estas facturas corresponden a ventas de tu empresa y no pueden causarse en este módulo."}
-                    {" "}El módulo de causación de ventas estará disponible próximamente.
+                      ? `Este documento corresponde a una ${nombreExcluido} y no se puede causar acá.`
+                      : `Estos documentos corresponden a ${nombreExcluido}s y no se pueden causar acá.`}
+                    {" "}
+                    {rutaExcluido
+                      ? "Cárgalo en el módulo correcto:"
+                      : "Revisa de qué tipo es y cárgalo en el módulo correspondiente (Compras o Ventas)."}
                   </p>
                 </div>
               </div>
@@ -547,11 +530,21 @@ export function Paso1() {
                   </span>
                 ))}
               </div>
+              {/* Ir directo al módulo correcto (compras ↔ ventas) */}
+              {rutaExcluido && (
+                <div className="pl-12">
+                  <Link href={rutaExcluido}>
+                    <Button size="sm" className="gap-1.5">
+                      Ir a {labelExcluido} <ArrowRight className="h-3.5 w-3.5" />
+                    </Button>
+                  </Link>
+                </div>
+              )}
               {/* Botón continuar si hay facturas de compra válidas */}
               {stored.length > 0 && (
                 <div className="pl-12">
                   <Button size="sm" onClick={() => setPaso(2)}>
-                    Continuar con {stored.length} factura{stored.length !== 1 ? "s" : ""} de compra →
+                    Continuar con {stored.length} factura{stored.length !== 1 ? "s" : ""} de {esVenta ? "venta" : "compra"} →
                   </Button>
                 </div>
               )}
@@ -605,7 +598,7 @@ export function Paso1() {
             </div>
           )}
 
-          {modo === "archivos" && !loading && omitidas.length === 0 && !(ventasDetectadas.length > 0 && stored.length > 0) && (
+          {!loading && omitidas.length === 0 && !(ventasDetectadas.length > 0 && stored.length > 0) && (
             <Button data-tutorial="parse-btn" onClick={handleParse} disabled={!files.length} size="lg" className="w-full sm:w-auto">
               {files.length
                 ? `Procesar ${files.length} archivo${files.length > 1 ? "s" : ""}`

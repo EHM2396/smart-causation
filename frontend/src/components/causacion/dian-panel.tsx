@@ -63,9 +63,15 @@ function buildPresets() {
 interface Props {
   /** Recibe las facturas ya parseadas (mismo shape que la carga manual). */
   onImportadas: (facturas: Factura[]) => void | Promise<void>;
+  /** "compras" (recibidas) | "ventas" (emitidas) | "soporte" (documento soporte). */
+  modo?: "compras" | "ventas" | "soporte";
 }
 
-export function DianPanel({ onImportadas }: Props) {
+export function DianPanel({ onImportadas, modo = "compras" }: Props) {
+  const esVenta = modo === "ventas";
+  const esSoporte = modo === "soporte";
+  const sustantivo = esSoporte ? "documento soporte" : esVenta ? "emitida" : "recibida"; // singular
+  const sustantivoP = esSoporte ? "documentos soporte" : esVenta ? "emitidas" : "recibidas";
   const presets = useMemo(buildPresets, []);
   const [authUrl, setAuthUrl] = useState("");
   const [desde, setDesde] = useState(() => presets[0].desde); // por defecto: "Este mes"
@@ -143,6 +149,7 @@ export function DianPanel({ onImportadas }: Props) {
         auth_url: authUrl.trim(),
         fecha_desde: isoToDian(desde),
         fecha_hasta: isoToDian(hasta),
+        modo,
       }));
       setDocumentos(res.documents);
       // Selección por defecto: todas
@@ -163,10 +170,10 @@ export function DianPanel({ onImportadas }: Props) {
     try {
       // Progreso REAL: el backend transmite una línea por factura descargada.
       const facturas = await conReintentos(() =>
-        api.dianImportarStream({ auth_url: authUrl.trim(), ids }, (done, total) => setProg({ done, total }))
+        api.dianImportarStream({ auth_url: authUrl.trim(), ids, modo }, (done, total) => setProg({ done, total }))
       );
       if (!facturas.length) {
-        setError("No se pudo traer ninguna factura (¿ya causadas o de venta?).");
+        setError(`No se pudo traer ning${esSoporte ? "ún documento" : "una factura"} (¿ya causad${esSoporte ? "o" : "a"}s o de otro tipo?).`);
         return;
       }
       await onImportadas(facturas);
@@ -188,7 +195,7 @@ export function DianPanel({ onImportadas }: Props) {
         <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" style={{ color: "var(--info-text)" }} />
         <div className="text-xs leading-relaxed" style={{ color: "var(--info-text)" }}>
           Inicia sesión en el portal de la DIAN, copia la <strong>URL de AuthToken</strong> y pégala aquí.
-          El sistema trae tus <strong>facturas recibidas</strong> del rango que elijas — sin descargar archivos.
+          El sistema trae tus <strong>facturas {sustantivoP}</strong> del rango que elijas — sin descargar archivos.
           Tu token es temporal y no se guarda.
         </div>
       </div>
@@ -306,14 +313,14 @@ export function DianPanel({ onImportadas }: Props) {
         <div className="space-y-3">
           {documentos.length === 0 ? (
             <p className="rounded-lg border py-6 text-center text-sm" style={{ borderColor: "var(--border-soft)", color: "var(--text-muted)" }}>
-              No se encontraron facturas recibidas en ese rango.
+              No se encontraron facturas {sustantivoP} en ese rango.
             </p>
           ) : (
             <>
               <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ backgroundColor: "var(--success-bg)", border: "1px solid var(--success-border)" }}>
                 <CheckSquare className="h-4 w-4 shrink-0" style={{ color: "var(--success-text)" }} />
                 <p className="text-sm font-medium" style={{ color: "var(--success-text)" }}>
-                  Se encontraron {documentos.length} factura{documentos.length !== 1 ? "s" : ""} recibida{documentos.length !== 1 ? "s" : ""}
+                  Se encontraron {documentos.length} factura{documentos.length !== 1 ? "s" : ""} {documentos.length !== 1 ? sustantivoP : sustantivo}
                 </p>
               </div>
 

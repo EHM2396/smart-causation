@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useWizardStore } from "@/stores/wizard";
+import { useWizardStore, esModoVenta } from "@/stores/wizard";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { fmt } from "@/lib/utils";
@@ -18,7 +18,8 @@ function _parseApiError(raw: string): string {
 }
 
 export function Paso4() {
-  const { facturas, facturasParaCausar, facturasYaCausadas, mapeos, tipoComp, centroCosto, reporte, xlsxBlob, reset, setPaso, tutorialActivo, setFacturasYaCausadas } = useWizardStore();
+  const { docTipo, facturas, facturasParaCausar, facturasYaCausadas, mapeos, tipoComp, centroCosto, reporte, xlsxBlob, reset, setPaso, tutorialActivo, setFacturasYaCausadas } = useWizardStore();
+  const esVenta = esModoVenta(docTipo);
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
@@ -49,7 +50,7 @@ export function Paso4() {
         factura: f,
         mapeos_confirmados: mapeos.filter((m) => m.idx_factura === idx),
       }));
-      await api.batchGenerar({ items, tipo_comprobante: tipoComp, centro_costo: centroCosto, confirmar: true });
+      await api.batchGenerar({ items, tipo_comprobante: tipoComp, centro_costo: centroCosto, confirmar: true, es_venta: esVenta });
 
       // Refrescar causadas de toda la carga: alimenta el modal y el filtro de paso2.
       const prev = useWizardStore.getState().facturasYaCausadas;
@@ -84,10 +85,12 @@ export function Paso4() {
       setRestantes(quedan);
       setConfirmed(true);
 
-      // Solo descartar el borrador cuando ya no queda nada pendiente.
+      // Solo descartar el borrador cuando ya no queda nada pendiente. Debe ser el
+      // borrador del MÓDULO actual (compras/nc/ventas/nc_ventas), no el de compras
+      // por defecto: descartar el equivocado dejaba trabajo huérfano en otro módulo.
       if (quedan === 0) {
-        api.descartarBorrador()
-          .then(() => queryClient.invalidateQueries({ queryKey: ["borrador"] }))
+        api.descartarBorrador(docTipo)
+          .then(() => queryClient.invalidateQueries({ queryKey: ["borrador", docTipo] }))
           .catch(() => {});
       }
     } catch (e) {

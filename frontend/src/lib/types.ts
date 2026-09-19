@@ -58,10 +58,26 @@ export interface FacturaCausadaInfo {
 export interface FacturaOmitida {
   filename: string;
   numero: string;
-  motivo: "venta" | "ya_causada";
+  // "venta": omitida en un módulo de compras · "compra": omitida en un módulo de ventas
+  motivo: "venta" | "compra" | "ya_causada";
 }
 
 // ─── Facturas / Parseo ────────────────────────────────────────────────────────
+
+/** Tributo DIAN distinto del IVA extraído de una línea (INC, bolsas, IBUA, ICUI,
+ *  INPP, otros). `grupo`: "independiente" (INC/bolsas → línea aparte en ventas) o
+ *  "costo" (se suma al costo/ingreso). */
+export interface TributoItem {
+  cod_dian: string;
+  nombre: string;
+  grupo: "independiente" | "costo";
+  base: number;
+  valor: number;
+  porcentaje: number;
+  // Se completan en el frontend al armar los mapeos (cuenta del catálogo + código SIIGO).
+  cuenta?: string;
+  cod_impuesto?: string;
+}
 
 export interface ItemFactura {
   descripcion: string;
@@ -69,10 +85,13 @@ export interface ItemFactura {
   valor_impuesto: number;
   cod_impuesto?: string;
   porcentaje?: number;
+  otros_tributos?: TributoItem[];
+  descuento_item?: number;
 }
 
 export interface Factura {
   numero_dian: string;
+  cufe?: string;   // CUFE/CUDE del documento (para buscarlo en la DIAN)
   razon_social: string;
   nit: string;
   nit_comprador?: string;
@@ -82,6 +101,11 @@ export interface Factura {
   regimen?: string;
   medio_pago?: string;
   forma_pago?: string;
+  // "factura" | "nota_credito" | "nota_debito" — lo emite el parser (solo XML/ZIP/PDF).
+  tipo_documento?: string;
+  // Descuentos / recargos globales (a nivel de factura) extraídos del XML.
+  descuento_global?: number;
+  recargo_global?: number;
   items: ItemFactura[];
   advertencias?: string[];
   _archivo?: string;
@@ -110,7 +134,7 @@ export interface Sugerencia {
 
 // ─── Mapeo ────────────────────────────────────────────────────────────────────
 
-export type FuenteMapeo = "aprendido" | "regla" | "sugerido" | "ia_alta" | "manual";
+export type FuenteMapeo = "aprendido" | "aprendido_otro" | "regla" | "sugerido" | "ia_alta" | "manual";
 
 export interface MapeoItem {
   idx_factura: number;
@@ -130,6 +154,9 @@ export interface MapeoItem {
   es_retencion: boolean;
   cuenta_pago: string;
   cuenta_pago_nombre: string;
+  // Otros tributos DIAN de la línea (INC, bolsas, IBUA, ICUI, INPP, otros), ya con
+  // su cuenta y código resueltos, para que el exporter arme sus líneas contables.
+  otros_tributos?: TributoItem[];
 }
 
 // ─── Validación ───────────────────────────────────────────────────────────────
@@ -164,6 +191,9 @@ export interface HistorialItem {
   subtotal: number | null;
   total: number;
   tipo_comprobante: string | null;
+  // Módulo de causación: "compras" | "nc" | "ventas" | "nc_ventas" | "soporte" |
+  // "nc_soporte". Nulo en registros de antes de que se guardara este dato.
+  tipo_causacion: string | null;
   archivo_origen: string | null;
   tiene_datos: boolean;
 }

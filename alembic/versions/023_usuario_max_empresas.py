@@ -1,7 +1,7 @@
 """Máximo de empresas por usuario causador (lo asigna el admin de la cuenta)
 
-Revision ID: 021
-Revises: 020
+Revision ID: 023
+Revises: 022
 Create Date: 2026-09-08
 
 Cada causador crea sus propias empresas hasta el máximo que le asigna el admin.
@@ -12,8 +12,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "021"
-down_revision = "020"
+revision = "023"
+down_revision = "022"
 branch_labels = None
 depends_on = None
 

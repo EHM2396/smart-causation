@@ -32,6 +32,12 @@ def get_cuentas_gasto(db: DB, empresa: EmpresaActiva):
     return cuentas_service.listar_cuentas_gasto(db, empresa_id=empresa.id)
 
 
+@router.get("/ingreso", response_model=list[CuentaOpcion])
+def get_cuentas_ingreso(db: DB, empresa: EmpresaActiva):
+    """Cuentas de ingreso (clase 4) para causar ventas y NC de ventas."""
+    return cuentas_service.listar_cuentas_ingreso(db, empresa_id=empresa.id)
+
+
 @router.get("/pago", response_model=list[CuentaOpcion])
 def get_metodos_pago(db: DB, empresa: EmpresaActiva):
     return cuentas_service.listar_metodos_pago(db, empresa_id=empresa.id)
