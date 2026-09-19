@@ -35,6 +35,7 @@ from sqlalchemy import func, select
 
 from db.session import SessionLocal, DATABASE_URL
 from db.models.contabilidad import FacturaCausada
+from scripts.respaldos import ruta_respaldo
 from services.causacion_service import base_gravable_de
 
 
@@ -100,7 +101,7 @@ def main() -> None:
             return
 
         sello = datetime.now().strftime("%Y%m%d_%H%M%S")
-        respaldo = f"backfill_base_gravable_{sello}.csv"
+        respaldo = ruta_respaldo(f"backfill_base_gravable_{sello}.csv")
         with open(respaldo, "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
             w.writerow(["factura_causada_id", "numero_dian", "total", "base_gravable_nueva"])
