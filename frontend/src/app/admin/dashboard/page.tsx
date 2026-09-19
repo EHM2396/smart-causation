@@ -2,11 +2,10 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { fmt } from "@/lib/utils";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { FileSpreadsheet, Users, DollarSign, Download, Loader2, ChevronRight, CalendarDays } from "lucide-react";
+import { FileSpreadsheet, Users, Download, Loader2, ChevronRight, CalendarDays } from "lucide-react";
 
 function localYMD(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -39,7 +38,7 @@ function Kpi({ icon: Icon, label, value, accent }: { icon: React.ElementType; la
   );
 }
 
-type Fila = { nombre: string; causaciones: number; monto: number };
+type Fila = { nombre: string; causaciones: number };
 
 function TablaResumen({ titulo, filas, onPick }: { titulo: string; filas: Fila[]; onPick?: (idx: number) => void }) {
   const totalC = filas.reduce((s, f) => s + f.causaciones, 0) || 1;
@@ -55,7 +54,6 @@ function TablaResumen({ titulo, filas, onPick }: { titulo: string; filas: Fila[]
             <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
               <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Nombre</th>
               <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Causaciones</th>
-              <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Monto</th>
               {onPick && <th className="w-8" />}
             </tr>
           </thead>
@@ -70,12 +68,11 @@ function TablaResumen({ titulo, filas, onPick }: { titulo: string; filas: Fila[]
                   </div>
                 </td>
                 <td className="px-4 py-2.5 text-right font-mono tabular-nums" style={{ color: "var(--text-primary)" }}>{f.causaciones}</td>
-                <td className="px-4 py-2.5 text-right font-mono tabular-nums" style={{ color: "var(--text-secondary)" }}>{fmt(f.monto)}</td>
                 {onPick && <td className="px-2 text-right"><ChevronRight className="h-4 w-4" style={{ color: "var(--text-muted)" }} /></td>}
               </tr>
             ))}
             {filas.length === 0 && (
-              <tr><td colSpan={onPick ? 4 : 3} className="px-4 py-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>Sin causaciones en este periodo.</td></tr>
+              <tr><td colSpan={onPick ? 3 : 2} className="px-4 py-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>Sin causaciones en este periodo.</td></tr>
             )}
           </tbody>
         </table>
@@ -97,10 +94,7 @@ function UsuarioDetalleModal({ usuarioId, desde, hasta, onClose }: { usuarioId: 
           <div className="py-10 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin" style={{ color: "var(--brand)" }} /></div>
         ) : (
           <div className="space-y-4 pt-1">
-            <div className="grid grid-cols-2 gap-3">
-              <Kpi icon={FileSpreadsheet} label="Causaciones" value={String(data?.total ?? 0)} accent="#4F46E5" />
-              <Kpi icon={DollarSign} label="Monto" value={fmt(data?.monto ?? 0)} accent="#059669" />
-            </div>
+            <Kpi icon={FileSpreadsheet} label="Causaciones" value={String(data?.total ?? 0)} accent="#4F46E5" />
             <div>
               <p className="mb-1.5 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Por empresa</p>
               <div className="overflow-hidden rounded-lg border" style={{ borderColor: "var(--border-soft)" }}>
@@ -109,7 +103,7 @@ function UsuarioDetalleModal({ usuarioId, desde, hasta, onClose }: { usuarioId: 
                     {(data?.por_empresa ?? []).map((e, i) => (
                       <tr key={i} style={{ borderBottom: "1px solid var(--border-soft)" }}>
                         <td className="px-3 py-2" style={{ color: "var(--text-primary)" }}>{e.nombre}</td>
-                        <td className="px-3 py-2 text-right font-mono" style={{ color: "var(--text-secondary)" }}>{e.causaciones} · {fmt(e.monto)}</td>
+                        <td className="px-3 py-2 text-right font-mono" style={{ color: "var(--text-secondary)" }}>{e.causaciones}</td>
                       </tr>
                     ))}
                     {(data?.por_empresa ?? []).length === 0 && <tr><td className="px-3 py-4 text-center text-sm" style={{ color: "var(--text-muted)" }}>Sin datos.</td></tr>}
@@ -123,7 +117,7 @@ function UsuarioDetalleModal({ usuarioId, desde, hasta, onClose }: { usuarioId: 
                 <table className="w-full text-sm">
                   <thead>
                     <tr style={{ backgroundColor: "var(--bg-elevated)", borderBottom: "1px solid var(--border-soft)" }}>
-                      {["Fecha", "Empresa", "N° / Proveedor", "Total"].map((h) => (
+                      {["Fecha", "Empresa", "N° / Proveedor"].map((h) => (
                         <th key={h} className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{h}</th>
                       ))}
                     </tr>
@@ -134,10 +128,9 @@ function UsuarioDetalleModal({ usuarioId, desde, hasta, onClose }: { usuarioId: 
                         <td className="px-3 py-2 tabular-nums" style={{ color: "var(--text-secondary)" }}>{d.fecha}</td>
                         <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>{d.empresa}</td>
                         <td className="px-3 py-2"><span className="font-mono text-xs" style={{ color: "var(--text-primary)" }}>{d.numero}</span><span className="ml-1 text-xs" style={{ color: "var(--text-muted)" }}>{d.proveedor}</span></td>
-                        <td className="px-3 py-2 text-right font-mono tabular-nums" style={{ color: "var(--text-secondary)" }}>{fmt(d.total)}</td>
                       </tr>
                     ))}
-                    {(data?.detalle ?? []).length === 0 && <tr><td colSpan={4} className="px-3 py-4 text-center text-sm" style={{ color: "var(--text-muted)" }}>Sin causaciones.</td></tr>}
+                    {(data?.detalle ?? []).length === 0 && <tr><td colSpan={3} className="px-3 py-4 text-center text-sm" style={{ color: "var(--text-muted)" }}>Sin causaciones.</td></tr>}
                   </tbody>
                 </table>
               </div>
@@ -208,16 +201,15 @@ export default function AdminDashboardPage() {
         </div>
       </div>
 
-      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Kpi icon={FileSpreadsheet} label="Causaciones (periodo)" value={String(data?.total_causaciones ?? 0)} accent="#4F46E5" />
-        <Kpi icon={DollarSign} label="Monto total (periodo)" value={fmt(data?.monto_total ?? 0)} accent="#059669" />
         <Kpi icon={Users} label="Usuarios con causaciones" value={String(data?.por_usuario.length ?? 0)} accent="#7c3aed" />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <TablaResumen titulo="Por usuario" filas={(data?.por_usuario ?? []).map((f) => ({ nombre: f.nombre, causaciones: f.causaciones, monto: f.monto }))}
+        <TablaResumen titulo="Por usuario" filas={(data?.por_usuario ?? []).map((f) => ({ nombre: f.nombre, causaciones: f.causaciones }))}
           onPick={(idx) => { const uid = data?.por_usuario[idx]?.usuario_id; if (uid != null) setDetalleUid(uid); }} />
-        <TablaResumen titulo="Por empresa" filas={(data?.por_empresa ?? []).map((f) => ({ nombre: f.nombre, causaciones: f.causaciones, monto: f.monto }))} />
+        <TablaResumen titulo="Por empresa" filas={(data?.por_empresa ?? []).map((f) => ({ nombre: f.nombre, causaciones: f.causaciones }))} />
       </div>
 
       {detalleUid != null && (
