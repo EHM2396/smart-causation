@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { DataTableShell, SortableTh, useDataTable } from "@/components/ui/data-table";
-import { Users, Building2, Gauge, Tag, Loader2, Pencil, AlertTriangle } from "lucide-react";
+import { Users, Building2, Gauge, Tag, Loader2, Pencil, AlertTriangle, Trash2 } from "lucide-react";
 
 function limiteTexto(l?: AdminLimite): string {
   if (!l) return "—";
@@ -48,6 +48,7 @@ export default function AdminUsuariosPage() {
   const { data: cuenta } = useQuery({ queryKey: ["admin-cuenta"], queryFn: api.adminCuenta });
   const { data: usuarios = [] } = useQuery({ queryKey: ["admin-usuarios"], queryFn: api.adminUsuarios });
   const [dlg, setDlg] = useState<null | { mode: "crear" } | { mode: "editar"; u: AdminUsuario }>(null);
+  const [eliminarDlg, setEliminarDlg] = useState<AdminUsuario | null>(null);
 
   const dt = useDataTable<AdminUsuario>(
     usuarios,
@@ -120,9 +121,20 @@ export default function AdminUsuariosPage() {
                 </td>
                 <td className="px-4 py-3"><Badge variant={u.activo ? "success" : "default"}>{u.activo ? "Activo" : "Inactivo"}</Badge></td>
                 <td className="px-4 py-3 text-right">
-                  <Button variant="outline" size="sm" onClick={() => setDlg({ mode: "editar", u })} className="gap-1">
-                    <Pencil className="h-3.5 w-3.5" /> Editar
-                  </Button>
+                  <div className="flex justify-end gap-1.5">
+                    <Button variant="outline" size="sm" onClick={() => setDlg({ mode: "editar", u })} className="gap-1">
+                      <Pencil className="h-3.5 w-3.5" /> Editar
+                    </Button>
+                    {/* Solo aparece si el usuario NUNCA causó nada. Si ya causó
+                        algo, no hay botón: la única opción es inactivarlo
+                        (arriba, en Editar). */}
+                    {u.puede_eliminar && (
+                      <Button variant="outline" size="sm" onClick={() => setEliminarDlg(u)}
+                        className="gap-1" style={{ borderColor: "var(--error-border)", color: "var(--error-text)" }}>
+                        <Trash2 className="h-3.5 w-3.5" /> Eliminar
+                      </Button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -147,7 +159,81 @@ export default function AdminUsuariosPage() {
           }}
         />
       )}
+
+      {eliminarDlg && (
+        <EliminarUsuarioDialog
+          usuario={eliminarDlg}
+          onClose={() => setEliminarDlg(null)}
+          onEliminado={() => {
+            qc.invalidateQueries({ queryKey: ["admin-usuarios"] });
+            qc.invalidateQueries({ queryKey: ["admin-cuenta"] });
+            qc.invalidateQueries({ queryKey: ["admin-empresas"] });
+            setEliminarDlg(null);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function EliminarUsuarioDialog({
+  usuario, onClose, onEliminado,
+}: { usuario: AdminUsuario; onClose: () => void; onEliminado: () => void }) {
+  const [err, setErr] = useState("");
+  const mut = useMutation({
+    mutationFn: () => api.adminEliminarUsuario(usuario.id),
+    onSuccess: onEliminado,
+    onError: (e) => setErr(errDetalle(e)),
+  });
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Eliminar usuario</DialogTitle>
+          <DialogDescription>Esta acción no se puede deshacer desde aquí.</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 pt-1">
+          <div className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
+            <span className="font-medium" style={{ color: "var(--text-primary)" }}>{usuario.nombre}</span>
+            <span className="ml-2 text-xs" style={{ color: "var(--text-muted)" }}>{usuario.email}</span>
+          </div>
+
+          <div className="flex items-start gap-2 rounded-lg px-3 py-2.5 text-sm" style={{ backgroundColor: "var(--error-bg)", border: "1px solid var(--error-border)", color: "var(--error-text)" }}>
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p>Se va a eliminar este usuario{usuario.empresas.length > 0 ? " junto con:" : "."}</p>
+              {usuario.empresas.length > 0 && (
+                <ul className="mt-1.5 list-disc space-y-0.5 pl-4">
+                  {usuario.empresas.map((e) => <li key={e.id}>{e.nombre}</li>)}
+                </ul>
+              )}
+              <p className="mt-1.5 text-xs opacity-90">
+                Deja de verse en esta lista y no va a poder volver a entrar con esta cuenta. No hay
+                forma de recuperarlo desde aquí. Su correo <strong>queda libre</strong>: puede
+                registrarse de nuevo por su cuenta cuando quiera, con un plan totalmente aparte
+                (no vuelve a este grupo).
+              </p>
+            </div>
+          </div>
+
+          {err && (
+            <div className="flex items-start gap-1.5 rounded-lg px-3 py-2 text-sm" style={{ backgroundColor: "var(--error-bg)", border: "1px solid var(--error-border)", color: "var(--error-text)" }}>
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {err}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" onClick={onClose} disabled={mut.isPending}>Cancelar</Button>
+            <Button variant="destructive" onClick={() => mut.mutate()} disabled={mut.isPending} className="gap-1.5">
+              {mut.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              Sí, eliminar todo
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

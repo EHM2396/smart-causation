@@ -208,6 +208,24 @@ def empresas_creadas_por_usuario(db: Session, usuario_id: int) -> int:
     ) or 0
 
 
+def empresas_activas_de_usuario(db: Session, usuario_id: int) -> list[Empresa]:
+    """Las empresas activas de ese usuario (para nombrarlas al eliminarlo)."""
+    return list(db.scalars(
+        select(Empresa).where(Empresa.owner_id == usuario_id, Empresa.activa.is_(True)).order_by(Empresa.nombre)
+    ).all())
+
+
+def usuario_ha_causado_algo(db: Session, usuario_id: int) -> bool:
+    """¿Este usuario causó alguna vez algo? Incluye lo que borró del historial:
+    eliminar del historial (FacturaCausada.eliminado) libera el número para
+    volver a causarlo, pero NO borra el hecho de que este usuario lo causó.
+    Es la condición que decide si se puede ELIMINAR al usuario (solo si nunca
+    causó nada) o si solo se puede inactivarlo."""
+    return db.scalar(
+        select(FacturaCausada.id).where(FacturaCausada.usuario_id == usuario_id).limit(1)
+    ) is not None
+
+
 def puede_crear_empresa_usuario(db: Session, cuenta: CuentaCliente | None, usuario: Usuario) -> tuple[bool, dict]:
     """¿Este causador puede crear otra empresa? Respeta el tope del plan (cuenta) y
     el tope personal que le asignó el admin (`usuario.max_empresas`)."""

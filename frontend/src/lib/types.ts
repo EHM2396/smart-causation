@@ -361,6 +361,11 @@ export interface AdminCuenta {
   limite_empresas: AdminLimite;
 }
 
+export interface AdminEmpresaMini {
+  id: number;
+  nombre: string;
+}
+
 export interface AdminUsuario {
   id: number;
   email: string;
@@ -369,6 +374,8 @@ export interface AdminUsuario {
   cupo_mes: number | null;       // tope de causaciones/mes (null = sin tope propio)
   max_empresas: number | null;   // cuántas empresas puede crear (null = sin tope propio)
   empresas_creadas: number;      // cuántas ha creado
+  puede_eliminar: boolean;       // solo true si nunca causó nada
+  empresas: AdminEmpresaMini[];  // para el texto de confirmación al eliminar
 }
 
 export interface AdminEmpresa {
@@ -377,6 +384,7 @@ export interface AdminEmpresa {
   nit: string | null;
   activa: boolean;
   creada_por?: string | null;    // nombre del causador que la creó
+  owner_id?: number | null;      // id del causador (para agrupar por usuario)
 }
 
 export interface AdminDashboardFila {

@@ -53,6 +53,16 @@ class Usuario(Base):
     # cuenta). NULL = sin tope propio (solo aplica el tope del plan).
     max_empresas: Mapped[int | None] = mapped_column(Integer, nullable=True)
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Eliminación desde el panel de admin (solo permitida si el usuario nunca
+    # causó nada). Nunca se borra la fila: se marca y desaparece de las listas,
+    # igual que facturas_causadas.eliminado. Distinto de `activo` (que sí es
+    # reversible con el toggle Activo/Inactivo): esto no tiene botón de "volver".
+    eliminado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    eliminado_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # El correo real, cuando `email` se reescribió a un valor inerte al
+    # eliminar (para dejar el correo real libre y que la persona pueda
+    # inscribirse de cero, como una cuenta totalmente aparte).
+    email_original: Mapped[str | None] = mapped_column(String(255), nullable=True)
     email_verificado: Mapped[bool] = mapped_column(Boolean, default=False)
     tutorial_pendiente: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
