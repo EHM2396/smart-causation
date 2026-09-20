@@ -29,7 +29,7 @@ from db.models.auth import Empresa, Usuario
 from db.session import get_db, SessionLocal
 from services import (
     analitica_service, causacion_service, dian_service, documentos_dian_service,
-    informe_analitica_service,
+    informe_analitica_service, informe_pdf_service,
 )
 from services.dian_service import DianError
 
@@ -146,6 +146,39 @@ def informe_xlsx(
     return StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{archivo}"'},
+    )
+
+
+@router.get("/informe.pdf")
+def informe_pdf(
+    db: DB,
+    current_user: CurrentUser,
+    desde: str | None = None,
+    hasta: str | None = None,
+    empresa_id: int | None = None,
+):
+    """Informe del periodo en PDF, para enviar a un cliente o a la gerencia.
+
+    Lleva el resumen y los gráficos; el detalle documento por documento va en el
+    Excel, porque en PDF serían cientos de páginas que nadie abre.
+    """
+    d, h = _parse_rango(desde, hasta)
+    visibles = analitica_service.empresas_visibles(db, current_user, current_user.cuenta_id)
+
+    nombre = "Todas las empresas"
+    if empresa_id is not None:
+        empresa = _empresa_visible(db, current_user, empresa_id)
+        visibles = [empresa_id]
+        nombre = empresa.nombre
+
+    buffer = informe_pdf_service.generar_pdf(
+        db, empresa_ids=visibles, desde=d, hasta=h, nombre_empresa=nombre,
+    )
+    archivo = f"ciolix_analitica_{d.isoformat()}_a_{h.isoformat()}.pdf"
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{archivo}"'},
     )
 

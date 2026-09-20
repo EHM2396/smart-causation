@@ -239,6 +239,59 @@ def _obtener_account_id(session: requests.Session) -> str:
     )
 
 
+# Documentos por página en los listados DataTables de la DIAN.
+_PAGINA = 150
+
+
+def _paginar_datatables(
+    session: requests.Session, url: str, data: dict, headers: dict, *, url_alias: str | None = None,
+) -> dict:
+    """Recorre TODAS las páginas de un listado de la DIAN.
+
+    La DIAN devuelve como máximo `length` documentos por respuesta y los ordena
+    por fecha DESCENDENTE. Pedir una sola página parecía suficiente y no lo es:
+    en un rango con más documentos que el tope, los MÁS VIEJOS quedan afuera en
+    silencio —meses enteros aparecen vacíos, sin ningún error— y el usuario cree
+    que no hubo movimiento. Se detectó con un rango de enero a septiembre donde
+    dos meses salían en cero y, consultados aparte, sí traían documentos.
+    """
+    todos: list[dict] = []
+    total: int | None = None
+    start = 0
+
+    while True:
+        pagina = {**data, "start": str(start), "length": str(_PAGINA)}
+        resp = session.post(url, data=pagina, headers=headers, timeout=_TIMEOUT)
+        if resp.status_code == 404 and url_alias:
+            resp = session.post(url_alias, data=pagina, headers=headers, timeout=_TIMEOUT)
+        resp.raise_for_status()
+        try:
+            payload = resp.json()
+        except ValueError:
+            # Si devuelve HTML en vez de JSON, la sesión dejó de estar autenticada.
+            raise DianError(
+                "SESSION_EXPIRED",
+                "El enlace de la DIAN venció (solo dura una hora). Lo que alcanzó a "
+                "descargarse quedó guardado: generá un enlace nuevo y volvé a traer "
+                "el mismo periodo para completar lo que falte.",
+            )
+
+        registros = payload.get("data") or []
+        todos.extend(registros)
+        if total is None:
+            total = payload.get("recordsTotal") or payload.get("recordsFiltered") or len(registros)
+
+        # Se corta cuando la página vino incompleta (era la última) o ya se
+        # juntó lo que la DIAN dijo que había.
+        if len(registros) < _PAGINA or (total and len(todos) >= total):
+            break
+        start += _PAGINA
+        if start > 20_000:  # red de seguridad: nunca un bucle infinito
+            break
+
+    return {"data": todos, "recordsTotal": total or len(todos)}
+
+
 def _get_received(session: requests.Session, account_id: str, desde: str, hasta: str) -> dict:
     """Aplica el rango de fechas y pide la lista JSON de documentos recibidos."""
     received_url = f"{BILLER_BASE}/Document/Received"
@@ -269,23 +322,12 @@ def _get_received(session: requests.Session, account_id: str, desde: str, hasta:
         "columns[2][data]": "SenderName",
         "columns[3][data]": "DocumentDate",
     }
-    resp = session.post(
+    return _paginar_datatables(
+        session,
         f"{BILLER_BASE}/Document/GetReceivedDocuments",
-        data=data,
-        headers={**_HEADERS, "Referer": received_url, "X-Requested-With": "XMLHttpRequest"},
-        timeout=_TIMEOUT,
+        data,
+        {**_HEADERS, "Referer": received_url, "X-Requested-With": "XMLHttpRequest"},
     )
-    resp.raise_for_status()
-    try:
-        return resp.json()
-    except ValueError:
-        # Si devuelve HTML en vez de JSON, la sesión dejó de estar autenticada.
-        raise DianError(
-            "SESSION_EXPIRED",
-            "El enlace de la DIAN venció (solo dura una hora). Lo que alcanzó a "
-            "descargarse quedó guardado: generá un enlace nuevo y volvé a traer "
-            "el mismo periodo para completar lo que falte.",
-        )
 
 
 def _get_soporte(session: requests.Session, account_id: str, desde: str, hasta: str, doc_type_id: str = "05") -> dict:
@@ -410,29 +452,13 @@ def _get_issued(session: requests.Session, account_id: str, desde: str, hasta: s
         "columns[2][data]": "ReceiverName",
         "columns[3][data]": "DocumentDate",
     }
-    resp = session.post(
+    return _paginar_datatables(
+        session,
         f"{BILLER_BASE}/Document/GetIssuedDocuments",
-        data=data,
-        headers={**_HEADERS, "Referer": sent_url, "X-Requested-With": "XMLHttpRequest"},
-        timeout=_TIMEOUT,
+        data,
+        {**_HEADERS, "Referer": sent_url, "X-Requested-With": "XMLHttpRequest"},
+        url_alias=f"{BILLER_BASE}/Document/GetSentDocuments",
     )
-    if resp.status_code == 404:
-        resp = session.post(
-            f"{BILLER_BASE}/Document/GetSentDocuments",
-            data=data,
-            headers={**_HEADERS, "Referer": sent_url, "X-Requested-With": "XMLHttpRequest"},
-            timeout=_TIMEOUT,
-        )
-    resp.raise_for_status()
-    try:
-        return resp.json()
-    except ValueError:
-        raise DianError(
-            "SESSION_EXPIRED",
-            "El enlace de la DIAN venció (solo dura una hora). Lo que alcanzó a "
-            "descargarse quedó guardado: generá un enlace nuevo y volvé a traer "
-            "el mismo periodo para completar lo que falte.",
-        )
 
 
 def _limpiar_html(valor) -> str:

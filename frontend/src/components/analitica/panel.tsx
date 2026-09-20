@@ -18,8 +18,8 @@ import {
   Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  ArrowDownRight, ArrowUpRight, Building2, CalendarCheck, CalendarDays, Download,
-  DownloadCloud, FileStack, Info, KeyRound, Loader2, Scale, TriangleAlert,
+  ArrowDownRight, ArrowUpRight, Building2, CalendarCheck, CalendarDays, DownloadCloud,
+  FileSpreadsheet, FileStack, FileText, Info, KeyRound, Loader2, Scale, Share2, TriangleAlert,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -163,7 +163,7 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
   const [progreso, setProgreso] = useState({ done: 0, total: 0 });
   const [resultado, setResultado] = useState<{ guardados: number; errores: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [descargando, setDescargando] = useState(false);
+  const [descargando, setDescargando] = useState<"xlsx" | "pdf" | null>(null);
   const queryClient = useQueryClient();
 
   const presetActivo = presets.find((p) => p.desde === desde && p.hasta === hasta)?.id ?? "personalizado";
@@ -234,21 +234,24 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
   // como que no hubo movimiento.
   const cubrePeriodo = !sinc || (sinc.desde <= desde && sinc.hasta >= hasta);
 
-  const descargar = async () => {
-    setDescargando(true);
+  const descargar = async (formato: "xlsx" | "pdf") => {
+    setDescargando(formato);
     try {
-      const blob = await api.analiticaInformeXlsx(desde, hasta, empresaId);
+      const blob = formato === "pdf"
+        ? await api.analiticaInformePdf(desde, hasta, empresaId)
+        : await api.analiticaInformeXlsx(desde, hasta, empresaId);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `ciolix_analitica_${desde}_a_${hasta}.xlsx`;
+      a.download = `ciolix_analitica_${desde}_a_${hasta}.${formato}`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
     } finally {
-      setDescargando(false);
+      setDescargando(null);
     }
   };
 
+  const ocupado = descargando !== null || trayendo;
   const k = data?.kpis;
   const margen = k && k.ingresos > 0 ? (k.resultado / k.ingresos) * 100 : null;
 
@@ -280,11 +283,6 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
             : "Cómo van tus costos, gastos e ingresos, según lo que reporta la DIAN."}
         </p>
         </div>
-        <Button onClick={descargar} disabled={descargando || trayendo || !hayDatos}
-          variant="outline" className="gap-1.5">
-          {descargando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-          Exportar Excel
-        </Button>
       </div>
 
       {/* ── Filtros ─────────────────────────────────────────────────────── */}
@@ -332,6 +330,29 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
             </span>
           </div>
         )}
+      </div>
+
+      {/* ── Exportar ─────────────────────────────────────────────────────
+          Entre el periodo y la traída a propósito: lo que se exporta es
+          justamente el periodo elegido arriba. */}
+      <div className="mb-6 flex flex-wrap items-center gap-2 rounded-xl border px-4 py-3"
+        style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
+        <span className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+          <Share2 className="h-4 w-4" style={{ color: "var(--brand)" }} /> Exportar informe
+        </span>
+        <span className="mr-auto text-xs" style={{ color: "var(--text-muted)" }}>
+          del periodo seleccionado
+        </span>
+        <Button onClick={() => descargar("pdf")} disabled={ocupado || !hayDatos}
+          variant="outline" className="gap-1.5">
+          {descargando === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+          PDF
+        </Button>
+        <Button onClick={() => descargar("xlsx")} disabled={ocupado || !hayDatos}
+          variant="outline" className="gap-1.5">
+          {descargando === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+          Excel
+        </Button>
       </div>
 
       {/* ── Traer de la DIAN ────────────────────────────────────────────── */}
