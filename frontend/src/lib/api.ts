@@ -176,6 +176,15 @@ export const api = {
     return reqBlob(`/analitica/informe.xlsx${q ? `?${q}` : ""}`);
   },
 
+  analiticaInformePdf: (desde?: string, hasta?: string, empresaId?: number | null) => {
+    const qs = new URLSearchParams();
+    if (desde) qs.set("desde", desde);
+    if (hasta) qs.set("hasta", hasta);
+    if (empresaId != null) qs.set("empresa_id", String(empresaId));
+    const q = qs.toString();
+    return reqBlob(`/analitica/informe.pdf${q ? `?${q}` : ""}`);
+  },
+
   /** Trae de la DIAN los documentos del rango y los guarda. Informa el progreso
    * real porque el listado de la DIAN no trae montos: hay que descargar y
    * parsear cada XML, y en un rango largo eso son minutos. */
