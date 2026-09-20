@@ -140,9 +140,39 @@ def _filtrar_por_modo(facturas: list[dict], empresa: Empresa, modo: str = "compr
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+def _exigir_token_de_la_empresa(auth_url: str, empresa: Empresa) -> None:
+    """El token debe ser el de la empresa seleccionada.
+
+    La DIAN pone el NIT del titular en el parámetro `rk` de la URL de AuthToken,
+    así que se puede verificar antes de descargar nada. Sin este control, pegar
+    el token equivocado importa los documentos de OTRA empresa como si fueran de
+    esta, y queda mezclado en el historial sin ninguna señal.
+
+    Si la empresa no tiene NIT registrado no se puede comparar: se deja pasar en
+    vez de bloquear el trabajo (el NIT es obligatorio al crear empresas nuevas,
+    pero puede faltar en las creadas antes de esa regla).
+    """
+    if not empresa.nit:
+        return
+    try:
+        nit_token = dian_service.nit_del_token(auth_url)
+    except DianError as e:
+        raise _mapear_error(e)
+    if not dian_service.nits_equivalentes(nit_token, empresa.nit):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"El token es del NIT {nit_token}, pero la empresa seleccionada "
+                f"es {empresa.nombre} (NIT {empresa.nit}). "
+                "Revisa que hayas copiado el token de la empresa correcta."
+            ),
+        )
+
+
 @router.post("/consultar", response_model=ConsultarResponse)
 def consultar(body: ConsultarRequest, empresa: EmpresaActiva):
     """Lista las facturas recibidas de la DIAN en el rango de fechas (sin descargar XML)."""
+    _exigir_token_de_la_empresa(body.auth_url, empresa)
     try:
         return dian_service.consultar_documentos(
             body.auth_url, body.fecha_desde, body.fecha_hasta, modo=body.modo
@@ -166,6 +196,7 @@ def importar(body: ImportarRequest, empresa: EmpresaActiva):
     """
     if not body.ids:
         raise HTTPException(400, "No se seleccionaron facturas para importar.")
+    _exigir_token_de_la_empresa(body.auth_url, empresa)
 
     def gen():
         facturas: list[dict] = []
@@ -213,6 +244,7 @@ def consultar_todo(body: ConsultarTodoRequest, empresa: EmpresaActiva):
     """Con un solo token, lista TODO en el rango: recibidos (compras) y emitidos
     (ventas). La sesión DIAN se reutiliza (cacheada por token), así que las dos
     consultas usan la misma autenticación."""
+    _exigir_token_de_la_empresa(body.auth_url, empresa)
     try:
         compras = dian_service.consultar_documentos(
             body.auth_url, body.fecha_desde, body.fecha_hasta, modo="compras"
@@ -271,6 +303,7 @@ def importar_todo(body: ImportarTodoRequest, empresa: EmpresaActiva):
     """
     if not (body.ids_compras or body.ids_ventas or body.ids_soporte or body.ids_soporte_ajuste):
         raise HTTPException(400, "No se seleccionaron facturas para importar.")
+    _exigir_token_de_la_empresa(body.auth_url, empresa)
 
     # Cuatro lotes con su PROPIA descarga y su bucket por ORIGEN: recibidos
     # (DownloadXml type=2), emitidos (DownloadXml type=1), soporte (05) y ajuste al
