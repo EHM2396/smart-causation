@@ -150,6 +150,43 @@ class FacturaCausada(Base):
         return f"<FacturaCausada {self.numero_dian} ({self.consecutivo})>"
 
 
+class DocumentoDian(Base):
+    """
+    Documento tal como lo reporta la DIAN, traído con el token de la empresa.
+
+    Es una verdad DISTINTA de FacturaCausada, no un duplicado: acá está lo que
+    la DIAN dice que pasó, se haya causado o no. Esa diferencia es justamente
+    lo que permite ver qué falta por causar.
+    """
+    __tablename__ = "documentos_dian"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"), nullable=False, index=True)
+    # compras | nc | nd | ventas | nc_ventas | nd_ventas | soporte | nc_soporte
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)
+    numero: Mapped[str] = mapped_column(String(80), nullable=False)
+    cufe: Mapped[str | None] = mapped_column(String(120))
+    fecha_emision: Mapped[date | None] = mapped_column(Date)
+    nit_contraparte: Mapped[str | None] = mapped_column(String(20))
+    razon_social: Mapped[str | None] = mapped_column(String(255))
+    total: Mapped[float | None] = mapped_column(Numeric(18, 4))
+    # Suma de las bases de los ítems, sin IVA: el IVA descontable no es costo.
+    base_gravable: Mapped[float | None] = mapped_column(Numeric(18, 4))
+    # Ítems con su base y su tarifa — los necesita el reporte de impuestos, y
+    # volver a bajarlos de la DIAN cuesta minutos.
+    items_json: Mapped[str | None] = mapped_column(Text)
+    traido_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("empresa_id", "tipo", "numero", name="uq_documentos_dian_empresa_tipo_numero"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<DocumentoDian {self.tipo} {self.numero}>"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Consecutivos por prefijo de comprobante
 # ─────────────────────────────────────────────────────────────────────────────
