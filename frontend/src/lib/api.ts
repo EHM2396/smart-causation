@@ -156,17 +156,76 @@ export const api = {
     const q = qs.toString();
     return req<import("@/lib/types").AdminUsuarioDetalle>(`/admin/usuario/${id}/detalle${q ? `?${q}` : ""}`);
   },
-  analiticaResumen: (desde?: string, hasta?: string, empresaId?: number | null, campoFecha?: CampoFechaHistorial) => {
+  analiticaResumen: (desde?: string, hasta?: string, empresaId?: number | null) => {
     const qs = new URLSearchParams();
     if (desde) qs.set("desde", desde);
     if (hasta) qs.set("hasta", hasta);
     if (empresaId != null) qs.set("empresa_id", String(empresaId));
-    if (campoFecha) qs.set("campo_fecha", campoFecha);
     const q = qs.toString();
     return req<import("@/lib/types").AnaliticaResumen>(`/analitica/resumen${q ? `?${q}` : ""}`);
   },
   analiticaEmpresas: () =>
     req<import("@/lib/types").AnaliticaEmpresaOpcion[]>("/analitica/empresas"),
+
+  /** Trae de la DIAN los documentos del rango y los guarda. Informa el progreso
+   * real porque el listado de la DIAN no trae montos: hay que descargar y
+   * parsear cada XML, y en un rango largo eso son minutos. */
+  analiticaSincronizar: async (
+    body: { auth_url: string; empresa_id: number; fecha_desde: string; fecha_hasta: string },
+    onProgress: (done: number, total: number) => void,
+  ): Promise<{ guardados: number; errores: number }> => {
+    const { token, empresaId } = useAuthStore.getState();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (empresaId != null) headers["X-Empresa-Id"] = String(empresaId);
+
+    const res = await fetch(`${BASE}/analitica/sincronizar`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+    if (res.status === 401) _handleUnauthorized();
+    if (!res.ok || !res.body) {
+      // El backend rechaza acá el token que no corresponde a la empresa: ese
+      // mensaje es para el usuario, hay que dejarlo pasar tal cual.
+      let detalle = res.statusText;
+      try {
+        const data = await res.json();
+        detalle = data?.detail ?? detalle;
+      } catch { /* la respuesta no era JSON */ }
+      throw new Error(detalle);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let guardados = 0;
+    let errores = 0;
+
+    const procesarLinea = (t: string) => {
+      let msg: { type: string; done?: number; total?: number; guardados?: number; errores?: number; message?: string };
+      try { msg = JSON.parse(t); } catch { return; }
+      if (msg.type === "start") onProgress(0, msg.total ?? 0);
+      else if (msg.type === "progress") onProgress(msg.done ?? 0, msg.total ?? 0);
+      else if (msg.type === "done") { guardados = msg.guardados ?? 0; errores = msg.errores ?? 0; }
+      else if (msg.type === "error") throw new Error(msg.message || "No se pudo traer la información de la DIAN.");
+    };
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const t = line.trim();
+        if (t) procesarLinea(t);
+      }
+    }
+    if (buffer.trim()) procesarLinea(buffer.trim());
+
+    return { guardados, errores };
+  },
 
   adminInformeXlsx: (desde?: string, hasta?: string) => {
     const qs = new URLSearchParams();

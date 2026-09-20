@@ -408,11 +408,12 @@ export interface AdminUsuarioDetalle {
 /** Naturaleza contable a la que aporta cada documento electrónico. */
 export type NaturalezaAnalitica = "ingresos" | "costos_gastos";
 
-/** Tipo de documento electrónico DIAN, por el módulo que lo causa. Mismos
- * valores que BorradorTipo en api.ts; se repite acá porque api.ts importa de
- * este archivo y al revés sería circular. */
+/** Tipo de documento electrónico DIAN. Incluye las notas DÉBITO, que no tienen
+ * módulo de causación pero sí existen en la DIAN y suman al valor. */
 export type DocumentoTipo =
-  | "compras" | "nc" | "ventas" | "nc_ventas" | "soporte" | "nc_soporte";
+  | "compras" | "nc" | "nd"
+  | "ventas" | "nc_ventas" | "nd_ventas"
+  | "soporte" | "nc_soporte";
 
 export interface AnaliticaPorTipo {
   tipo: DocumentoTipo;
@@ -449,8 +450,8 @@ export interface AnaliticaTercero {
 
 export interface AnaliticaResumen {
   periodo: { desde: string; hasta: string };
-  /** Sobre qué fecha corrió el rango: la de emisión del documento o la de causación. */
-  campo_fecha: "emision" | "causacion";
+  /** Cuándo se trajo por última vez la información de la DIAN (null si nunca). */
+  actualizado_at: string | null;
   /** "cuenta" = todas las empresas (admin); "empresa" = una sola. */
   alcance: "cuenta" | "empresa";
   empresas: number;
@@ -465,6 +466,7 @@ export interface AnaliticaEmpresaOpcion {
   id: number;
   nombre: string;
   nit: string | null;
+  actualizado_at: string | null;
 }
 
 // ─── Wizard state ─────────────────────────────────────────────────────────────

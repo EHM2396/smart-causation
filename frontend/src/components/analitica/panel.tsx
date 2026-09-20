@@ -1,7 +1,10 @@
 "use client";
 /**
  * Panel de analítica: cómo van los costos, gastos e ingresos según los
- * documentos electrónicos DIAN ya causados.
+ * documentos electrónicos que la DIAN reporta para la empresa.
+ *
+ * La fuente es lo que trae el token, NO lo que se alcanzó a causar: un informe
+ * tiene que reflejar lo que pasó, no lo que se registró.
  *
  * Es el MISMO panel para el causador y para el administrador — el alcance lo
  * resuelve el backend por el rol (el causador ve sus empresas; el admin, todas
@@ -9,17 +12,19 @@
  * verdad, que es justo lo que se quiere de un informe.
  */
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bar, BarChart, CartesianGrid, Cell, Legend, Line, ComposedChart,
   Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  ArrowDownRight, ArrowUpRight, Building2, CalendarDays, FileStack, Info, Loader2, Scale,
+  ArrowDownRight, ArrowUpRight, Building2, CalendarDays, DownloadCloud, FileStack,
+  Info, KeyRound, Loader2, Scale, TriangleAlert,
 } from "lucide-react";
 
-import { api, type CampoFechaHistorial } from "@/lib/api";
+import { api } from "@/lib/api";
 import { fmt } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
 import type { AnaliticaPorTipo } from "@/lib/types";
@@ -35,8 +40,10 @@ const COLOR_RESULTADO = "#6366f1";
 const COLOR_TIPO: Record<string, string> = {
   ventas: "#10b981",
   nc_ventas: "#6ee7b7",
+  nd_ventas: "#34d399",
   compras: "#f43f5e",
   nc: "#fda4af",
+  nd: "#fb7185",
   soporte: "#f59e0b",
   nc_soporte: "#fcd34d",
 };
@@ -54,6 +61,12 @@ function buildPresets() {
     { id: "anio", label: "Este año", desde: localYMD(new Date(y, 0, 1)), hasta: localYMD(now) },
     { id: "anterior", label: "Año anterior", desde: localYMD(new Date(y - 1, 0, 1)), hasta: localYMD(new Date(y - 1, 11, 31)) },
   ];
+}
+
+/** La DIAN espera las fechas como DD/MM/YYYY; los selectores las dan YYYY-MM-DD. */
+function aDDMMYYYY(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
 }
 
 /** Cifra corta para los ejes: $1.451.647.645 no cabe, "$1.452 M" sí. */
@@ -138,9 +151,12 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
   const [desde, setDesde] = useState(presets[2].desde);
   const [hasta, setHasta] = useState(presets[2].hasta);
   const [empresaId, setEmpresaId] = useState<number | null>(null);
-  // Una factura de agosto causada en septiembre cae en un mes o en el otro según
-  // esto, así que el rango de fechas no significa nada si no se ve cuál está activo.
-  const [campoFecha, setCampoFecha] = useState<CampoFechaHistorial>("causacion");
+  const [token, setToken] = useState("");
+  const [trayendo, setTrayendo] = useState(false);
+  const [progreso, setProgreso] = useState({ done: 0, total: 0 });
+  const [resultado, setResultado] = useState<{ guardados: number; errores: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   const presetActivo = presets.find((p) => p.desde === desde && p.hasta === hasta)?.id ?? "personalizado";
 
@@ -158,10 +174,37 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
   }, [empresas, exigeEmpresa]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["analitica", desde, hasta, empresaId, campoFecha],
-    queryFn: () => api.analiticaResumen(desde, hasta, empresaId, campoFecha),
+    queryKey: ["analitica", desde, hasta, empresaId],
+    queryFn: () => api.analiticaResumen(desde, hasta, empresaId),
     enabled: !faltaElegir,
   });
+
+  // ── Traer de la DIAN ──────────────────────────────────────────────────────
+  const traer = async () => {
+    if (empresaId == null || !token.trim()) return;
+    setError(null);
+    setTrayendo(true);
+    setProgreso({ done: 0, total: 0 });
+    try {
+      const r = await api.analiticaSincronizar(
+        {
+          auth_url: token.trim(),
+          empresa_id: empresaId,
+          fecha_desde: aDDMMYYYY(desde),
+          fecha_hasta: aDDMMYYYY(hasta),
+        },
+        (done, total) => setProgreso({ done, total }),
+      );
+      setResultado(r);
+      setToken("");
+      await queryClient.invalidateQueries({ queryKey: ["analitica"] });
+      await queryClient.invalidateQueries({ queryKey: ["analitica-empresas"] });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo traer la información de la DIAN.");
+    } finally {
+      setTrayendo(false);
+    }
+  };
 
   const k = data?.kpis;
   const margen = k && k.ingresos > 0 ? (k.resultado / k.ingresos) * 100 : null;
@@ -189,8 +232,8 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
         <h1 className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>Analítica</h1>
         <p className="mt-1 text-sm" style={{ color: "var(--text-secondary)" }}>
           {contexto === "admin"
-            ? "Cómo van los costos, gastos e ingresos de cada empresa de la cuenta, según los documentos DIAN causados."
-            : "Cómo van tus costos, gastos e ingresos, según los documentos DIAN que has causado."}
+            ? "Cómo van los costos, gastos e ingresos de cada empresa de la cuenta, según lo que reporta la DIAN."
+            : "Cómo van tus costos, gastos e ingresos, según lo que reporta la DIAN."}
         </p>
       </div>
 
@@ -200,21 +243,9 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
           <span className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
             <CalendarDays className="h-4 w-4" style={{ color: "var(--brand)" }} /> Periodo
           </span>
-          <div className="flex items-center gap-1 rounded-full p-0.5" style={{ backgroundColor: "var(--bg-elevated)", border: "1px solid var(--border-soft)" }}>
-            {([
-              { id: "causacion", label: "Por fecha de causación" },
-              { id: "emision", label: "Por fecha de emisión" },
-            ] as const).map((op) => {
-              const active = campoFecha === op.id;
-              return (
-                <button key={op.id} type="button" onClick={() => setCampoFecha(op.id)}
-                  className="rounded-full px-3 py-1 text-xs font-medium transition-colors"
-                  style={{ backgroundColor: active ? "var(--brand)" : "transparent", color: active ? "#fff" : "var(--text-secondary)" }}>
-                  {op.label}
-                </button>
-              );
-            })}
-          </div>
+          <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+            por fecha de emisión del documento
+          </span>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           {presets.map((p) => {
@@ -253,6 +284,77 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
         )}
       </div>
 
+      {/* ── Traer de la DIAN ────────────────────────────────────────────── */}
+      <div className="mb-6 rounded-xl border p-4" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
+        <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+            <KeyRound className="h-4 w-4" style={{ color: "var(--brand)" }} /> Información de la DIAN
+          </span>
+          {data?.actualizado_at && (
+            <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+              · actualizada el {new Date(data.actualizado_at).toLocaleString("es-CO", {
+                day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+              })}
+            </span>
+          )}
+        </div>
+        <p className="mb-3 text-xs" style={{ color: "var(--text-secondary)" }}>
+          Pegá el enlace de la DIAN de la empresa seleccionada y traé los documentos del periodo.
+          Se descarga cada documento, así que un rango largo puede tardar varios minutos.
+        </p>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            disabled={trayendo || empresaId == null}
+            placeholder="https://catalogo-vpfe.dian.gov.co/User/AuthToken?pk=...&rk=...&token=..."
+            className="h-10 min-w-0 flex-1 rounded-lg border px-3 text-sm focus:outline-none focus:ring-2 disabled:opacity-40"
+            style={{
+              borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)",
+              color: "var(--text-primary)", outlineColor: "var(--ring)",
+            }}
+          />
+          <Button onClick={traer} disabled={trayendo || empresaId == null || !token.trim()} className="gap-1.5">
+            {trayendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <DownloadCloud className="h-4 w-4" />}
+            {trayendo ? "Trayendo..." : "Traer de la DIAN"}
+          </Button>
+        </div>
+
+        {empresaId == null && (
+          <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>
+            Elegí primero una empresa: el enlace debe ser el de esa empresa.
+          </p>
+        )}
+
+        {trayendo && progreso.total > 0 && (
+          <div className="mt-3">
+            <div className="mb-1 flex justify-between text-xs" style={{ color: "var(--text-secondary)" }}>
+              <span>Descargando documentos...</span>
+              <span className="tabular-nums">{progreso.done} de {progreso.total}</span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: "var(--bg-elevated)" }}>
+              <div className="h-full rounded-full transition-all"
+                style={{ width: `${Math.round((progreso.done / progreso.total) * 100)}%`, backgroundColor: "var(--brand)" }} />
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="mt-3 flex gap-2 rounded-lg border px-3 py-2" style={{ borderColor: "#f43f5e55", backgroundColor: "#f43f5e14" }}>
+            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" style={{ color: COLOR_COSTOS }} />
+            <p className="text-xs leading-relaxed" style={{ color: "var(--text-primary)" }}>{error}</p>
+          </div>
+        )}
+
+        {resultado && !trayendo && !error && (
+          <p className="mt-3 text-xs" style={{ color: "var(--text-secondary)" }}>
+            Listo: {resultado.guardados} documento(s) guardado(s)
+            {resultado.errores > 0 && `, ${resultado.errores} no se pudieron leer`}.
+          </p>
+        )}
+      </div>
+
       {faltaElegir ? (
         <div className="rounded-xl border px-4 py-16 text-center" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
           <Building2 className="mx-auto mb-3 h-8 w-8" style={{ color: "var(--text-muted)" }} />
@@ -267,11 +369,11 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
       ) : !hayDatos ? (
         <div className="rounded-xl border px-4 py-16 text-center" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
           <FileStack className="mx-auto mb-3 h-8 w-8" style={{ color: "var(--text-muted)" }} />
-          <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>No hay documentos en este periodo</p>
+          <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>No hay documentos de la DIAN en este periodo</p>
           <p className="mx-auto mt-1 max-w-md text-sm" style={{ color: "var(--text-muted)" }}>
-            {campoFecha === "causacion"
-              ? "Estás filtrando por fecha de causación. Si las facturas se emitieron en este rango pero se causaron después, probá con “Por fecha de emisión”."
-              : "Estás filtrando por fecha de emisión. Probá con un rango más amplio o con “Por fecha de causación”."}
+            {data?.actualizado_at
+              ? "Ya se trajo información de la DIAN, pero no hay documentos emitidos en este rango. Probá con otras fechas."
+              : "Pegá arriba el enlace de la DIAN y traé los documentos del periodo para ver el informe."}
           </p>
         </div>
       ) : (
@@ -404,11 +506,12 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
           <div className="flex gap-2.5 rounded-xl border px-4 py-3" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
             <Info className="mt-0.5 h-4 w-4 shrink-0" style={{ color: "var(--brand)" }} />
             <p className="text-xs leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-              Las cifras salen de los documentos electrónicos causados, clasificados por su tipo DIAN.
-              Los <strong>ingresos</strong> son las facturas de venta menos sus notas crédito.
-              Los <strong>costos y gastos</strong> son las facturas de compra y los documentos soporte
-              —la legalización de costo con personas naturales no obligadas a facturar— menos sus notas.
-              Se usa la <strong>base gravable</strong>, sin IVA, porque el IVA descontable no es un costo.
+              Las cifras salen de lo que la DIAN reporta con tu token, <strong>se haya causado o no</strong>,
+              clasificado por tipo de documento. Los <strong>ingresos</strong> son las facturas de venta
+              menos sus notas crédito, más sus notas débito. Los <strong>costos y gastos</strong> son las
+              facturas de compra y los documentos soporte —la legalización de costo con personas naturales
+              no obligadas a facturar— con el mismo ajuste por notas. Se usa la <strong>base gravable</strong>,
+              sin IVA, porque el IVA descontable no es un costo sino un saldo a favor.
             </p>
           </div>
         </>

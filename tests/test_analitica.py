@@ -13,6 +13,7 @@ import pytest
 from db.models.contabilidad import FacturaCausada
 from services.analitica_service import ETIQUETA, NATURALEZA, ORDEN, SIGNO
 from services.causacion_service import base_gravable_de, columna_fecha
+from services.documentos_dian_service import clasificar
 
 pytestmark = pytest.mark.analitica
 
@@ -22,8 +23,10 @@ pytestmark = pytest.mark.analitica
 @pytest.mark.parametrize("tipo,naturaleza", [
     ("ventas", "ingresos"),
     ("nc_ventas", "ingresos"),
+    ("nd_ventas", "ingresos"),
     ("compras", "costos_gastos"),
     ("nc", "costos_gastos"),
+    ("nd", "costos_gastos"),
     # El documento soporte legaliza un costo con personas naturales no obligadas
     # a facturar: es costo/gasto, no un ingreso, aunque lo emita el comprador.
     ("soporte", "costos_gastos"),
@@ -33,7 +36,7 @@ def test_naturaleza_por_tipo_de_documento(tipo, naturaleza):
     assert NATURALEZA[tipo] == naturaleza
 
 
-# ─── Las notas crédito restan ────────────────────────────────────────────────
+# ─── Las notas crédito restan y las débito suman ─────────────────────────────
 
 @pytest.mark.parametrize("tipo", ["nc", "nc_ventas", "nc_soporte"])
 def test_las_notas_credito_restan(tipo):
@@ -43,6 +46,64 @@ def test_las_notas_credito_restan(tipo):
 @pytest.mark.parametrize("tipo", ["compras", "ventas", "soporte"])
 def test_las_facturas_suman(tipo):
     assert SIGNO[tipo] == 1
+
+
+@pytest.mark.parametrize("tipo", ["nd", "nd_ventas"])
+def test_las_notas_debito_suman(tipo):
+    """Una nota débito aumenta el valor del documento que ajusta. No tiene módulo
+    de causación, pero existe en la DIAN: omitirla falsearía el informe."""
+    assert SIGNO[tipo] == 1
+
+
+# ─── Clasificación de lo que trae el token ───────────────────────────────────
+
+@pytest.mark.parametrize("tipo_documento,origen,esperado", [
+    ("factura", "compras", "compras"),
+    ("factura", "ventas", "ventas"),
+    ("nota_credito", "compras", "nc"),
+    ("nota_credito", "ventas", "nc_ventas"),
+    ("nota_debito", "compras", "nd"),
+    ("nota_debito", "ventas", "nd_ventas"),
+    # El origen manda para el documento soporte: se consulta por su propio
+    # endpoint, así que es más confiable que leer el CustomizationID.
+    ("factura", "soporte", "soporte"),
+    ("nota_credito", "soporte_ajuste", "nc_soporte"),
+    # Malla de seguridad: un DS que se cuele en otra bandeja igual va a su tipo.
+    ("documento_soporte", "compras", "soporte"),
+    ("nota_ajuste_soporte", "compras", "nc_soporte"),
+])
+def test_clasificar_documento_del_token(tipo_documento, origen, esperado):
+    assert clasificar({"tipo_documento": tipo_documento}, origen) == esperado
+
+
+def test_clasificar_sin_tipo_documento_asume_factura():
+    assert clasificar({}, "compras") == "compras"
+    assert clasificar({}, "ventas") == "ventas"
+
+
+@pytest.mark.parametrize("origen", ["compras", "ventas"])
+def test_la_nota_debito_cuenta_en_analitica_pero_no_se_puede_causar(origen):
+    """Los dos caminos difieren A PROPÓSITO y conviene que siga así.
+
+    La analítica refleja lo que la DIAN reporta, así que una nota débito suma.
+    La causación, en cambio, no tiene módulo donde registrarla: el importador la
+    omite. Si alguien "unifica" ambos criterios, esta prueba avisa.
+    """
+    from api.routers.dian import _bucket_de
+
+    factura = {"tipo_documento": "nota_debito"}
+    assert clasificar(factura, origen) in ("nd", "nd_ventas")   # sí entra al informe
+    assert _bucket_de(factura, origen) is None                  # no se puede causar
+
+
+def test_todo_lo_que_clasifica_tiene_signo_y_naturaleza():
+    """Un tipo que el traído produzca pero la analítica no conozca se sumaría
+    con signo por defecto, en silencio y mal."""
+    for tipo_doc in ("factura", "nota_credito", "nota_debito"):
+        for origen in ("compras", "ventas", "soporte", "soporte_ajuste"):
+            tipo = clasificar({"tipo_documento": tipo_doc}, origen)
+            assert tipo in SIGNO, f"{tipo} no tiene signo"
+            assert tipo in NATURALEZA, f"{tipo} no tiene naturaleza"
 
 
 def test_una_venta_con_su_nota_credito_se_neutraliza():
