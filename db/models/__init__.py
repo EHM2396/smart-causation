@@ -26,6 +26,7 @@ from db.models.contabilidad import (                       # noqa: F401
     Proveedor,
     FacturaCausada,
     DocumentoDian,
+    SincronizacionDian,
     Consecutivo,
 )
 from db.models.causacion import (                           # noqa: F401
@@ -62,6 +63,7 @@ __all__ = [
     "Proveedor",
     "FacturaCausada",
     "DocumentoDian",
+    "SincronizacionDian",
     "Consecutivo",
     "BorradorCausacion",
     "MapeoPUC",

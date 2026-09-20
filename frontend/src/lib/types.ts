@@ -450,8 +450,14 @@ export interface AnaliticaTercero {
 
 export interface AnaliticaResumen {
   periodo: { desde: string; hasta: string };
-  /** Cuándo se trajo por última vez la información de la DIAN (null si nunca). */
-  actualizado_at: string | null;
+  /** La última vez que se trajo información de la DIAN: qué periodo y cuándo.
+   * null si nunca se ha traído para esta empresa. */
+  ultima_sincronizacion: {
+    desde: string;
+    hasta: string;
+    documentos: number;
+    ejecutado_at: string;
+  } | null;
   /** "cuenta" = todas las empresas (admin); "empresa" = una sola. */
   alcance: "cuenta" | "empresa";
   empresas: number;

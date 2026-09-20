@@ -187,6 +187,31 @@ class DocumentoDian(Base):
         return f"<DocumentoDian {self.tipo} {self.numero}>"
 
 
+class SincronizacionDian(Base):
+    """
+    Cada vez que alguien trajo información de la DIAN, y de qué periodo.
+
+    Saber solo "cuándo se actualizó" no alcanza: si la última traída cubrió
+    enero–junio y el usuario está mirando agosto, va a ver todo vacío sin
+    entender por qué. El rango consultado es lo que explica eso.
+    """
+    __tablename__ = "sincronizaciones_dian"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"), nullable=False, index=True)
+    usuario_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"), nullable=True)
+    fecha_desde: Mapped[date] = mapped_column(Date, nullable=False)
+    fecha_hasta: Mapped[date] = mapped_column(Date, nullable=False)
+    documentos: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    errores: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ejecutado_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"<SincronizacionDian empresa={self.empresa_id} {self.fecha_desde}..{self.fecha_hasta}>"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Consecutivos por prefijo de comprobante
 # ─────────────────────────────────────────────────────────────────────────────

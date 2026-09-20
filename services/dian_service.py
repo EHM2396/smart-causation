@@ -197,7 +197,11 @@ def _crear_sesion_autenticada(pk: str, rk: str, token: str) -> tuple[requests.Se
             timeout=_TIMEOUT,
         )
         if _token_expirado(resp):
-            raise DianError("TOKEN_EXPIRED", "Token expirado, por favor genera uno nuevo en la DIAN.")
+            raise DianError(
+                "TOKEN_EXPIRED",
+                "El enlace de la DIAN ya no sirve: solo dura una hora. "
+                "Generá uno nuevo en el portal de la DIAN y volvé a intentar.",
+            )
         if resp.status_code >= 400:
             raise DianError("SESSION_EXPIRED", f"La DIAN rechazó la autenticación (HTTP {resp.status_code}).")
 
@@ -276,7 +280,12 @@ def _get_received(session: requests.Session, account_id: str, desde: str, hasta:
         return resp.json()
     except ValueError:
         # Si devuelve HTML en vez de JSON, la sesión dejó de estar autenticada.
-        raise DianError("SESSION_EXPIRED", "La sesión con la DIAN expiró. Autentícate nuevamente.")
+        raise DianError(
+            "SESSION_EXPIRED",
+            "El enlace de la DIAN venció (solo dura una hora). Lo que alcanzó a "
+            "descargarse quedó guardado: generá un enlace nuevo y volvé a traer "
+            "el mismo periodo para completar lo que falte.",
+        )
 
 
 def _get_soporte(session: requests.Session, account_id: str, desde: str, hasta: str, doc_type_id: str = "05") -> dict:
@@ -418,7 +427,12 @@ def _get_issued(session: requests.Session, account_id: str, desde: str, hasta: s
     try:
         return resp.json()
     except ValueError:
-        raise DianError("SESSION_EXPIRED", "La sesión con la DIAN expiró. Autentícate nuevamente.")
+        raise DianError(
+            "SESSION_EXPIRED",
+            "El enlace de la DIAN venció (solo dura una hora). Lo que alcanzó a "
+            "descargarse quedó guardado: generá un enlace nuevo y volvé a traer "
+            "el mismo periodo para completar lo que falte.",
+        )
 
 
 def _limpiar_html(valor) -> str:

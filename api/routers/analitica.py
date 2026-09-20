@@ -27,7 +27,10 @@ from sqlalchemy.orm import Session
 from api.dependencies import get_current_user
 from db.models.auth import Empresa, Usuario
 from db.session import get_db, SessionLocal
-from services import analitica_service, causacion_service, dian_service, documentos_dian_service
+from services import (
+    analitica_service, causacion_service, dian_service, documentos_dian_service,
+    informe_analitica_service,
+)
 from services.dian_service import DianError
 
 router = APIRouter(prefix="/analitica", tags=["Analítica"])
@@ -60,6 +63,15 @@ def _parse_rango(desde: str | None, hasta: str | None) -> tuple[date, date]:
     return d, h
 
 
+def _a_fecha(ddmmyyyy: str) -> date:
+    """La DIAN usa DD/MM/YYYY; la base guarda fechas reales."""
+    try:
+        d, m, y = ddmmyyyy.strip().split("/")
+        return date(int(y), int(m), int(d))
+    except (ValueError, AttributeError):
+        return date.today()
+
+
 def _empresa_visible(db: Session, usuario: Usuario, empresa_id: int) -> Empresa:
     """La empresa pedida, solo si este usuario puede verla."""
     if empresa_id not in analitica_service.empresas_visibles(db, usuario, usuario.cuenta_id):
@@ -88,17 +100,54 @@ def resumen(
 
     datos = analitica_service.resumen(db, empresa_ids=visibles, desde=d, hasta=h)
     es_admin = current_user.rol in ("org_admin", "admin")
-    actualizado = (
-        documentos_dian_service.ultima_actualizacion(db, empresa_id)
+
+    # Qué periodo se trajo la última vez: sin eso, ver el informe vacío no
+    # explica si falta traer o si de verdad no hubo documentos.
+    sinc = (
+        documentos_dian_service.ultima_sincronizacion(db, empresa_id)
         if empresa_id is not None else None
     )
     return {
         "periodo": {"desde": d.isoformat(), "hasta": h.isoformat()},
         "alcance": "cuenta" if es_admin and empresa_id is None else "empresa",
         "empresas": len(visibles),
-        "actualizado_at": actualizado.isoformat() if actualizado else None,
+        "ultima_sincronizacion": {
+            "desde": sinc.fecha_desde.isoformat(),
+            "hasta": sinc.fecha_hasta.isoformat(),
+            "documentos": sinc.documentos,
+            "ejecutado_at": sinc.ejecutado_at.isoformat(),
+        } if sinc else None,
         **datos,
     }
+
+
+@router.get("/informe.xlsx")
+def informe_xlsx(
+    db: DB,
+    current_user: CurrentUser,
+    desde: str | None = None,
+    hasta: str | None = None,
+    empresa_id: int | None = None,
+):
+    """Descarga el informe del periodo en Excel, para enviarlo fuera de Ciolix."""
+    d, h = _parse_rango(desde, hasta)
+    visibles = analitica_service.empresas_visibles(db, current_user, current_user.cuenta_id)
+
+    nombre = "Todas las empresas"
+    if empresa_id is not None:
+        empresa = _empresa_visible(db, current_user, empresa_id)
+        visibles = [empresa_id]
+        nombre = empresa.nombre
+
+    buffer = informe_analitica_service.generar_xlsx(
+        db, empresa_ids=visibles, desde=d, hasta=h, nombre_empresa=nombre,
+    )
+    archivo = f"ciolix_analitica_{d.isoformat()}_a_{h.isoformat()}.xlsx"
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{archivo}"'},
+    )
 
 
 @router.get("/empresas")
@@ -157,6 +206,7 @@ def sincronizar(body: SincronizarRequest, db: DB, current_user: CurrentUser):
             )
 
     empresa_id = empresa.id
+    usuario_id = current_user.id
 
     def gen():
         # Sesión propia: el generador sigue vivo después de que termina la
@@ -202,6 +252,11 @@ def sincronizar(body: SincronizarRequest, db: DB, current_user: CurrentUser):
                         errores += 1
                     yield json.dumps({"type": "progress", "done": done, "total": total}) + "\n"
 
+            documentos_dian_service.registrar_sincronizacion(
+                sesion, empresa_id=empresa_id, usuario_id=usuario_id,
+                desde=_a_fecha(body.fecha_desde), hasta=_a_fecha(body.fecha_hasta),
+                documentos=guardados, errores=errores,
+            )
             yield json.dumps({"type": "done", "guardados": guardados, "errores": errores}) + "\n"
         except DianError as e:
             yield json.dumps({"type": "error", "code": e.code, "message": e.message}) + "\n"
