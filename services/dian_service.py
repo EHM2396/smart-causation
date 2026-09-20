@@ -135,6 +135,40 @@ def extraer_token_url(url: str) -> tuple[str, str, str]:
     return pk, rk, token
 
 
+def solo_digitos(nit: str | None) -> str:
+    return re.sub(r"[^0-9]", "", nit or "")
+
+
+def nits_equivalentes(a: str | None, b: str | None) -> bool:
+    """¿Dos NIT son el mismo? Tolera el dígito de verificación.
+
+    En Colombia el NIT son 9 dígitos más uno de verificación, y cada fuente lo
+    escribe distinto: '901694417', '901694417-1', '9016944171'. Comparar los
+    textos tal cual daría "no coinciden" para el mismo NIT, así que si uno trae
+    un dígito de más se compara sin él.
+    """
+    a, b = solo_digitos(a), solo_digitos(b)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    # Solo se acepta el dígito de más como verificación si lo que queda sigue
+    # siendo un NIT plausible (9 dígitos o más). Si no, '901694417' y '90169441'
+    # pasarían por el mismo NIT y son dos contribuyentes distintos.
+    largo, corto = (a, b) if len(a) > len(b) else (b, a)
+    if len(largo) == len(corto) + 1 and len(corto) >= 9:
+        return largo[:-1] == corto
+    return False
+
+
+def nit_del_token(auth_url: str) -> str:
+    """NIT del titular del token, que la DIAN pone en el parámetro `rk` de la URL
+    de AuthToken. Permite avisar que el token no corresponde a la empresa
+    seleccionada ANTES de descargar nada."""
+    _pk, rk, _token = extraer_token_url(auth_url)
+    return solo_digitos(rk)
+
+
 def _token_expirado(response: requests.Response) -> bool:
     """La DIAN puede responder HTTP 200 con un HTML de login si el token expiró."""
     try:
