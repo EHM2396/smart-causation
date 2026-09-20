@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Loader2, MailCheck } from "lucide-react";
+import { ArrowLeft, Loader2, MailCheck } from "lucide-react";
 import { PasswordStrength } from "@/components/password-strength";
 import { PasswordInput } from "@/components/password-input";
 import { LogoCiolix } from "@/components/logo-ciolix";
@@ -257,6 +257,12 @@ export default function RegistroPage() {
               ¿Ya tienes cuenta?{" "}
               <Link href="/login" className="font-medium" style={{ color: "var(--brand)" }}>
                 Inicia sesión
+              </Link>
+            </p>
+
+            <p className="mt-4 text-center text-sm">
+              <Link href="/" className="flex items-center justify-center gap-1.5 font-medium" style={{ color: "var(--brand)" }}>
+                <ArrowLeft className="h-3.5 w-3.5" /> Volver al inicio
               </Link>
             </p>
 
