@@ -141,6 +141,8 @@ export const api = {
     req<import("@/lib/types").AdminUsuario>("/admin/usuarios", { method: "POST", body: JSON.stringify(body) }),
   adminActualizarUsuario: (id: number, body: { activo?: boolean; cupo_mes?: number | null; max_empresas?: number | null }) =>
     req<import("@/lib/types").AdminUsuario>(`/admin/usuarios/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  adminEliminarUsuario: (id: number) =>
+    req<{ eliminado: boolean; empresas_eliminadas: number }>(`/admin/usuarios/${id}`, { method: "DELETE" }),
   adminEmpresas: () => req<import("@/lib/types").AdminEmpresa[]>("/admin/empresas"),
   adminDashboard: (desde?: string, hasta?: string) => {
     const qs = new URLSearchParams();

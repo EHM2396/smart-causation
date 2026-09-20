@@ -8,7 +8,7 @@ causador crea sus propias empresas hasta el tope que le asigna el admin.
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from typing import Annotated
 
@@ -54,6 +54,11 @@ def _hash_password(pw: str) -> str:
 
 # ─── Schemas ─────────────────────────────────────────────────────────────────
 
+class EmpresaMini(BaseModel):
+    id: int
+    nombre: str
+
+
 class UsuarioOut(BaseModel):
     id: int
     email: str
@@ -62,6 +67,10 @@ class UsuarioOut(BaseModel):
     cupo_mes: int | None = None        # tope de causaciones/mes (None = sin tope propio)
     max_empresas: int | None = None    # cuántas empresas puede crear (None = sin tope propio)
     empresas_creadas: int = 0          # cuántas ha creado
+    # Se puede ELIMINAR (no solo inactivar) solo si nunca causó nada. Si no,
+    # el botón de eliminar ni debe aparecer en el frontend.
+    puede_eliminar: bool = False
+    empresas: list[EmpresaMini] = []   # para el texto de confirmación al eliminar
 
 
 class UsuarioCreate(BaseModel):
@@ -85,6 +94,7 @@ class EmpresaOut(BaseModel):
     nit: str | None = None
     activa: bool
     creada_por: str | None = None      # nombre del causador que la creó
+    owner_id: int | None = None        # id del causador (para agrupar por usuario)
 
 
 def _validar_reparto(db: Session, cuenta: CuentaCliente, cupo_mes: int | None,
@@ -114,11 +124,14 @@ def _validar_reparto(db: Session, cuenta: CuentaCliente, cupo_mes: int | None,
 
 
 def _usuario_out(db: Session, cuenta_id: int, u: Usuario) -> "UsuarioOut":
+    empresas = planes_service.empresas_activas_de_usuario(db, u.id)
     return UsuarioOut(
         id=u.id, email=u.email, nombre=u.nombre, activo=u.activo,
         cupo_mes=planes_service.cupo_usuario(db, cuenta_id, u.id),
         max_empresas=u.max_empresas,
-        empresas_creadas=planes_service.empresas_creadas_por_usuario(db, u.id),
+        empresas_creadas=len(empresas),
+        puede_eliminar=not planes_service.usuario_ha_causado_algo(db, u.id),
+        empresas=[EmpresaMini(id=e.id, nombre=e.nombre) for e in empresas],
     )
 
 
@@ -145,7 +158,9 @@ def get_cuenta(db: DB, admin: OrgAdmin):
 def list_usuarios(db: DB, admin: OrgAdmin):
     cuenta = _cuenta_de(db, admin)
     usuarios = db.scalars(
-        select(Usuario).where(Usuario.cuenta_id == cuenta.id, Usuario.rol == "causador").order_by(Usuario.id)
+        select(Usuario).where(
+            Usuario.cuenta_id == cuenta.id, Usuario.rol == "causador", Usuario.eliminado.is_(False),
+        ).order_by(Usuario.id)
     ).all()
     return [_usuario_out(db, cuenta.id, u) for u in usuarios]
 
@@ -190,7 +205,7 @@ def create_usuario(body: UsuarioCreate, db: DB, admin: OrgAdmin):
 def update_usuario(usuario_id: int, body: UsuarioUpdate, db: DB, admin: OrgAdmin):
     cuenta = _cuenta_de(db, admin)
     u = db.get(Usuario, usuario_id)
-    if u is None or u.cuenta_id != cuenta.id or u.rol != "causador":
+    if u is None or u.cuenta_id != cuenta.id or u.rol != "causador" or u.eliminado:
         raise HTTPException(status_code=404, detail="Usuario no encontrado en tu cuenta")
 
     _validar_reparto(
@@ -212,6 +227,60 @@ def update_usuario(usuario_id: int, body: UsuarioUpdate, db: DB, admin: OrgAdmin
     return _usuario_out(db, cuenta.id, u)
 
 
+class UsuarioEliminadoOut(BaseModel):
+    eliminado: bool = True
+    empresas_eliminadas: int = 0
+
+
+@router.delete("/usuarios/{usuario_id}", response_model=UsuarioEliminadoOut)
+def eliminar_usuario(usuario_id: int, db: DB, admin: OrgAdmin):
+    """Elimina un causador que NUNCA causó nada, junto con las empresas que
+    haya creado.
+
+    Nunca se borra la fila (regla del proyecto: nunca DELETE): se marca
+    `eliminado` y desaparece de las listas, igual que ya hacen
+    `facturas_causadas.eliminado` y `empresas.activa`. Por eso es SEGURO
+    (no hay filas huérfanas, todo queda para auditoría) y también por eso es
+    IRREVERSIBLE desde la interfaz: a diferencia de Activo/Inactivo, no hay
+    botón para "recuperarlo" — el admin tiene que crearlo de nuevo si se
+    equivocó.
+
+    Bloqueado por completo si el usuario alguna vez causó algo: ahí solo se
+    puede inactivar (endpoint PATCH), nunca eliminar.
+    """
+    cuenta = _cuenta_de(db, admin)
+    u = db.get(Usuario, usuario_id)
+    if u is None or u.cuenta_id != cuenta.id or u.rol != "causador" or u.eliminado:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado en tu cuenta")
+
+    if planes_service.usuario_ha_causado_algo(db, u.id):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{u.nombre} ya causó documentos, así que no se puede eliminar. "
+                "Podés inactivarlo para que no siga usando cupo del plan."
+            ),
+        )
+
+    empresas = planes_service.empresas_activas_de_usuario(db, u.id)
+    for e in empresas:
+        e.activa = False
+
+    # Eliminar de ESTE grupo no deja a la persona marcada para siempre: el
+    # correo real queda libre para que se inscriba de cero, como una cuenta
+    # totalmente aparte (su propio plan, su propia Cuenta) — no es un veto.
+    # `email` es UNIQUE, así que se reescribe a un valor inerte y el real se
+    # guarda en email_original solo para consulta/auditoría.
+    u.email_original = u.email
+    u.email = f"eliminado-{u.id}@eliminado.ciolix.local"
+    u.eliminado = True
+    u.eliminado_at = datetime.now(timezone.utc)
+    u.activo = False
+
+    db.commit()
+    return UsuarioEliminadoOut(eliminado=True, empresas_eliminadas=len(empresas))
+
+
 # ─── Empresas (solo lectura: el admin ve las que creó cada causador) ──────────
 
 @router.get("/empresas", response_model=list[EmpresaOut])
@@ -224,7 +293,8 @@ def list_empresas(db: DB, admin: OrgAdmin):
         .order_by(Empresa.id)
     ).all()
     return [
-        EmpresaOut(id=e.id, nombre=e.nombre, nit=e.nit, activa=e.activa, creada_por=owner)
+        EmpresaOut(id=e.id, nombre=e.nombre, nit=e.nit, activa=e.activa,
+                   creada_por=owner, owner_id=e.owner_id)
         for (e, owner) in rows
     ]
 
