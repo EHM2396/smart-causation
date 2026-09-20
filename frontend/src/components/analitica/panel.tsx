@@ -11,15 +11,15 @@
  * las de la cuenta). Así ninguno de los dos ve una versión distinta de la
  * verdad, que es justo lo que se quiere de un informe.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bar, BarChart, CartesianGrid, Cell, Legend, Line, ComposedChart,
   Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  ArrowDownRight, ArrowUpRight, Building2, CalendarDays, DownloadCloud, FileStack,
-  Info, KeyRound, Loader2, Scale, TriangleAlert,
+  ArrowDownRight, ArrowUpRight, Building2, CalendarCheck, CalendarDays, Download,
+  DownloadCloud, FileStack, Info, KeyRound, Loader2, Scale, TriangleAlert,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -77,6 +77,13 @@ function fmtCorto(n: number): string {
   if (abs >= 1_000_000) return `${signo}$${Math.round(abs / 1_000_000)} M`;
   if (abs >= 1_000) return `${signo}$${Math.round(abs / 1_000)} k`;
   return `${signo}$${abs}`;
+}
+
+/** "2026-08-01" → "1 ago 2026" */
+function fechaCorta(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  const meses = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+  return `${Number(d)} ${meses[Number(m) - 1] ?? m} ${y}`;
 }
 
 /** "2026-09" → "Sep 2026" */
@@ -156,6 +163,7 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
   const [progreso, setProgreso] = useState({ done: 0, total: 0 });
   const [resultado, setResultado] = useState<{ guardados: number; errores: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [descargando, setDescargando] = useState(false);
   const queryClient = useQueryClient();
 
   const presetActivo = presets.find((p) => p.desde === desde && p.hasta === hasta)?.id ?? "personalizado";
@@ -176,8 +184,22 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
   const { data, isLoading } = useQuery({
     queryKey: ["analitica", desde, hasta, empresaId],
     queryFn: () => api.analiticaResumen(desde, hasta, empresaId),
-    enabled: !faltaElegir,
+    // Mientras se trae de la DIAN NO se consulta: los documentos se van
+    // guardando de a uno, y refrescar en medio mostraría cifras a medio armar
+    // que parecen definitivas. Se vuelve a consultar cuando termina.
+    enabled: !faltaElegir && !trayendo,
+    refetchOnWindowFocus: !trayendo,
   });
+
+  // Cerrar o recargar la pestaña SÍ corta la descarga a mitad (se pierde la
+  // conexión con el servidor). Lo ya guardado se conserva y volver a traer el
+  // mismo periodo completa lo que falte, pero conviene avisar antes.
+  useEffect(() => {
+    if (!trayendo) return;
+    const avisar = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", avisar);
+    return () => window.removeEventListener("beforeunload", avisar);
+  }, [trayendo]);
 
   // ── Traer de la DIAN ──────────────────────────────────────────────────────
   const traer = async () => {
@@ -206,6 +228,27 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
     }
   };
 
+  const sinc = data?.ultima_sincronizacion ?? null;
+  // ¿El rango que se está mirando cae dentro de lo que se trajo? Si no, las
+  // cifras van a salir cortas y hay que avisarlo, no dejar que se interprete
+  // como que no hubo movimiento.
+  const cubrePeriodo = !sinc || (sinc.desde <= desde && sinc.hasta >= hasta);
+
+  const descargar = async () => {
+    setDescargando(true);
+    try {
+      const blob = await api.analiticaInformeXlsx(desde, hasta, empresaId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ciolix_analitica_${desde}_a_${hasta}.xlsx`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDescargando(false);
+    }
+  };
+
   const k = data?.kpis;
   const margen = k && k.ingresos > 0 ? (k.resultado / k.ingresos) * 100 : null;
 
@@ -228,13 +271,20 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
 
   return (
     <div className="px-4 py-6 lg:px-8 lg:py-8">
-      <div className="mb-6">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <div>
         <h1 className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>Analítica</h1>
         <p className="mt-1 text-sm" style={{ color: "var(--text-secondary)" }}>
           {contexto === "admin"
             ? "Cómo van los costos, gastos e ingresos de cada empresa de la cuenta, según lo que reporta la DIAN."
             : "Cómo van tus costos, gastos e ingresos, según lo que reporta la DIAN."}
         </p>
+        </div>
+        <Button onClick={descargar} disabled={descargando || trayendo || !hayDatos}
+          variant="outline" className="gap-1.5">
+          {descargando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          Exportar Excel
+        </Button>
       </div>
 
       {/* ── Filtros ─────────────────────────────────────────────────────── */}
@@ -290,14 +340,45 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
           <span className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
             <KeyRound className="h-4 w-4" style={{ color: "var(--brand)" }} /> Información de la DIAN
           </span>
-          {data?.actualizado_at && (
-            <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-              · actualizada el {new Date(data.actualizado_at).toLocaleString("es-CO", {
-                day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
-              })}
-            </span>
-          )}
         </div>
+
+        {/* Qué periodo está cargado. Es lo primero que hay que poder responder:
+            sin esto, un informe vacío no distingue "falta traer" de "no hubo
+            documentos", y no se sabe si hay que volver a pegar el token. */}
+        {empresaId != null && (
+          <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg px-3 py-2.5"
+            style={{
+              backgroundColor: sinc ? "color-mix(in srgb, var(--brand) 10%, transparent)" : "var(--bg-elevated)",
+              border: `1px solid ${sinc ? "color-mix(in srgb, var(--brand) 35%, transparent)" : "var(--border-soft)"}`,
+            }}>
+            {sinc ? (
+              <>
+                <span className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                  <CalendarCheck className="h-4 w-4" style={{ color: "var(--brand)" }} />
+                  Datos cargados del {fechaCorta(sinc.desde)} al {fechaCorta(sinc.hasta)}
+                </span>
+                <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                  {sinc.documentos} documento(s) · traídos el{" "}
+                  {new Date(sinc.ejecutado_at).toLocaleString("es-CO", {
+                    day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+                  })}
+                </span>
+                {!cubrePeriodo && (
+                  <span className="flex items-center gap-1 text-xs font-medium" style={{ color: COLOR_COSTOS }}>
+                    <TriangleAlert className="h-3.5 w-3.5" />
+                    El periodo que estás viendo no está cubierto: volvé a traer con el token.
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="flex items-center gap-1.5 text-sm" style={{ color: "var(--text-secondary)" }}>
+                <TriangleAlert className="h-4 w-4" style={{ color: "var(--text-muted)" }} />
+                Todavía no se ha traído información de la DIAN para esta empresa.
+              </span>
+            )}
+          </div>
+        )}
+
         <p className="mb-3 text-xs" style={{ color: "var(--text-secondary)" }}>
           Pegá el enlace de la DIAN de la empresa seleccionada y traé los documentos del periodo.
           Se descarga cada documento, así que un rango largo puede tardar varios minutos.
@@ -349,13 +430,27 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
 
         {resultado && !trayendo && !error && (
           <p className="mt-3 text-xs" style={{ color: "var(--text-secondary)" }}>
-            Listo: {resultado.guardados} documento(s) guardado(s)
-            {resultado.errores > 0 && `, ${resultado.errores} no se pudieron leer`}.
+            Listo: {resultado.guardados} documento(s) guardado(s).
+            {resultado.errores > 0 && (
+              <> {resultado.errores} no se pudieron descargar — volvé a traer el mismo
+              periodo y se completan los que faltaron, sin duplicar lo que ya está.</>
+            )}
           </p>
         )}
       </div>
 
-      {faltaElegir ? (
+      {trayendo ? (
+        <div className="rounded-xl border px-4 py-16 text-center" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
+          <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin" style={{ color: "var(--brand)" }} />
+          <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+            Trayendo la información de la DIAN
+          </p>
+          <p className="mx-auto mt-1 max-w-md text-sm" style={{ color: "var(--text-muted)" }}>
+            El informe se muestra cuando termine la descarga, para que no veas cifras a medio armar.
+            No cierres esta pestaña.
+          </p>
+        </div>
+      ) : faltaElegir ? (
         <div className="rounded-xl border px-4 py-16 text-center" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
           <Building2 className="mx-auto mb-3 h-8 w-8" style={{ color: "var(--text-muted)" }} />
           <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>Elegí una empresa para ver su analítica</p>
@@ -371,7 +466,7 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
           <FileStack className="mx-auto mb-3 h-8 w-8" style={{ color: "var(--text-muted)" }} />
           <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>No hay documentos de la DIAN en este periodo</p>
           <p className="mx-auto mt-1 max-w-md text-sm" style={{ color: "var(--text-muted)" }}>
-            {data?.actualizado_at
+            {sinc
               ? "Ya se trajo información de la DIAN, pero no hay documentos emitidos en este rango. Probá con otras fechas."
               : "Pegá arriba el enlace de la DIAN y traé los documentos del periodo para ver el informe."}
           </p>

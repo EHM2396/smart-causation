@@ -21,7 +21,7 @@ from datetime import date, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from db.models.contabilidad import DocumentoDian
+from db.models.contabilidad import DocumentoDian, SincronizacionDian
 from services import dian_service
 from services.causacion_service import base_gravable_de
 
@@ -101,6 +101,32 @@ def ultima_actualizacion(db: Session, empresa_id: int) -> datetime | None:
     from sqlalchemy import func
     return db.scalar(
         select(func.max(DocumentoDian.traido_at)).where(DocumentoDian.empresa_id == empresa_id)
+    )
+
+
+def registrar_sincronizacion(
+    db: Session, *, empresa_id: int, usuario_id: int | None,
+    desde: date, hasta: date, documentos: int, errores: int,
+) -> SincronizacionDian:
+    """Deja constancia de qué periodo se trajo y cuándo."""
+    s = SincronizacionDian(
+        empresa_id=empresa_id, usuario_id=usuario_id,
+        fecha_desde=desde, fecha_hasta=hasta,
+        documentos=documentos, errores=errores,
+    )
+    db.add(s)
+    db.commit()
+    return s
+
+
+def ultima_sincronizacion(db: Session, empresa_id: int) -> SincronizacionDian | None:
+    """La última traída de esta empresa: sirve para decirle al usuario qué
+    periodo tiene cargado y si necesita volver a pegar el token."""
+    return db.scalar(
+        select(SincronizacionDian)
+        .where(SincronizacionDian.empresa_id == empresa_id)
+        .order_by(SincronizacionDian.ejecutado_at.desc())
+        .limit(1)
     )
 
 
