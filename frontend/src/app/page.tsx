@@ -6,6 +6,7 @@ import Image from "next/image";
 import {
   Zap, Brain, FileSpreadsheet, Users, BarChart3, Building2,
   Check, X, Upload, Cpu, Download, ArrowRight, Menu, ChevronDown,
+  KeyRound, ReceiptText, FileCheck2, ChartColumnBig,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BRAND } from "@/lib/brand";
@@ -20,9 +21,19 @@ function scrollTo(id: string) {
 
 const FEATURES = [
   {
-    icon: Upload,
-    title: "Importación masiva de facturas",
-    desc: "Sube PDFs de facturas DIAN en lote. El motor extrae automáticamente NIT, valores, impuestos y datos del proveedor.",
+    icon: KeyRound,
+    title: "Conexión directa con la DIAN",
+    desc: "Pega tu enlace de autenticación y trae de una sola vez las facturas de compra, venta y documento soporte del periodo. Sin exportar nada a mano.",
+  },
+  {
+    icon: ReceiptText,
+    title: "Compras y ventas, cada una en su módulo",
+    desc: "Causa lo que recibes y lo que emites, con sus notas crédito y débito, sin mezclarlas ni perder el rastro de cuál es cuál.",
+  },
+  {
+    icon: FileCheck2,
+    title: "Documento soporte",
+    desc: "Legaliza los costos con proveedores no obligados a facturar, como lo exige la DIAN para personas naturales.",
   },
   {
     icon: Brain,
@@ -30,32 +41,37 @@ const FEATURES = [
     desc: "Cada vez que confirmas una causación, la IA refuerza su aprendizaje. Con el tiempo, las sugerencias son casi perfectas.",
   },
   {
+    icon: ChartColumnBig,
+    title: "Analítica con los datos de la DIAN",
+    desc: "Cómo van tus ingresos, costos y gastos, con gráficos claros y un informe exportable a Excel o PDF para enviar fuera de la plataforma.",
+  },
+  {
     icon: FileSpreadsheet,
-    title: "Exportación directa a Siigo",
-    desc: "Genera el Excel en el formato exacto de importación masiva de Siigo Nube SF_CO, listo para cargar con un clic.",
+    title: "Archivo listo para Siigo",
+    desc: "Genera el Excel en el formato exacto de importación masiva de Siigo Nube SF_CO, listo para que lo cargues con un clic.",
   },
   {
     icon: Users,
     title: "Módulo de terceros",
-    desc: "Gestiona proveedores con todos los campos que Siigo necesita: tipo de persona, régimen IVA, responsabilidad fiscal y geo.",
+    desc: "Gestiona proveedores con todos los campos que Siigo necesita: tipo de persona, régimen IVA, responsabilidad fiscal y geo — con aprendizaje automático.",
   },
   {
-    icon: BarChart3,
-    title: "Historial completo",
-    desc: "Consulta cada causación, regenera archivos anteriores y lleva el control exacto de lo procesado.",
+    icon: Upload,
+    title: "Carga manual cuando la necesites",
+    desc: "¿No tienes el token a la mano? Sube el PDF, el XML o el Excel del portal DIAN y el motor extrae los datos igual.",
   },
   {
     icon: Building2,
-    title: "Multiempresa",
-    desc: "Administra varias empresas desde una sola cuenta. Cada una con sus catálogos, reglas de IA e historial propios.",
+    title: "Multiempresa y equipos",
+    desc: "Una firma administra varios causadores, cada uno con sus propias empresas, y reparte entre ellos las causaciones que permite su plan.",
   },
 ];
 
 const STEPS = [
   {
-    icon: Upload,
-    title: "Sube tus facturas",
-    desc: "Arrastra los PDFs de tus facturas electrónicas DIAN. Puedes subir decenas a la vez.",
+    icon: KeyRound,
+    title: "Conecta tu token DIAN",
+    desc: "Pega el enlace de autenticación de la DIAN y trae automáticamente tus facturas de compra, venta y documento soporte. También podés subir el PDF o el XML a mano.",
   },
   {
     icon: Cpu,
@@ -463,8 +479,9 @@ export default function LandingPage() {
             className="mx-auto mb-10 max-w-2xl text-lg leading-relaxed"
             style={{ color: "var(--text-secondary)" }}
           >
-            Sube facturas DIAN, deja que la IA sugiera cuentas, impuestos y comprobantes, y exporta
-            directo a Siigo Nube. Sin digitación manual. Sin errores.
+            Trae tus facturas de compra y venta directo desde la DIAN con un solo token, deja que la
+            IA sugiera cuentas e impuestos, y genera el archivo listo para Siigo Nube. Sin digitación
+            manual. Sin errores.
           </p>
 
           <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
@@ -515,7 +532,7 @@ export default function LandingPage() {
             [
               ["Facturas", "100%", "automáticas"],
               ["Compatible", "DIAN", "electrónica"],
-              ["Exporta a", "Siigo", "Nube SF_CO"],
+              ["Archivo listo", "Excel", "para Siigo Nube"],
               ["IA con", "Aprend.", "continuo"],
             ] as const
           ).map(([label, value, sub]) => (
@@ -604,7 +621,7 @@ export default function LandingPage() {
               Tan fácil como 1 · 2 · 3
             </h2>
             <p className="mx-auto max-w-xl text-base" style={{ color: "var(--text-secondary)" }}>
-              De la factura en PDF al asiento contable en Siigo en menos de un minuto.
+              Del token de la DIAN (o tu PDF) al asiento contable en Siigo, en minutos.
             </p>
           </div>
 

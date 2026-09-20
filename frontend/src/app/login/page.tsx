@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { Loader2, MailWarning, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Loader2, MailWarning, CheckCircle2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
 import { PasswordInput } from "@/components/password-input";
@@ -33,7 +33,12 @@ export default function LoginPage() {
         setLoading(false);
         return;
       }
-      router.replace("/causacion");
+      // El admin de la cuenta (y el superadmin) no causan: van directo a su
+      // panel. Antes siempre se mandaba a /causacion y era app-shell quien
+      // corregía la ruta un instante después — ese doble salto es lo que se
+      // veía como que la pantalla "parpadeaba" al iniciar sesión.
+      const esAdmin = data.rol === "org_admin" || data.rol === "admin";
+      router.replace(esAdmin ? "/admin/dashboard" : "/causacion");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al iniciar sesión");
     } finally {
@@ -180,6 +185,12 @@ export default function LoginPage() {
           ¿No tienes cuenta?{" "}
           <Link href="/registro" className="font-medium" style={{ color: "var(--brand)" }}>
             Regístrate
+          </Link>
+        </p>
+
+        <p className="mt-4 text-center text-sm">
+          <Link href="/" className="flex items-center justify-center gap-1.5 font-medium" style={{ color: "var(--brand)" }}>
+            <ArrowLeft className="h-3.5 w-3.5" /> Volver al inicio
           </Link>
         </p>
 
