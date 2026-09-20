@@ -51,6 +51,18 @@ def test_un_dato_sin_comprimir_se_devuelve_igual():
     assert xml_original(doc) == XML
 
 
+def test_el_xml_no_se_carga_a_menos_que_se_pida():
+    """Es la única columna pesada de la tabla y casi ninguna consulta la
+    necesita: el informe recorre miles de documentos para escribir texto y
+    cifras. Si dejara de estar diferida, cada consulta arrastraría todos los
+    XML —incluida la sincronización, que ya es lenta— sin que nadie lo note
+    hasta que el informe empiece a tardar."""
+    from sqlalchemy import inspect
+
+    columna = inspect(DocumentoDian).attrs["xml_crudo"]
+    assert columna.deferred, "xml_crudo debe seguir siendo diferida"
+
+
 def test_tambien_sirve_para_un_zip():
     """La DIAN a veces entrega un ZIP en vez del XML suelto. Se guarda tal cual,
     sin desempacarlo: el original es el ZIP."""
