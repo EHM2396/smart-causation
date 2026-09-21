@@ -144,6 +144,22 @@ export const api = {
   adminEliminarUsuario: (id: number) =>
     req<{ eliminado: boolean; empresas_eliminadas: number }>(`/admin/usuarios/${id}`, { method: "DELETE" }),
   adminEmpresas: () => req<import("@/lib/types").AdminEmpresa[]>("/admin/empresas"),
+
+  f300Proveedores: (desde?: string, hasta?: string, empresaId?: number | null, tarifa: number = 0) => {
+    const qs = new URLSearchParams();
+    if (desde) qs.set("desde", desde);
+    if (hasta) qs.set("hasta", hasta);
+    if (empresaId != null) qs.set("empresa_id", String(empresaId));
+    qs.set("tarifa", String(tarifa));
+    return req<import("@/lib/types").ResumenF300>(`/formulario-300/proveedores?${qs.toString()}`);
+  },
+  f300Clasificar: (body: {
+    empresa_id: number; concepto: string; tratamiento: string;
+    nit_tercero?: string | null; articulo_et?: string | null; norma?: string | null;
+  }) =>
+    req<{ id: number; tratamiento: string; estado: string; es_excepcion: boolean }>(
+      "/formulario-300/clasificar", { method: "POST", body: JSON.stringify(body) }
+    ),
   adminDashboard: (desde?: string, hasta?: string) => {
     const qs = new URLSearchParams();
     if (desde) qs.set("desde", desde);
