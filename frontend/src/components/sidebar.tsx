@@ -4,7 +4,7 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { FileSpreadsheet, FileMinus2, BookOpen, History, UserCircle, Users, ShieldCheck, Building2, LayoutDashboard, ReceiptText, DownloadCloud, Save, Loader2, FileCheck2, ChevronDown, ChartColumnBig } from "lucide-react";
+import { FileSpreadsheet, FileMinus2, BookOpen, History, UserCircle, Users, ShieldCheck, Building2, LayoutDashboard, ReceiptText, DownloadCloud, Save, Loader2, FileCheck2, ChevronDown, ChartColumnBig, ScrollText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/auth";
 import { useWizardStore } from "@/stores/wizard";
@@ -66,6 +66,7 @@ const NAV_ADMIN: NavNode[] = [
   { href: "/admin/analitica", icon: ChartColumnBig, label: "Analítica", desc: "Costos, gastos e ingresos" },
   { href: "/admin/usuarios", icon: Users, label: "Usuarios", desc: "Gestiona los usuarios" },
   { href: "/admin/empresas", icon: Building2, label: "Empresas", desc: "Empresas de la cuenta" },
+  { href: "/admin/formulario-300", icon: ScrollText, label: "Formulario 300", desc: "Clasificación de IVA" },
 ];
 
 const NAV_BOTTOM: NavNode[] = [

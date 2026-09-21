@@ -275,8 +275,13 @@ def sincronizar(body: SincronizarRequest, db: DB, current_user: CurrentUser):
                     try:
                         nombre = dian_service.nombre_para_parser(xml, id_)
                         for fac in causacion_service.parsear_archivo(xml, nombre):
+                            # El archivo original se guarda con el documento: es el
+                            # final de la cadena de trazabilidad del reporte de IVA.
+                            # Un ZIP puede traer varias facturas; todas comparten
+                            # el mismo origen, que es justamente lo correcto.
                             documentos_dian_service.guardar_documento(
-                                sesion, empresa_id=empresa_id, factura=fac, origen=origen
+                                sesion, empresa_id=empresa_id, factura=fac,
+                                origen=origen, xml_crudo=xml,
                             )
                             guardados += 1
                         sesion.commit()

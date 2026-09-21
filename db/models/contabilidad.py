@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean, Date, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text,
+    UniqueConstraint, func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 
@@ -175,6 +178,18 @@ class DocumentoDian(Base):
     # Ítems con su base y su tarifa — los necesita el reporte de impuestos, y
     # volver a bajarlos de la DIAN cuesta minutos.
     items_json: Mapped[str | None] = mapped_column(Text)
+    # El archivo original tal como lo entrega la DIAN (XML suelto o ZIP),
+    # comprimido con gzip. Es el final de la cadena de trazabilidad —cada cifra
+    # del reporte tiene que poder llegar hasta acá— y permite reprocesar cuando
+    # el parser aprenda a leer un campo nuevo, sin volver a descargar de la DIAN.
+    # Se lee con `documentos_dian_service.xml_original()`.
+    #
+    # DIFERIDA a propósito: es la única columna pesada de la tabla, y casi
+    # ninguna consulta la necesita (el informe recorre miles de documentos para
+    # escribir texto y cifras). Sin `deferred`, cargar un documento arrastraría
+    # su XML siempre, incluso durante la sincronización, que ya es lenta de por
+    # sí. Se lee sola en cuanto alguien toca el atributo.
+    xml_crudo: Mapped[bytes | None] = mapped_column(LargeBinary, deferred=True)
     traido_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

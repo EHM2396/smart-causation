@@ -32,6 +32,12 @@ from db.models.contabilidad import (                       # noqa: F401
 from db.models.causacion import (                           # noqa: F401
     BorradorCausacion,
 )
+from db.models.tributario import (                          # noqa: F401
+    CatalogoTributario,
+    CatalogoTributarioCambio,
+    ClasificacionEmpresa,
+    EmpresaConfigTributaria,
+)
 from db.models.aprendizaje import (                        # noqa: F401
     MapeoPUC,
     HistorialDecision,
@@ -66,6 +72,10 @@ __all__ = [
     "SincronizacionDian",
     "Consecutivo",
     "BorradorCausacion",
+    "CatalogoTributario",
+    "CatalogoTributarioCambio",
+    "ClasificacionEmpresa",
+    "EmpresaConfigTributaria",
     "MapeoPUC",
     "HistorialDecision",
     "ReglaClasificacion",

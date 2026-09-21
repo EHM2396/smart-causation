@@ -15,6 +15,7 @@ pero existen en la DIAN y suman al valor, así que omitirlas falsearía el infor
 """
 from __future__ import annotations
 
+import gzip
 import json
 from datetime import date, datetime
 
@@ -62,12 +63,35 @@ def _fecha(valor: str | None) -> date | None:
     return None
 
 
-def guardar_documento(db: Session, *, empresa_id: int, factura: dict, origen: str) -> DocumentoDian:
+def xml_original(doc: DocumentoDian) -> bytes | None:
+    """El archivo tal como lo entregó la DIAN (XML suelto o ZIP), descomprimido.
+
+    Es el último eslabón de la trazabilidad: cada cifra del reporte tiene que
+    poder llegar hasta el documento que la originó.
+    """
+    if not doc.xml_crudo:
+        return None
+    try:
+        return gzip.decompress(doc.xml_crudo)
+    except (OSError, EOFError, gzip.BadGzipFile):
+        # Guardado antes de que se comprimiera, o dato corrupto: se devuelve
+        # tal cual en vez de fallar — el original sigue siendo más útil que nada.
+        return bytes(doc.xml_crudo)
+
+
+def guardar_documento(
+    db: Session, *, empresa_id: int, factura: dict, origen: str, xml_crudo: bytes | None = None,
+) -> DocumentoDian:
     """Guarda (o actualiza) un documento traído de la DIAN.
 
     Se actualiza en vez de duplicar: volver a traer el mismo rango es una
     operación normal —para incorporar documentos que el proveedor emitió
     después— y no debe multiplicar las cifras.
+
+    `xml_crudo` es el archivo original que entregó la DIAN. Se guarda comprimido
+    y sin modificar: es el final de la cadena de trazabilidad y lo que permite
+    reprocesar cuando el parser aprenda a leer un campo nuevo, sin tener que
+    volver a descargarlo todo con un enlace que dura una hora.
     """
     tipo = clasificar(factura, origen)
     numero = factura.get("numero_dian") or factura.get("numero_factura") or ""
@@ -88,6 +112,10 @@ def guardar_documento(db: Session, *, empresa_id: int, factura: dict, origen: st
     doc.total = factura.get("total") or 0.0
     doc.base_gravable = base_gravable_de(factura)
     doc.items_json = json.dumps(factura.get("items") or [], ensure_ascii=False, default=str)
+    # Solo se pisa si llega uno nuevo: si una traída falla al descargar el
+    # archivo, no se borra el que ya estaba guardado.
+    if xml_crudo:
+        doc.xml_crudo = gzip.compress(xml_crudo)
     doc.traido_at = datetime.now()
 
     if existente is None:

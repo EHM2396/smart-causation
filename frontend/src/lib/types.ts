@@ -366,6 +366,51 @@ export interface AdminEmpresaMini {
   nombre: string;
 }
 
+// ─── Formulario 300: clasificación tributaria ─────────────────────────────────
+
+export type TratamientoIVA =
+  | "gravado_general" | "gravado_5" | "exento" | "excluido" | "no_gravado" | "especial";
+
+export const TRATAMIENTO_LABEL: Record<TratamientoIVA, string> = {
+  gravado_general: "Gravado (tarifa general)",
+  gravado_5: "Gravado (5%)",
+  exento: "Exento",
+  excluido: "Excluido",
+  no_gravado: "No gravado",
+  especial: "Operación especial",
+};
+
+export interface ConceptoF300 {
+  concepto: string;
+  nit_proveedor: string;
+  base_acumulada: number;
+  documentos: number;
+  participacion: number;
+  tratamiento: TratamientoIVA | null;
+  estado: "pendiente" | "sugerida" | "validada" | "manual";
+  origen: "catalogo" | "ia" | "manual" | "heredada" | null;
+  requiere_revision: boolean;
+  es_excepcion: boolean;
+  articulo_et: string | null;
+  norma: string | null;
+}
+
+export interface ProveedorF300 {
+  nit: string;
+  razon_social: string;
+  base_total: number;
+  documentos: number;
+  pendientes: number;
+  predominante: ConceptoF300;
+  secundarios: ConceptoF300[];
+}
+
+export interface ResumenF300 {
+  periodo: { desde: string; hasta: string };
+  tarifa: number;
+  proveedores: ProveedorF300[];
+}
+
 export interface AdminUsuario {
   id: number;
   email: string;
