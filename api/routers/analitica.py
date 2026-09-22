@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_current_user
+from core.parser import usar_cliente_como_tercero
 from db.models.auth import Empresa, Usuario
 from db.session import get_db, SessionLocal
 from services import (
@@ -275,6 +276,14 @@ def sincronizar(body: SincronizarRequest, db: DB, current_user: CurrentUser):
                     try:
                         nombre = dian_service.nombre_para_parser(xml, id_)
                         for fac in causacion_service.parsear_archivo(xml, nombre):
+                            # En una venta el "tercero" es el CLIENTE, no el emisor
+                            # (que es la propia empresa). Sin este reemplazo, una
+                            # factura o NC de venta queda guardada con el NIT y la
+                            # razón social de la empresa misma como si fuera su
+                            # propio proveedor — es lo que ya hacen dian.py y
+                            # causacion.py para causar, y acá faltaba.
+                            if origen == "ventas":
+                                fac = usar_cliente_como_tercero(fac)
                             # El archivo original se guarda con el documento: es el
                             # final de la cadena de trazabilidad del reporte de IVA.
                             # Un ZIP puede traer varias facturas; todas comparten

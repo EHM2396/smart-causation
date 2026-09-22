@@ -19,12 +19,13 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle, Building2, CalendarDays, Check, ChevronDown, Loader2,
-  ScrollText, TriangleAlert,
+  Pencil, ScrollText, TriangleAlert,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { fmt } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
 import type { ConceptoF300, ProveedorF300, TratamientoIVA } from "@/lib/types";
@@ -104,11 +105,9 @@ function ConceptoRow({
               <TriangleAlert className="h-3.5 w-3.5" style={{ color: "#d97706" }} />
             </span>
           )}
-          <button type="button" onClick={() => setEditando((v) => !v)}
-            className="rounded-md px-2 py-1 text-xs font-medium transition-colors"
-            style={{ backgroundColor: "var(--bg-elevated)", color: "var(--brand)" }}>
-            {c.estado === "validada" ? "Cambiar" : "Clasificar"}
-          </button>
+          <Button variant="outline" size="sm" onClick={() => setEditando((v) => !v)} className="gap-1.5">
+            <Pencil className="h-3.5 w-3.5" /> {c.estado === "validada" ? "Cambiar" : "Clasificar"}
+          </Button>
         </div>
       </div>
 
