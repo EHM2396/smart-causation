@@ -32,3 +32,55 @@ export function fechaEmisionKey(fecha: string): number {
 export function ordenarPorFechaEmision<T extends { fecha: string }>(facturas: T[]): T[] {
   return [...facturas].sort((a, b) => fechaEmisionKey(a.fecha) - fechaEmisionKey(b.fecha));
 }
+
+/** "YYYY-MM-DD" en hora local — la fecha "en crudo" que usan los DatePicker. */
+export function localYMD(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export interface PeriodoPreset {
+  id: string;
+  label: string;
+  desde: string;
+  hasta: string;
+}
+
+/**
+ * Los periodos de la pantalla de Analítica y de Formulario 300: "Este mes"
+ * (en curso) y los dos periodos REALES de declaración de IVA (Art. 600 ET),
+ * pero del último que ya CERRÓ, no del que está corriendo.
+ *
+ * Antes mostraban el bimestre/cuatrimestre EN CURSO, y en cualquier mes que
+ * fuera el primero de ambos periodos a la vez (enero, mayo, septiembre) los
+ * tres botones daban exactamente el mismo rango que "Este mes" — parecía que
+ * Bimestral y Cuatrimestral no hacían nada, porque el resultado era idéntico
+ * al que ya estaba puesto. Mostrar el periodo YA CERRADO además tiene más
+ * sentido para el caso real: cuando declarás, te interesa el periodo que
+ * terminó, no el que todavía está corriendo.
+ */
+export function periodosIVA(): PeriodoPreset[] {
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth();
+
+  const inicioBimestreActual = Math.floor(m / 2) * 2;
+  const inicioCuatrimestreActual = Math.floor(m / 4) * 4;
+
+  // `new Date(y, mes, 0)` es el último día del mes ANTERIOR a `mes` — así se
+  // consigue el cierre del periodo previo sin tener que manejar a mano el
+  // cambio de año (diciembre → enero ya lo resuelve el propio Date).
+  const finBimestreAnterior = new Date(y, inicioBimestreActual, 0);
+  const inicioBimestreAnterior = new Date(
+    finBimestreAnterior.getFullYear(), finBimestreAnterior.getMonth() - 1, 1
+  );
+
+  const finCuatrimestreAnterior = new Date(y, inicioCuatrimestreActual, 0);
+  const inicioCuatrimestreAnterior = new Date(
+    finCuatrimestreAnterior.getFullYear(), finCuatrimestreAnterior.getMonth() - 3, 1
+  );
+
+  return [
+    { id: "mes", label: "Este mes", desde: localYMD(new Date(y, m, 1)), hasta: localYMD(now) },
+    { id: "bimestre", label: "Último bimestre", desde: localYMD(inicioBimestreAnterior), hasta: localYMD(finBimestreAnterior) },
+    { id: "cuatrimestre", label: "Último cuatrimestre", desde: localYMD(inicioCuatrimestreAnterior), hasta: localYMD(finCuatrimestreAnterior) },
+  ];
+}
