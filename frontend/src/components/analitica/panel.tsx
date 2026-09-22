@@ -52,14 +52,19 @@ function localYMD(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// Los periodos que de verdad existen para el IVA (Art. 600 ET): bimestral o
+// cuatrimestral según el responsable. "Trimestre" y "Año anterior" no
+// corresponden a ningún periodo real de declaración, así que no van acá — para
+// cualquier otro rango están los selectores de fecha, al lado.
 function buildPresets() {
   const now = new Date();
   const y = now.getFullYear(), m = now.getMonth();
+  const inicioBimestre = Math.floor(m / 2) * 2;
+  const inicioCuatrimestre = Math.floor(m / 4) * 4;
   return [
     { id: "mes", label: "Este mes", desde: localYMD(new Date(y, m, 1)), hasta: localYMD(now) },
-    { id: "trimestre", label: "Trimestre", desde: localYMD(new Date(y, Math.floor(m / 3) * 3, 1)), hasta: localYMD(now) },
-    { id: "anio", label: "Este año", desde: localYMD(new Date(y, 0, 1)), hasta: localYMD(now) },
-    { id: "anterior", label: "Año anterior", desde: localYMD(new Date(y - 1, 0, 1)), hasta: localYMD(new Date(y - 1, 11, 31)) },
+    { id: "bimestre", label: "Bimestral", desde: localYMD(new Date(y, inicioBimestre, 1)), hasta: localYMD(now) },
+    { id: "cuatrimestre", label: "Cuatrimestral", desde: localYMD(new Date(y, inicioCuatrimestre, 1)), hasta: localYMD(now) },
   ];
 }
 

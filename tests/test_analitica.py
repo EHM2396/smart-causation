@@ -96,6 +96,43 @@ def test_la_nota_debito_cuenta_en_analitica_pero_no_se_puede_causar(origen):
     assert _bucket_de(factura, origen) is None                  # no se puede causar
 
 
+def test_una_venta_real_guarda_el_cliente_no_la_propia_empresa():
+    """Bug real de producción: BELTRAN aparecía como 'proveedor' de sí misma en
+    el Formulario 300, porque sus propias facturas de venta se estaban
+    guardando sin reemplazar el tercero.
+
+    El emisor de una factura de venta ES la empresa: el parser llena nit/
+    razon_social con esos datos por defecto. Para que el tercero sea el
+    CLIENTE hay que llamar usar_cliente_como_tercero — lo que causacion.py y
+    dian.py ya hacían, y a la sincronización de Analítica/Formulario 300 le
+    faltaba."""
+    from core.parser import usar_cliente_como_tercero
+
+    factura_como_la_da_el_parser = {
+        "nit": "901694417", "razon_social": "BELTRAN INGENIERIA S.A.S.",  # el emisor
+        "comprador_nit": "800555111", "comprador_razon_social": "CLIENTE REAL S.A.S.",
+        "tipo_documento": "factura",
+    }
+    corregida = usar_cliente_como_tercero(dict(factura_como_la_da_el_parser))
+    assert corregida["nit"] == "800555111", "debe quedar el NIT del cliente, no el de BELTRAN"
+    assert corregida["razon_social"] == "CLIENTE REAL S.A.S."
+
+
+def test_analitica_aplica_el_reemplazo_de_tercero_en_ventas():
+    """Guarda de regresión: el código fuente del router tiene que seguir
+    llamando a usar_cliente_como_tercero para origen == 'ventas', antes de
+    guardar_documento. Si alguien reordena o borra esa línea sin darse cuenta,
+    vuelve el mismo bug."""
+    import inspect
+    import api.routers.analitica as router
+
+    fuente = inspect.getsource(router)
+    assert "usar_cliente_como_tercero" in fuente, (
+        "analitica.py dejó de llamar a usar_cliente_como_tercero: "
+        "las ventas volverían a guardarse con el NIT de la propia empresa"
+    )
+
+
 def test_todo_lo_que_clasifica_tiene_signo_y_naturaleza():
     """Un tipo que el traído produzca pero la analítica no conozca se sumaría
     con signo por defecto, en silencio y mal."""

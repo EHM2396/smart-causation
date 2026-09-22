@@ -64,9 +64,9 @@ function esActivo(path: string, href: string): boolean {
 const NAV_ADMIN: NavNode[] = [
   { href: "/admin/dashboard", icon: LayoutDashboard, label: "Dashboard", desc: "Informes y control" },
   { href: "/admin/analitica", icon: ChartColumnBig, label: "Analítica", desc: "Costos, gastos e ingresos" },
+  { href: "/admin/formulario-300", icon: ScrollText, label: "Formulario 300", desc: "Clasificación de IVA" },
   { href: "/admin/usuarios", icon: Users, label: "Usuarios", desc: "Gestiona los usuarios" },
   { href: "/admin/empresas", icon: Building2, label: "Empresas", desc: "Empresas de la cuenta" },
-  { href: "/admin/formulario-300", icon: ScrollText, label: "Formulario 300", desc: "Clasificación de IVA" },
 ];
 
 const NAV_BOTTOM: NavNode[] = [
