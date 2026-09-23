@@ -17,7 +17,7 @@ from datetime import date
 import pytest
 
 from services.catalogo_tributario_service import (
-    PENDIENTE, Clasificacion, _vigente_en, normalizar_concepto,
+    PENDIENTE, Clasificacion, _vigente_en, normalizar_concepto, sugerir_tipo_item,
 )
 
 pytestmark = pytest.mark.tributario
@@ -119,3 +119,44 @@ def test_una_clasificacion_carga_su_procedencia():
     assert c.articulo_et == "424"
     assert c.norma == "Art. 424 ET"
     assert c.catalogo_id == 7
+
+
+def test_una_clasificacion_sin_tipo_item_no_esta_confirmado():
+    """El valor por defecto no puede leerse como una confirmación del
+    contador: nadie tocó ese campo todavía."""
+    c = Clasificacion(tratamiento="excluido", estado="validada", origen="manual")
+    assert c.tipo_item is None
+    assert c.tipo_item_confirmado is False
+
+
+# ─── Sugerencia bien vs. servicio (Fase 1, versión simplificada) ─────────────
+#
+# Andrés fue explícito: nada de un algoritmo tributario complejo, solo
+# palabras clave de la descripción, editable en un clic, y "pendiente" —
+# nunca un valor inventado— cuando hay ambigüedad real.
+
+@pytest.mark.parametrize("descripcion,esperado", [
+    # Los tres ejemplos exactos que dio Andrés en su respuesta.
+    ("Servicio de mantenimiento preventivo de aire acondicionado", "servicio"),
+    ("Computador portátil Lenovo ThinkPad", "bien"),
+    ("Honorarios profesionales de asesoría contable", "servicio"),
+    ("Compra de computadores", "bien"),
+    ("Servicio de mantenimiento de equipos", "servicio"),
+])
+def test_sugiere_bien_o_servicio_por_palabras_clave(descripcion, esperado):
+    assert sugerir_tipo_item(descripcion) == esperado
+
+
+@pytest.mark.parametrize("vacio", [None, "", "   "])
+def test_sin_descripcion_no_hay_sugerencia(vacio):
+    assert sugerir_tipo_item(vacio) is None
+
+
+def test_servicio_gana_cuando_el_texto_menciona_tambien_un_bien():
+    """"Servicio de mantenimiento de computadores" es un servicio, aunque
+    mencione un bien físico como objeto de la actividad."""
+    assert sugerir_tipo_item("Servicio de mantenimiento de computadores") == "servicio"
+
+
+def test_texto_sin_ninguna_palabra_clave_queda_sin_sugerencia():
+    assert sugerir_tipo_item("Referencia XYZ-123") is None

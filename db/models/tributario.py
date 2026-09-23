@@ -54,6 +54,11 @@ ORIGENES = ("catalogo", "ia", "manual", "heredada")
 
 PERIODICIDADES = ("bimestral", "cuatrimestral", "anual")
 
+# Bien o servicio, sugerido automáticamente por descripción (ver
+# catalogo_tributario_service.sugerir_tipo_item) y confirmable por el
+# contador. No es obligatorio: sin seguridad suficiente queda sin definir.
+TIPOS_ITEM = ("bien", "servicio")
+
 
 # ── Catálogo maestro ─────────────────────────────────────────────────────────
 
@@ -142,12 +147,23 @@ class ClasificacionEmpresa(Base):
     # distintas según el emisor: "transporte" de una empresa de maquinaria no es
     # el mismo hecho económico que el de una de transporte público.
     nit_tercero: Mapped[str | None] = mapped_column(String(20))
+    # Código/referencia del producto tal como lo trae el XML
+    # (SellersItemIdentification). Afina la memoria: proveedor + descripción
+    # sola no alcanza cuando el mismo proveedor vende bienes y servicios
+    # distintos con textos parecidos. NULL cuando el XML no la trae — la
+    # búsqueda cae al fallback proveedor + descripción de siempre.
+    referencia: Mapped[str | None] = mapped_column(String(120))
     concepto_norm: Mapped[str] = mapped_column(String(500), nullable=False)
     concepto: Mapped[str] = mapped_column(String(500), nullable=False)
 
     tratamiento: Mapped[str] = mapped_column(String(30), nullable=False)
     origen: Mapped[str] = mapped_column(String(20), nullable=False, default="manual", server_default="manual")
     estado: Mapped[str] = mapped_column(String(20), nullable=False, default="pendiente", server_default="pendiente")
+
+    # bien | servicio. Sugerido por descripción, confirmable en un clic. NULL
+    # = sin seguridad suficiente todavía — no bloquea nada, se muestra como
+    # pendiente y se sugiere de nuevo la próxima vez.
+    tipo_item: Mapped[str | None] = mapped_column(String(20))
 
     catalogo_id: Mapped[int | None] = mapped_column(ForeignKey("catalogo_tributario.id"), nullable=True)
     # TRUE cuando difiere de lo que dice el maestro. Se marca para que se vea

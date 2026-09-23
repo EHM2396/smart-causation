@@ -380,9 +380,19 @@ export const TRATAMIENTO_LABEL: Record<TratamientoIVA, string> = {
   especial: "Operación especial",
 };
 
+export type TipoItem = "bien" | "servicio";
+
+export const TIPO_ITEM_LABEL: Record<TipoItem, string> = {
+  bien: "Bien",
+  servicio: "Servicio",
+};
+
+export type OrigenF300 = "ventas" | "compras";
+
 export interface ConceptoF300 {
   concepto: string;
   nit_proveedor: string;
+  referencia: string | null;
   base_acumulada: number;
   documentos: number;
   participacion: number;
@@ -393,6 +403,10 @@ export interface ConceptoF300 {
   es_excepcion: boolean;
   articulo_et: string | null;
   norma: string | null;
+  // Sugerido por descripción, o confirmado por el contador —
+  // `tipo_item_confirmado` distingue una cosa de la otra.
+  tipo_item: TipoItem | null;
+  tipo_item_confirmado: boolean;
 }
 
 export interface ProveedorF300 {
@@ -408,6 +422,7 @@ export interface ProveedorF300 {
 export interface ResumenF300 {
   periodo: { desde: string; hasta: string };
   tarifa: number;
+  origen: OrigenF300;
   proveedores: ProveedorF300[];
 }
 

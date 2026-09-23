@@ -38,6 +38,7 @@ def linea_xml(
     otros: list[tuple[str, float, float]] | None = None,
     descuento: float = 0.0,
     tag: str = "InvoiceLine",
+    referencia: str | None = None,
 ) -> str:
     """Una línea de factura.
 
@@ -74,7 +75,11 @@ def linea_xml(
             "</cac:TaxCategory></cac:TaxSubtotal></cac:TaxTotal>"
         )
 
-    partes.append(f"<cac:Item><cbc:Description>{descripcion}</cbc:Description></cac:Item>")
+    sellers_id = (
+        f"<cac:SellersItemIdentification><cbc:ID>{referencia}</cbc:ID></cac:SellersItemIdentification>"
+        if referencia else ""
+    )
+    partes.append(f"<cac:Item><cbc:Description>{descripcion}</cbc:Description>{sellers_id}</cac:Item>")
     return f"<cac:{tag}>{''.join(partes)}</cac:{tag}>"
 
 
