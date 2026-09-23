@@ -193,12 +193,23 @@ def resumen(db: Session, *, empresa_ids: list[int], desde: date, hasta: date) ->
     )
 
     # ── Terceros de mayor peso en costos y gastos ────────────────────────────
+    # Se agrupa SOLO por NIT, nunca por (NIT, razón social) a la vez: si el
+    # mismo proveedor tiene un documento con la razón social vacía —pasa con
+    # datos de antes de que se capturara de forma confiable— agrupar por los
+    # dos campos lo partía en dos filas: una con nombre y otra como "—", cada
+    # una con solo una parte de su monto real. func.max(NULLIF(...)) toma
+    # cualquier nombre disponible del grupo, descartando los vacíos, así que
+    # basta con que UN documento del proveedor lo tenga guardado.
     tipos_costo = [t for t, nat in NATURALEZA.items() if nat == "costos_gastos"]
     filas_ter = db.execute(
-        select(DocumentoDian.nit_contraparte, DocumentoDian.razon_social,
-               func.count(DocumentoDian.id), func.sum(valor))
-        .where(*base, DocumentoDian.tipo.in_(tipos_costo))
-        .group_by(DocumentoDian.nit_contraparte, DocumentoDian.razon_social)
+        select(
+            DocumentoDian.nit_contraparte,
+            func.max(func.nullif(DocumentoDian.razon_social, "")),
+            func.count(DocumentoDian.id),
+            func.sum(valor),
+        )
+        .where(*base, DocumentoDian.tipo.in_(tipos_costo), DocumentoDian.nit_contraparte.is_not(None))
+        .group_by(DocumentoDian.nit_contraparte)
         .order_by(func.sum(valor).desc()).limit(10)
     ).all()
     por_tercero = [
