@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import pytest
 
-from services.formulario_300_service import ConceptoResumen, ProveedorResumen
+from services.formulario_300_service import (
+    TIPOS_COMPRAS, TIPOS_VENTAS, ConceptoResumen, ProveedorResumen,
+)
 from services.catalogo_tributario_service import PENDIENTE, Clasificacion
+from services.analitica_service import ORDEN as TIPOS_DOCUMENTO_DIAN
 
 pytestmark = pytest.mark.formulario300
 
@@ -90,3 +93,47 @@ def test_lo_pendiente_de_verdad_cuenta_como_pendiente():
     p = ProveedorResumen(nit="1", razon_social="X", base_total=100, documentos=1,
                          predominante=_concepto("sin clasificar", 100), secundarios=[])
     assert p.pendientes == 1
+
+
+# ─── Ventas y Compras nunca se mezclan (Fase 1) ──────────────────────────────
+#
+# La pantalla se separa en dos flujos: en ventas exento y excluido nunca se
+# fusionan, en compras sí se agrupan en la presentación. Si un tipo de
+# documento nuevo se agrega a la DIAN y se olvida acá, un documento entero
+# desaparecería de las dos pantallas sin ningún error visible — por eso se
+# valida contra la misma lista que ya usa Analítica.
+
+def test_todo_tipo_de_documento_dian_cae_en_ventas_o_en_compras():
+    cubiertos = set(TIPOS_VENTAS) | set(TIPOS_COMPRAS)
+    assert cubiertos == set(TIPOS_DOCUMENTO_DIAN)
+
+
+def test_ventas_y_compras_no_se_superponen():
+    assert set(TIPOS_VENTAS).isdisjoint(set(TIPOS_COMPRAS))
+
+
+def test_las_notas_de_venta_van_con_ventas_no_con_compras():
+    """Antes de esta fase, un documento de venta con nota crédito/débito se
+    mezclaba con los de compra en la misma pantalla de clasificación."""
+    assert "nc_ventas" in TIPOS_VENTAS
+    assert "nd_ventas" in TIPOS_VENTAS
+    assert "nc_ventas" not in TIPOS_COMPRAS
+    assert "nd_ventas" not in TIPOS_COMPRAS
+
+
+# ─── El concepto conserva su referencia (Fase 1: memoria por proveedor +
+# referencia + descripción) ───────────────────────────────────────────────────
+
+def test_concepto_sin_referencia_no_revienta():
+    """La mayoría de proveedores no manda código de producto en el XML — el
+    campo debe poder quedar vacío sin romper nada."""
+    c = _concepto("sin referencia", 1000)
+    assert c.referencia is None
+
+
+def test_concepto_conserva_la_referencia_del_producto():
+    c = ConceptoResumen(
+        concepto="Producto X", concepto_norm="producto x", nit_proveedor="900111222",
+        base_acumulada=1000, documentos=1, clasificacion=PENDIENTE, referencia="ABC123",
+    )
+    assert c.referencia == "ABC123"

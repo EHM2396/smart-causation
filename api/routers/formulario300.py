@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from api.dependencies import get_current_user
 from db.models.auth import CuentaCliente, Empresa, Usuario
-from db.models.tributario import TRATAMIENTOS
+from db.models.tributario import TIPOS_ITEM, TRATAMIENTOS
 from db.session import get_db
 from services import formulario_300_service as f300
 
@@ -76,9 +76,17 @@ def proveedores(
     hasta: str | None = None,
     empresa_id: int | None = None,
     tarifa: float = 0.0,
+    origen: str = "compras",
 ):
     """Proveedores con operaciones a la tarifa dada, con su concepto
-    predominante y los secundarios, cada uno con su clasificación actual."""
+    predominante y los secundarios, cada uno con su clasificación actual.
+
+    `origen` separa la pantalla en dos flujos —"ventas" o "compras"— que nunca
+    se mezclan: en ventas exento y excluido siempre quedan separados, en
+    compras se agrupan en la presentación principal."""
+    if origen not in ("ventas", "compras"):
+        raise HTTPException(status_code=400, detail="origen debe ser 'ventas' o 'compras'")
+
     cuenta = _cuenta_de(db, admin)
     d, h = _parse_rango(desde, hasta)
     empresas = _empresas_de_cuenta(db, cuenta.id)
@@ -92,13 +100,14 @@ def proveedores(
         return {"periodo": {"desde": d.isoformat(), "hasta": h.isoformat()}, "proveedores": []}
 
     resultado = f300.resumen_por_proveedor(
-        db, empresa_ids=empresas, desde=d, hasta=h, tarifa=tarifa, cuenta_id=cuenta.id,
+        db, empresa_ids=empresas, desde=d, hasta=h, tarifa=tarifa, origen=origen, cuenta_id=cuenta.id,
     )
 
     def _concepto(c) -> dict:
         return {
             "concepto": c.concepto,
             "nit_proveedor": c.nit_proveedor,
+            "referencia": c.referencia,
             "base_acumulada": c.base_acumulada,
             "documentos": c.documentos,
             "participacion": c.participacion,
@@ -109,11 +118,14 @@ def proveedores(
             "es_excepcion": c.clasificacion.es_excepcion,
             "articulo_et": c.clasificacion.articulo_et,
             "norma": c.clasificacion.norma,
+            "tipo_item": c.clasificacion.tipo_item,
+            "tipo_item_confirmado": c.clasificacion.tipo_item_confirmado,
         }
 
     return {
         "periodo": {"desde": d.isoformat(), "hasta": h.isoformat()},
         "tarifa": tarifa,
+        "origen": origen,
         "proveedores": [
             {
                 "nit": p.nit,
@@ -137,6 +149,12 @@ class ClasificarRequest(BaseModel):
     # no se comparte). Sin NIT: es una regla general del concepto y se propone
     # también a las demás empresas de la firma.
     nit_tercero: str | None = None
+    # Código/referencia del producto (si el XML la trae) — afina la memoria
+    # cuando el mismo proveedor vende bienes y servicios con textos parecidos.
+    referencia: str | None = None
+    # bien | servicio, confirmado por el contador — opcional, es un eje
+    # independiente del tratamiento de IVA.
+    tipo_item: str | None = None
     articulo_et: str | None = None
     norma: str | None = None
 
@@ -153,13 +171,20 @@ def clasificar_endpoint(body: ClasificarRequest, db: DB, admin: OrgAdmin):
             status_code=400,
             detail=f"Tratamiento inválido. Debe ser uno de: {', '.join(TRATAMIENTOS)}",
         )
+    if body.tipo_item is not None and body.tipo_item not in TIPOS_ITEM:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tipo de ítem inválido. Debe ser uno de: {', '.join(TIPOS_ITEM)}",
+        )
 
     fila = f300.validar_clasificacion(
         db, empresa=empresa, usuario=admin, concepto=body.concepto,
         tratamiento=body.tratamiento, nit_tercero=body.nit_tercero,
+        referencia=body.referencia, tipo_item=body.tipo_item,
         articulo_et=body.articulo_et, norma=body.norma,
     )
     return {
         "id": fila.id, "concepto": fila.concepto, "tratamiento": fila.tratamiento,
         "estado": fila.estado, "es_excepcion": fila.es_excepcion,
+        "tipo_item": fila.tipo_item,
     }

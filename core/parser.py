@@ -1072,10 +1072,18 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
         # Descripción
         desc = ""
         item_el = line.find("cac:Item", _NS)
+        referencia = ""
         if item_el is not None:
             desc = _xml_text(item_el.find("cbc:Description", _NS))
+            # Código/referencia del producto que puso el vendedor. Se guarda
+            # aparte de la descripción —aunque el XML no traiga descripción y
+            # este mismo valor se use como respaldo de `desc` más abajo— para
+            # que la memoria de clasificación (proveedor + referencia +
+            # descripción) tenga con qué afinar cuando el mismo proveedor
+            # vende bienes y servicios con textos parecidos.
+            referencia = _xml_text(item_el.find("cac:SellersItemIdentification/cbc:ID", _NS))
             if not desc:
-                desc = _xml_text(item_el.find("cac:SellersItemIdentification/cbc:ID", _NS))
+                desc = referencia
         if not desc:
             desc = _xml_text(line.find("cbc:Note", _NS))
         if not desc:
@@ -1152,6 +1160,7 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
         valor_otros = round(sum(t["valor"] for t in otros_tributos), 2)
         items.append({
             "descripcion":    desc,
+            "referencia":     referencia or None,
             "base":           round(base, 2),
             "cod_impuesto":   cod_impuesto,
             "porcentaje":     porcentaje,

@@ -29,6 +29,14 @@ from services.catalogo_tributario_service import (
 )
 from db.models.tributario import CatalogoTributario, ClasificacionEmpresa
 
+# Documentos que corresponden a cada lado del Formulario 300. La pantalla de
+# clasificación se separa en dos flujos porque en ventas EXENTO y EXCLUIDO
+# nunca se agrupan, y en compras sí se agrupan en la presentación principal —
+# mezclar ambos tipos de documento en una sola lista impedía aplicar esa
+# regla de forma consistente.
+TIPOS_VENTAS = ("ventas", "nc_ventas", "nd_ventas")
+TIPOS_COMPRAS = ("compras", "nc", "nd", "soporte", "nc_soporte")
+
 
 @dataclass
 class ConceptoResumen:
@@ -41,6 +49,9 @@ class ConceptoResumen:
     # % del total del proveedor que representa este concepto — es lo que decide
     # cuál es el "predominante" y cuáles quedan de segundo plano en la pantalla.
     participacion: float = 0.0
+    # Código/referencia del producto (si el XML lo trae). Se manda de vuelta al
+    # validar, para que la memoria quede guardada a este nivel de detalle.
+    referencia: str | None = None
 
 
 @dataclass
@@ -68,10 +79,15 @@ def resumen_por_proveedor(
     desde: date,
     hasta: date,
     tarifa: float = 0.0,
+    origen: str = "compras",
     cuenta_id: int | None = None,
 ) -> list[ProveedorResumen]:
     """Proveedores con operaciones a la `tarifa` dada, con sus conceptos
     clasificados y ordenados por peso económico.
+
+    `origen` separa Ventas de Compras — son dos flujos de clasificación
+    distintos (en ventas exento y excluido nunca se agrupan; en compras sí,
+    en la presentación principal) y nunca se mezclan en una misma pantalla.
 
     Se usa la fecha de EMISIÓN de cada documento para resolver el tratamiento
     vigente en ese momento — no la de hoy. Un documento de marzo se clasifica
@@ -80,9 +96,12 @@ def resumen_por_proveedor(
     if not empresa_ids:
         return []
 
+    tipos = TIPOS_VENTAS if origen == "ventas" else TIPOS_COMPRAS
+
     docs = db.execute(
         select(DocumentoDian).where(
             DocumentoDian.empresa_id.in_(empresa_ids),
+            DocumentoDian.tipo.in_(tipos),
             DocumentoDian.fecha_emision >= desde,
             DocumentoDian.fecha_emision <= hasta,
         )
@@ -122,11 +141,12 @@ def resumen_por_proveedor(
                 continue
 
             base = float(it.get("base") or 0)
+            referencia = str(it.get("referencia") or "").strip() or None
             clave = (nit, norm)
             acc = acumulado.setdefault(clave, {
                 "concepto": concepto, "concepto_norm": norm, "nit": nit,
                 "razon_social": doc.razon_social or "", "base": 0.0, "documentos": 0,
-                "fecha_referencia": fecha_doc,
+                "fecha_referencia": fecha_doc, "referencia": referencia,
             })
             acc["base"] += base
             acc["documentos"] += 1
@@ -137,6 +157,8 @@ def resumen_por_proveedor(
                 acc["fecha_referencia"] = fecha_doc
             if not acc["razon_social"] and doc.razon_social:
                 acc["razon_social"] = doc.razon_social
+            if not acc.get("referencia") and referencia:
+                acc["referencia"] = referencia
 
     if not acumulado:
         return []
@@ -148,11 +170,12 @@ def resumen_por_proveedor(
         clas = clasificar(
             db, empresa_id=empresa_ids[0] if len(empresa_ids) == 1 else _empresa_de(db, empresa_ids, nit),
             concepto=acc["concepto"], fecha=acc["fecha_referencia"],
-            nit_tercero=nit, cuenta_id=cuenta_id,
+            nit_tercero=nit, referencia=acc.get("referencia"), cuenta_id=cuenta_id,
         )
         cr = ConceptoResumen(
             concepto=acc["concepto"], concepto_norm=acc["concepto_norm"], nit_proveedor=nit,
             base_acumulada=round(acc["base"], 2), documentos=acc["documentos"], clasificacion=clas,
+            referencia=acc.get("referencia"),
         )
         conceptos_por_nit.setdefault(nit, []).append(cr)
         razon_social_por_nit[nit] = acc["razon_social"]
@@ -200,11 +223,15 @@ def validar_clasificacion(
     concepto: str,
     tratamiento: str,
     nit_tercero: str | None = None,
+    referencia: str | None = None,
+    tipo_item: str | None = None,
     articulo_et: str | None = None,
     norma: str | None = None,
 ) -> ClasificacionEmpresa:
     """El contador confirma (o corrige) el tratamiento de un concepto para esta
-    empresa.
+    empresa, y de paso puede confirmar si es bien o servicio (`tipo_item`,
+    opcional — son dos ejes independientes, pero se guardan en la misma fila
+    porque se clasifican al mismo nivel: proveedor + referencia + concepto).
 
     Si la validación NO está atada a un proveedor puntual (`nit_tercero=None`),
     también enriquece el catálogo de la firma: es una regla general del
@@ -212,8 +239,13 @@ def validar_clasificacion(
     sugerencia. Si SÍ está atada a un proveedor, queda como una excepción propia
     de esa relación comercial y no se comparte — generalizarla podría
     equivocarse con otro proveedor que factura el mismo texto por algo distinto.
+
+    La `referencia` (código de producto) se guarda junto con el tratamiento:
+    es lo que afina la memoria cuando el mismo proveedor vende bienes y
+    servicios distintos con descripciones parecidas.
     """
     norm = normalizar_concepto(concepto)
+    ref = (referencia or "").strip() or None
     ahora = datetime.now(timezone.utc)
     hoy = ahora.date()
 
@@ -221,8 +253,9 @@ def validar_clasificacion(
     es_excepcion = sugerencia is not None and sugerencia.tratamiento != tratamiento
 
     fila = ClasificacionEmpresa(
-        empresa_id=empresa.id, nit_tercero=nit_tercero,
+        empresa_id=empresa.id, nit_tercero=nit_tercero, referencia=ref,
         concepto_norm=norm, concepto=concepto, tratamiento=tratamiento,
+        tipo_item=tipo_item,
         origen="manual", estado="validada",
         catalogo_id=sugerencia.id if sugerencia else None,
         es_excepcion=es_excepcion,

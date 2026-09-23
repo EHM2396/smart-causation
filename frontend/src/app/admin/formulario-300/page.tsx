@@ -3,12 +3,21 @@
  * Clasificación tributaria de operaciones a tarifa 0%, para armar el
  * Formulario 300 más adelante.
  *
- * Principio de la pantalla, confirmado con el analista de impuestos:
+ * Principio de la pantalla, confirmado con el analista de impuestos (Andrés):
  * "resumen primero, detalle bajo demanda". El eje es el PROVEEDOR —el NIT
  * predice el tratamiento mejor que el texto de la descripción, un mismo
  * proveedor de maquinaria factura acarreos gravados aunque diga
  * "transporte"— y dentro de cada uno se ve primero el concepto de mayor peso
  * económico, con los secundarios disponibles pero sin invadir la pantalla.
+ *
+ * Fase 1 del módulo de IVA (versión simplificada): dos flujos separados —
+ * Ventas (exento y excluido SIEMPRE distintos) y Compras (exento+excluido+no
+ * gravado se muestran agrupados, pero el detalle sigue guardado aparte por
+ * dentro)— y clasificación de un clic: los botones de tratamiento están
+ * siempre visibles en la fila, sin diálogo intermedio. Selección múltiple
+ * para clasificar varios conceptos de una sola vez. Nunca "aplicar a todo el
+ * proveedor": un mismo proveedor puede vender bienes y servicios con
+ * tratamientos distintos.
  *
  * Solo para el administrador de la cuenta por ahora (lo exige el backend):
  * es donde se toman decisiones de clasificación que se comparten con toda la
@@ -19,7 +28,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle, Building2, CalendarDays, Check, ChevronDown, Loader2,
-  Pencil, ScrollText, TriangleAlert,
+  ReceiptText, ScrollText, ShoppingCart, TriangleAlert, X,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -28,13 +37,22 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
-import type { ConceptoF300, ProveedorF300, TratamientoIVA } from "@/lib/types";
-import { TRATAMIENTO_LABEL } from "@/lib/types";
+import type { ConceptoF300, OrigenF300, ProveedorF300, TipoItem, TratamientoIVA } from "@/lib/types";
+import { TIPO_ITEM_LABEL, TRATAMIENTO_LABEL } from "@/lib/types";
 
-const OPCIONES_TRATAMIENTO: TratamientoIVA[] = [
-  "exento", "excluido", "no_gravado", "gravado_general", "gravado_5",
+// En ventas, cada tratamiento es su propio botón — exento y excluido nunca se
+// confunden. En compras se agrupan visualmente exento+excluido+no gravado
+// (así lo pide la presentación principal del Formulario 300), pero cada uno
+// sigue siendo un botón propio: el detalle se conserva igual por dentro.
+const OPCIONES_VENTAS: TratamientoIVA[] = [
+  "gravado_5", "gravado_general", "exento", "excluido", "no_gravado",
 ];
+const OPCIONES_COMPRAS_GRAVADO: TratamientoIVA[] = ["gravado_5", "gravado_general"];
+const OPCIONES_COMPRAS_AGRUPADO: TratamientoIVA[] = ["exento", "excluido", "no_gravado"];
 
+function claveConcepto(c: ConceptoF300): string {
+  return `${c.nit_proveedor}::${c.concepto}`;
+}
 
 function badgeEstado(estado: ConceptoF300["estado"]) {
   switch (estado) {
@@ -45,15 +63,34 @@ function badgeEstado(estado: ConceptoF300["estado"]) {
   }
 }
 
+function BotonTratamiento({
+  t, activo, guardando, disabled, onClick,
+}: { t: TratamientoIVA; activo: boolean; guardando: boolean; disabled: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled}
+      className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
+      style={{
+        backgroundColor: activo ? "var(--brand)" : "var(--bg-elevated)",
+        color: activo ? "#fff" : "var(--text-secondary)",
+        border: `1px solid ${activo ? "var(--brand)" : "var(--border-soft)"}`,
+      }}>
+      {guardando ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+      {TRATAMIENTO_LABEL[t]}
+    </button>
+  );
+}
+
 function ConceptoRow({
-  c, empresaId, onValidado,
-}: { c: ConceptoF300; empresaId: number; onValidado: () => void }) {
-  const [editando, setEditando] = useState(false);
+  c, empresaId, origen, seleccionado, onToggleSeleccion, onValidado,
+}: {
+  c: ConceptoF300; empresaId: number; origen: OrigenF300;
+  seleccionado: boolean; onToggleSeleccion: () => void; onValidado: () => void;
+}) {
   const [soloEsteProveedor, setSoloEsteProveedor] = useState(true);
-  const [guardando, setGuardando] = useState<TratamientoIVA | null>(null);
+  const [guardando, setGuardando] = useState<TratamientoIVA | "tipo_item" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const validar = async (tratamiento: TratamientoIVA) => {
+  const clasificar = async (tratamiento: TratamientoIVA) => {
     setGuardando(tratamiento);
     setError(null);
     try {
@@ -62,8 +99,8 @@ function ConceptoRow({
         concepto: c.concepto,
         tratamiento,
         nit_tercero: soloEsteProveedor ? c.nit_proveedor : null,
+        referencia: c.referencia,
       });
-      setEditando(false);
       onValidado();
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo guardar la clasificación.");
@@ -72,67 +109,114 @@ function ConceptoRow({
     }
   };
 
+  const confirmarTipoItem = async (tipo: TipoItem) => {
+    if (!c.tratamiento) return; // sin tratamiento todavía no hay nada que guardar
+    setGuardando("tipo_item");
+    setError(null);
+    try {
+      await api.f300Clasificar({
+        empresa_id: empresaId,
+        concepto: c.concepto,
+        tratamiento: c.tratamiento,
+        nit_tercero: soloEsteProveedor ? c.nit_proveedor : null,
+        referencia: c.referencia,
+        tipo_item: tipo,
+      });
+      onValidado();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar el tipo de ítem.");
+    } finally {
+      setGuardando(null);
+    }
+  };
+
+  const opcionesPrincipales = origen === "ventas" ? OPCIONES_VENTAS : OPCIONES_COMPRAS_GRAVADO;
+
   return (
-    <div className="rounded-lg border px-3 py-2.5" style={{ borderColor: "var(--border-soft)" }}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium" style={{ color: "var(--text-primary)" }}>{c.concepto}</p>
-          <p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>
-            {fmt(c.base_acumulada)} · {c.documentos} documento(s) · {c.participacion}% del proveedor
-          </p>
+    <div className="rounded-lg border px-3 py-2.5" style={{ borderColor: seleccionado ? "var(--brand)" : "var(--border-soft)" }}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-1 items-start gap-2">
+          <input type="checkbox" checked={seleccionado} onChange={onToggleSeleccion}
+            className="mt-0.5 h-3.5 w-3.5 shrink-0" title="Seleccionar para clasificar junto con otros" />
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium" style={{ color: "var(--text-primary)" }}>{c.concepto}</p>
+            <p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>
+              {fmt(c.base_acumulada)} · {c.documentos} documento(s) · {c.participacion}% del proveedor
+              {c.referencia && <> · ref. {c.referencia}</>}
+            </p>
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {c.tratamiento && (
-            <span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
-              {TRATAMIENTO_LABEL[c.tratamiento]}
-            </span>
-          )}
           {badgeEstado(c.estado)}
           {c.es_excepcion && (
             <span title="Difiere de la clasificación general de la firma">
               <TriangleAlert className="h-3.5 w-3.5" style={{ color: "#d97706" }} />
             </span>
           )}
-          <Button variant="outline" size="sm" onClick={() => setEditando((v) => !v)} className="gap-1.5">
-            <Pencil className="h-3.5 w-3.5" /> {c.estado === "validada" ? "Cambiar" : "Clasificar"}
-          </Button>
         </div>
       </div>
 
-      {editando && (
-        <div className="mt-3 border-t pt-3" style={{ borderColor: "var(--border-soft)" }}>
-          <div className="flex flex-wrap gap-2">
-            {OPCIONES_TRATAMIENTO.map((t) => (
-              <button key={t} type="button" onClick={() => validar(t)} disabled={guardando !== null}
-                className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
-                style={{
-                  backgroundColor: c.tratamiento === t ? "var(--brand)" : "var(--bg-elevated)",
-                  color: c.tratamiento === t ? "#fff" : "var(--text-secondary)",
-                  border: `1px solid ${c.tratamiento === t ? "var(--brand)" : "var(--border-soft)"}`,
-                }}>
-                {guardando === t ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-                {TRATAMIENTO_LABEL[t]}
-              </button>
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+        {opcionesPrincipales.map((t) => (
+          <BotonTratamiento key={t} t={t} activo={c.tratamiento === t}
+            guardando={guardando === t} disabled={guardando !== null}
+            onClick={() => clasificar(t)} />
+        ))}
+        {origen === "compras" && (
+          <span className="ml-1 flex items-center gap-1.5 rounded-full border px-1.5 py-1"
+            style={{ borderColor: "var(--border-soft)" }} title="Se agrupan en el Formulario 300, pero cada uno se guarda por separado">
+            {OPCIONES_COMPRAS_AGRUPADO.map((t) => (
+              <BotonTratamiento key={t} t={t} activo={c.tratamiento === t}
+                guardando={guardando === t} disabled={guardando !== null}
+                onClick={() => clasificar(t)} />
             ))}
-          </div>
-          <label className="mt-2.5 flex items-center gap-1.5 text-xs" style={{ color: "var(--text-muted)" }}>
-            <input type="checkbox" checked={soloEsteProveedor} onChange={(e) => setSoloEsteProveedor(e.target.checked)} />
-            Solo para este proveedor (si lo destildás, se propone como regla general del concepto para toda la firma)
-          </label>
-          {error && (
-            <p className="mt-2 flex items-center gap-1.5 text-xs" style={{ color: "#dc2626" }}>
-              <AlertTriangle className="h-3.5 w-3.5" /> {error}
-            </p>
-          )}
-        </div>
+          </span>
+        )}
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span className="text-xs" style={{ color: "var(--text-muted)" }}>Bien / servicio:</span>
+        {(["bien", "servicio"] as TipoItem[]).map((tipo) => {
+          const activo = c.tipo_item === tipo;
+          return (
+            <button key={tipo} type="button" onClick={() => confirmarTipoItem(tipo)}
+              disabled={guardando !== null || !c.tratamiento}
+              title={!c.tratamiento ? "Clasificá primero el tratamiento de IVA" : undefined}
+              className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50"
+              style={{
+                backgroundColor: activo ? "var(--brand-muted)" : "transparent",
+                color: activo ? "var(--brand)" : "var(--text-muted)",
+                border: `1px dashed ${activo ? "var(--brand)" : "var(--border-soft)"}`,
+              }}>
+              {guardando === "tipo_item" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+              {TIPO_ITEM_LABEL[tipo]}
+            </button>
+          );
+        })}
+        {c.tipo_item && !c.tipo_item_confirmado && (
+          <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>(sugerido, sin confirmar)</span>
+        )}
+      </div>
+
+      <label className="mt-2.5 flex items-center gap-1.5 text-xs" style={{ color: "var(--text-muted)" }}>
+        <input type="checkbox" checked={soloEsteProveedor} onChange={(e) => setSoloEsteProveedor(e.target.checked)} />
+        Solo para este proveedor (si lo destildás, se propone como regla general del concepto para toda la firma)
+      </label>
+      {error && (
+        <p className="mt-2 flex items-center gap-1.5 text-xs" style={{ color: "#dc2626" }}>
+          <AlertTriangle className="h-3.5 w-3.5" /> {error}
+        </p>
       )}
     </div>
   );
 }
 
 function ProveedorCard({
-  p, empresaId, onValidado,
-}: { p: ProveedorF300; empresaId: number; onValidado: () => void }) {
+  p, empresaId, origen, seleccionados, onToggleSeleccion, onValidado,
+}: {
+  p: ProveedorF300; empresaId: number; origen: OrigenF300;
+  seleccionados: Set<string>; onToggleSeleccion: (c: ConceptoF300) => void; onValidado: () => void;
+}) {
   const [abierto, setAbierto] = useState(false);
   return (
     <div className="overflow-hidden rounded-xl border" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)", boxShadow: "var(--shadow-sm)" }}>
@@ -164,7 +248,9 @@ function ProveedorCard({
           <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
             Concepto predominante
           </p>
-          <ConceptoRow c={p.predominante} empresaId={empresaId} onValidado={onValidado} />
+          <ConceptoRow c={p.predominante} empresaId={empresaId} origen={origen} onValidado={onValidado}
+            seleccionado={seleccionados.has(claveConcepto(p.predominante))}
+            onToggleSeleccion={() => onToggleSeleccion(p.predominante)} />
 
           {p.secundarios.length > 0 && (
             <>
@@ -172,7 +258,9 @@ function ProveedorCard({
                 Otros conceptos ({p.secundarios.length})
               </p>
               {p.secundarios.map((c) => (
-                <ConceptoRow key={c.concepto} c={c} empresaId={empresaId} onValidado={onValidado} />
+                <ConceptoRow key={c.concepto} c={c} empresaId={empresaId} origen={origen} onValidado={onValidado}
+                  seleccionado={seleccionados.has(claveConcepto(c))}
+                  onToggleSeleccion={() => onToggleSeleccion(c)} />
               ))}
             </>
           )}
@@ -182,24 +270,92 @@ function ProveedorCard({
   );
 }
 
+/** Barra flotante para clasificar de una sola vez varios conceptos ya
+ * seleccionados — nunca "todo el proveedor", solo lo que el contador marcó a
+ * mano (conceptos iguales repetidos entre proveedores, por ejemplo). */
+function BarraSeleccion({
+  seleccion, origen, empresaId, onLimpiar, onAplicado,
+}: {
+  seleccion: ConceptoF300[]; origen: OrigenF300; empresaId: number;
+  onLimpiar: () => void; onAplicado: () => void;
+}) {
+  const [aplicando, setAplicando] = useState<TratamientoIVA | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (seleccion.length === 0) return null;
+
+  const opciones = origen === "ventas"
+    ? OPCIONES_VENTAS
+    : [...OPCIONES_COMPRAS_GRAVADO, ...OPCIONES_COMPRAS_AGRUPADO];
+
+  const aplicar = async (tratamiento: TratamientoIVA) => {
+    setAplicando(tratamiento);
+    setError(null);
+    try {
+      await Promise.all(seleccion.map((c) => api.f300Clasificar({
+        empresa_id: empresaId, concepto: c.concepto, tratamiento,
+        nit_tercero: c.nit_proveedor, referencia: c.referencia,
+      })));
+      onAplicado();
+      onLimpiar();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo aplicar a toda la selección.");
+    } finally {
+      setAplicando(null);
+    }
+  };
+
+  return (
+    <div className="sticky bottom-4 z-10 mx-auto mt-4 flex max-w-3xl flex-wrap items-center gap-2 rounded-xl border px-4 py-3 shadow-lg"
+      style={{ borderColor: "var(--brand)", backgroundColor: "var(--bg-surface)" }}>
+      <span className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>
+        {seleccion.length} concepto(s) seleccionado(s)
+      </span>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {opciones.map((t) => (
+          <BotonTratamiento key={t} t={t} activo={false} guardando={aplicando === t}
+            disabled={aplicando !== null} onClick={() => aplicar(t)} />
+        ))}
+      </div>
+      {error && <span className="text-xs" style={{ color: "#dc2626" }}>{error}</span>}
+      <button type="button" onClick={onLimpiar} disabled={aplicando !== null}
+        className="ml-auto flex items-center gap-1 text-xs" style={{ color: "var(--text-muted)" }}>
+        <X className="h-3.5 w-3.5" /> Limpiar
+      </button>
+    </div>
+  );
+}
+
 export default function Formulario300Page() {
   const presets = useMemo(periodosIVA, []);
   const [desde, setDesde] = useState(presets[2].desde);
   const [hasta, setHasta] = useState(presets[2].hasta);
   const [empresaId, setEmpresaId] = useState<number | null>(null);
+  const [origen, setOrigen] = useState<OrigenF300>("compras");
+  const [seleccion, setSeleccion] = useState<Map<string, ConceptoF300>>(new Map());
   const qc = useQueryClient();
 
   const presetActivo = presets.find((p) => p.desde === desde && p.hasta === hasta)?.id ?? "personalizado";
 
   const { data: empresas } = useQuery({ queryKey: ["admin-empresas"], queryFn: api.adminEmpresas });
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ["f300-proveedores", desde, hasta, empresaId],
-    queryFn: () => api.f300Proveedores(desde, hasta, empresaId, 0),
+    queryKey: ["f300-proveedores", desde, hasta, empresaId, origen],
+    queryFn: () => api.f300Proveedores(desde, hasta, empresaId, 0, origen),
     enabled: empresaId != null,
   });
 
   const opcionesEmpresa = (empresas ?? []).filter((e) => e.activa).map((e) => ({ value: String(e.id), label: e.nombre }));
   const onValidado = () => { refetch(); qc.invalidateQueries({ queryKey: ["f300-proveedores"] }); };
+
+  const cambiarOrigen = (o: OrigenF300) => { setOrigen(o); setSeleccion(new Map()); };
+
+  const toggleSeleccion = (c: ConceptoF300) => {
+    setSeleccion((prev) => {
+      const next = new Map(prev);
+      const clave = claveConcepto(c);
+      if (next.has(clave)) next.delete(clave); else next.set(clave, c);
+      return next;
+    });
+  };
 
   const totalPendientes = (data?.proveedores ?? []).reduce((s, p) => s + p.pendientes, 0);
   const totalProveedores = data?.proveedores.length ?? 0;
@@ -216,6 +372,19 @@ export default function Formulario300Page() {
             Clasifica las operaciones a tarifa 0% por proveedor: exento, excluido, no gravado o gravado.
           </p>
         </div>
+      </div>
+
+      <div className="mb-4 flex gap-1 rounded-xl border p-1" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)", width: "fit-content" }}>
+        <button type="button" onClick={() => cambiarOrigen("compras")}
+          className="flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-medium transition-colors"
+          style={{ backgroundColor: origen === "compras" ? "var(--brand)" : "transparent", color: origen === "compras" ? "#fff" : "var(--text-secondary)" }}>
+          <ShoppingCart className="h-3.5 w-3.5" /> Compras
+        </button>
+        <button type="button" onClick={() => cambiarOrigen("ventas")}
+          className="flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-medium transition-colors"
+          style={{ backgroundColor: origen === "ventas" ? "var(--brand)" : "transparent", color: origen === "ventas" ? "#fff" : "var(--text-secondary)" }}>
+          <ReceiptText className="h-3.5 w-3.5" /> Ventas
+        </button>
       </div>
 
       <div className="mb-6 rounded-xl border p-4" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
@@ -266,7 +435,9 @@ export default function Formulario300Page() {
       ) : totalProveedores === 0 ? (
         <div className="rounded-xl border px-4 py-16 text-center" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
           <Check className="mx-auto mb-3 h-8 w-8" style={{ color: "var(--text-muted)" }} />
-          <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>Sin operaciones a tarifa 0% en este periodo</p>
+          <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+            Sin operaciones de {origen} a tarifa 0% en este periodo
+          </p>
           <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
             Si esperabas ver algo, confirmá que ya trajiste la información de la DIAN en Analítica para este periodo.
           </p>
@@ -288,9 +459,12 @@ export default function Formulario300Page() {
           </div>
           <div className="space-y-3">
             {data?.proveedores.map((p) => (
-              <ProveedorCard key={p.nit} p={p} empresaId={empresaId} onValidado={onValidado} />
+              <ProveedorCard key={p.nit} p={p} empresaId={empresaId} origen={origen} onValidado={onValidado}
+                seleccionados={new Set(seleccion.keys())} onToggleSeleccion={toggleSeleccion} />
             ))}
           </div>
+          <BarraSeleccion seleccion={[...seleccion.values()]} origen={origen} empresaId={empresaId}
+            onLimpiar={() => setSeleccion(new Map())} onAplicado={onValidado} />
         </>
       )}
     </div>

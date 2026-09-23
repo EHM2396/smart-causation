@@ -153,3 +153,35 @@ def test_clasificacion_de_tributos(codigo, grupo_esperado, conocido):
     assert grupo == grupo_esperado
     assert es_conocido is conocido
     assert nombre, "todo tributo debe tener un nombre legible para el contador"
+
+
+# ─── Referencia/código del producto (Fase 1 del módulo de IVA) ───────────────
+#
+# La memoria de clasificación ahora afina por proveedor + referencia +
+# descripción, no solo proveedor + descripción — hace falta que el parser
+# guarde ese código aparte, sin tocar cómo se arma la descripción.
+
+def test_extrae_la_referencia_del_producto():
+    xml = factura_xml([linea_xml("Servicio de mantenimiento", 100000, iva_pct=0, iva_valor=0,
+                                  referencia="MANT-001")])
+    f = _parsear_xml_dian(xml, "prueba.xml")
+    assert f["items"][0]["referencia"] == "MANT-001"
+
+
+def test_sin_referencia_en_el_xml_queda_en_none():
+    """No todos los proveedores mandan SellersItemIdentification: no debe
+    reventar ni inventarse un valor."""
+    xml = factura_xml([linea_xml("Servicio sin código", 100000, iva_pct=0, iva_valor=0)])
+    f = _parsear_xml_dian(xml, "prueba.xml")
+    assert f["items"][0]["referencia"] is None
+
+
+def test_referencia_no_reemplaza_la_descripcion_cuando_ambas_existen():
+    """La referencia es un dato aparte, no un respaldo de la descripción — eso
+    solo pasa cuando el XML no trae Description en absoluto."""
+    xml = factura_xml([linea_xml("Descripción real del ítem", 100000, iva_pct=0, iva_valor=0,
+                                  referencia="REF-9")])
+    f = _parsear_xml_dian(xml, "prueba.xml")
+    item = f["items"][0]
+    assert item["descripcion"] == "Descripción real del ítem"
+    assert item["referencia"] == "REF-9"
