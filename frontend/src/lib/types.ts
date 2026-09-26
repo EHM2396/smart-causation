@@ -387,6 +387,14 @@ export const TIPO_ITEM_LABEL: Record<TipoItem, string> = {
   servicio: "Servicio",
 };
 
+// Fase 2: si el IVA facturado en una compra cuenta como descontable.
+export type IvaDescontable = "descontable" | "no_descontable";
+
+export const IVA_DESCONTABLE_LABEL: Record<IvaDescontable, string> = {
+  descontable: "Descontable",
+  no_descontable: "No descontable",
+};
+
 export type OrigenF300 = "ventas" | "compras";
 
 export interface ConceptoF300 {
@@ -398,7 +406,9 @@ export interface ConceptoF300 {
   participacion: number;
   tratamiento: TratamientoIVA | null;
   estado: "pendiente" | "sugerida" | "validada" | "manual";
-  origen: "catalogo" | "ia" | "manual" | "heredada" | null;
+  // "tarifa" = se infirió solo de la tarifa del ítem (5%/19%), sin que nadie
+  // lo haya clasificado — no necesita revisión, la tarifa ya lo dice.
+  origen: "catalogo" | "ia" | "manual" | "heredada" | "tarifa" | null;
   requiere_revision: boolean;
   es_excepcion: boolean;
   articulo_et: string | null;
@@ -407,6 +417,10 @@ export interface ConceptoF300 {
   // `tipo_item_confirmado` distingue una cosa de la otra.
   tipo_item: TipoItem | null;
   tipo_item_confirmado: boolean;
+  // Fase 2: sugerido a partir del tratamiento, o confirmado por el contador
+  // — mismo criterio que tipo_item.
+  iva_descontable: IvaDescontable | null;
+  iva_descontable_confirmado: boolean;
 }
 
 export interface ProveedorF300 {
@@ -422,6 +436,7 @@ export interface ProveedorF300 {
 export interface ResumenF300 {
   periodo: { desde: string; hasta: string };
   tarifa: number;
+  todas_tarifas: boolean;
   origen: OrigenF300;
   proveedores: ProveedorF300[];
 }

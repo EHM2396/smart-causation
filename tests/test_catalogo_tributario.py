@@ -18,6 +18,7 @@ import pytest
 
 from services.catalogo_tributario_service import (
     PENDIENTE, Clasificacion, _vigente_en, normalizar_concepto, sugerir_tipo_item,
+    sugerir_iva_descontable, sugerir_tratamiento_por_tarifa,
 )
 
 pytestmark = pytest.mark.tributario
@@ -129,6 +130,12 @@ def test_una_clasificacion_sin_tipo_item_no_esta_confirmado():
     assert c.tipo_item_confirmado is False
 
 
+def test_una_clasificacion_sin_iva_descontable_no_esta_confirmado():
+    c = Clasificacion(tratamiento="gravado_general", estado="validada", origen="manual")
+    assert c.iva_descontable is None
+    assert c.iva_descontable_confirmado is False
+
+
 # ─── Sugerencia bien vs. servicio (Fase 1, versión simplificada) ─────────────
 #
 # Andrés fue explícito: nada de un algoritmo tributario complejo, solo
@@ -160,3 +167,50 @@ def test_servicio_gana_cuando_el_texto_menciona_tambien_un_bien():
 
 def test_texto_sin_ninguna_palabra_clave_queda_sin_sugerencia():
     assert sugerir_tipo_item("Referencia XYZ-123") is None
+
+
+# ─── IVA descontable (Fase 2, versión simplificada) ──────────────────────────
+#
+# Andrés: nada de motor de reglas ni prorrateo todavía. Solo una sugerencia
+# simple a partir del tratamiento ya clasificado.
+
+@pytest.mark.parametrize("tratamiento", ["gravado_general", "gravado_5"])
+def test_gravado_se_sugiere_descontable(tratamiento):
+    assert sugerir_iva_descontable(tratamiento) == "descontable"
+
+
+@pytest.mark.parametrize("tratamiento", ["exento", "excluido", "no_gravado"])
+def test_sin_iva_se_sugiere_no_descontable(tratamiento):
+    """Si la operación no tuvo IVA, no hay nada que descontar."""
+    assert sugerir_iva_descontable(tratamiento) == "no_descontable"
+
+
+def test_especial_no_se_sugiere_requiere_revision_caso_por_caso():
+    assert sugerir_iva_descontable("especial") is None
+
+
+def test_sin_tratamiento_todavia_no_hay_sugerencia_de_iva():
+    """Sin saber el tratamiento de IVA no se puede opinar si es descontable."""
+    assert sugerir_iva_descontable(None) is None
+
+
+# ─── Tratamiento obvio por la tarifa (evita "pendientes" falsos en compras
+# gravadas normales, ahora que la pantalla las muestra también) ──────────────
+
+def test_tarifa_5_sugiere_gravado_5():
+    assert sugerir_tratamiento_por_tarifa(5.0) == ("gravado_5", "tarifa")
+
+
+@pytest.mark.parametrize("pct", [19.0, 8.0, 4.0])
+def test_cualquier_otra_tarifa_no_cero_sugiere_gravado_general(pct):
+    assert sugerir_tratamiento_por_tarifa(pct) == ("gravado_general", "tarifa")
+
+
+def test_tarifa_cero_sigue_sin_sugerencia_automatica():
+    """La ambigüedad real (exento/excluido/no gravado) es justo al 0% — ahí
+    nunca se adivina, sigue haciendo falta el catálogo o el contador."""
+    assert sugerir_tratamiento_por_tarifa(0.0) is None
+
+
+def test_sin_tarifa_conocida_no_hay_sugerencia():
+    assert sugerir_tratamiento_por_tarifa(None) is None

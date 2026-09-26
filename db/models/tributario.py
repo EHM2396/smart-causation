@@ -59,6 +59,13 @@ PERIODICIDADES = ("bimestral", "cuatrimestral", "anual")
 # contador. No es obligatorio: sin seguridad suficiente queda sin definir.
 TIPOS_ITEM = ("bien", "servicio")
 
+# Fase 2 del módulo de IVA: si el IVA facturado en una compra cuenta como
+# descontable. NULL = pendiente de validación (ver
+# catalogo_tributario_service.sugerir_iva_descontable) — nunca se asume
+# "descontable" por defecto, pero tampoco bloquea nada mientras no se
+# confirme.
+IVA_DESCONTABLE_ESTADOS = ("descontable", "no_descontable")
+
 
 # ── Catálogo maestro ─────────────────────────────────────────────────────────
 
@@ -164,6 +171,11 @@ class ClasificacionEmpresa(Base):
     # = sin seguridad suficiente todavía — no bloquea nada, se muestra como
     # pendiente y se sugiere de nuevo la próxima vez.
     tipo_item: Mapped[str | None] = mapped_column(String(20))
+
+    # descontable | no_descontable. NULL = pendiente de validación — la
+    # sugerencia automática (derivada del tratamiento) se ofrece igual, pero
+    # no se guarda como decisión hasta que el contador la confirme.
+    iva_descontable: Mapped[str | None] = mapped_column(String(20))
 
     catalogo_id: Mapped[int | None] = mapped_column(ForeignKey("catalogo_tributario.id"), nullable=True)
     # TRUE cuando difiere de lo que dice el maestro. Se marca para que se vea
