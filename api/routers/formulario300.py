@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from api.dependencies import get_current_user
 from db.models.auth import CuentaCliente, Empresa, Usuario
-from db.models.tributario import TIPOS_ITEM, TRATAMIENTOS
+from db.models.tributario import IVA_DESCONTABLE_ESTADOS, TIPOS_ITEM, TRATAMIENTOS
 from db.session import get_db
 from services import formulario_300_service as f300
 
@@ -76,6 +76,7 @@ def proveedores(
     hasta: str | None = None,
     empresa_id: int | None = None,
     tarifa: float = 0.0,
+    todas_tarifas: bool = False,
     origen: str = "compras",
 ):
     """Proveedores con operaciones a la tarifa dada, con su concepto
@@ -83,7 +84,11 @@ def proveedores(
 
     `origen` separa la pantalla en dos flujos —"ventas" o "compras"— que nunca
     se mezclan: en ventas exento y excluido siempre quedan separados, en
-    compras se agrupan en la presentación principal."""
+    compras se agrupan en la presentación principal.
+
+    `todas_tarifas` ignora `tarifa` y trae conceptos de cualquier tarifa —
+    hace falta para clasificar IVA descontable (Fase 2), que aplica sobre
+    todo a los ítems gravados (5%/19%), no a los de tarifa 0%."""
     if origen not in ("ventas", "compras"):
         raise HTTPException(status_code=400, detail="origen debe ser 'ventas' o 'compras'")
 
@@ -100,7 +105,8 @@ def proveedores(
         return {"periodo": {"desde": d.isoformat(), "hasta": h.isoformat()}, "proveedores": []}
 
     resultado = f300.resumen_por_proveedor(
-        db, empresa_ids=empresas, desde=d, hasta=h, tarifa=tarifa, origen=origen, cuenta_id=cuenta.id,
+        db, empresa_ids=empresas, desde=d, hasta=h, tarifa=tarifa,
+        todas_tarifas=todas_tarifas, origen=origen, cuenta_id=cuenta.id,
     )
 
     def _concepto(c) -> dict:
@@ -120,11 +126,14 @@ def proveedores(
             "norma": c.clasificacion.norma,
             "tipo_item": c.clasificacion.tipo_item,
             "tipo_item_confirmado": c.clasificacion.tipo_item_confirmado,
+            "iva_descontable": c.clasificacion.iva_descontable,
+            "iva_descontable_confirmado": c.clasificacion.iva_descontable_confirmado,
         }
 
     return {
         "periodo": {"desde": d.isoformat(), "hasta": h.isoformat()},
         "tarifa": tarifa,
+        "todas_tarifas": todas_tarifas,
         "origen": origen,
         "proveedores": [
             {
@@ -155,6 +164,10 @@ class ClasificarRequest(BaseModel):
     # bien | servicio, confirmado por el contador — opcional, es un eje
     # independiente del tratamiento de IVA.
     tipo_item: str | None = None
+    # descontable | no_descontable, confirmado por el contador — opcional,
+    # Fase 2. Nunca se propaga al catálogo de la firma (ver
+    # validar_clasificacion).
+    iva_descontable: str | None = None
     articulo_et: str | None = None
     norma: str | None = None
 
@@ -176,15 +189,21 @@ def clasificar_endpoint(body: ClasificarRequest, db: DB, admin: OrgAdmin):
             status_code=400,
             detail=f"Tipo de ítem inválido. Debe ser uno de: {', '.join(TIPOS_ITEM)}",
         )
+    if body.iva_descontable is not None and body.iva_descontable not in IVA_DESCONTABLE_ESTADOS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"IVA descontable inválido. Debe ser uno de: {', '.join(IVA_DESCONTABLE_ESTADOS)}",
+        )
 
     fila = f300.validar_clasificacion(
         db, empresa=empresa, usuario=admin, concepto=body.concepto,
         tratamiento=body.tratamiento, nit_tercero=body.nit_tercero,
         referencia=body.referencia, tipo_item=body.tipo_item,
+        iva_descontable=body.iva_descontable,
         articulo_et=body.articulo_et, norma=body.norma,
     )
     return {
         "id": fila.id, "concepto": fila.concepto, "tratamiento": fila.tratamiento,
         "estado": fila.estado, "es_excepcion": fila.es_excepcion,
-        "tipo_item": fila.tipo_item,
+        "tipo_item": fila.tipo_item, "iva_descontable": fila.iva_descontable,
     }

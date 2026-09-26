@@ -102,6 +102,11 @@ class Clasificacion:
     # una confirmación no se debería sobrescribir en silencio.
     tipo_item: str | None = None
     tipo_item_confirmado: bool = False
+    # Fase 2: descontable | no_descontable, confirmado por el contador si ya
+    # existe, si no lo que sugiere sugerir_iva_descontable() a partir del
+    # tratamiento. Mismo criterio que tipo_item: sugerencia vs. confirmación.
+    iva_descontable: str | None = None
+    iva_descontable_confirmado: bool = False
 
     @property
     def requiere_revision(self) -> bool:
@@ -160,6 +165,42 @@ def sugerir_tipo_item(descripcion: str | None) -> str | None:
     return None
 
 
+# ── IVA descontable (Fase 2) ─────────────────────────────────────────────────
+#
+# Andrés fue igual de explícito acá: nada de motor de reglas, nada de
+# prorrateo todavía. Una sugerencia simple a partir del tratamiento de IVA
+# que ya se clasificó — si la operación no tuvo IVA (exento/excluido/no
+# gravado), no hay nada que descontar; si sí lo tuvo (gravado), la regla
+# general (Art. 488 ET) es que es descontable. "especial" no se sugiere:
+# requiere mirarlo caso por caso, así que queda pendiente.
+_TRATAMIENTOS_SIN_IVA = ("exento", "excluido", "no_gravado")
+
+
+def sugerir_iva_descontable(tratamiento: str | None) -> str | None:
+    """Descontable o no, sugerido a partir del tratamiento de IVA ya
+    clasificado. Sin tratamiento (todavía pendiente) no hay sobre qué
+    opinar — se devuelve None, nunca se inventa."""
+    if tratamiento in ("gravado_general", "gravado_5"):
+        return "descontable"
+    if tratamiento in _TRATAMIENTOS_SIN_IVA:
+        return "no_descontable"
+    return None
+
+
+def sugerir_tratamiento_por_tarifa(pct: float | None) -> tuple[str, str] | None:
+    """Tratamiento de IVA obvio a partir de la tarifa del ítem, cuando nadie
+    lo clasificó todavía: (tratamiento, origen).
+
+    Una tarifa del 5% o del 19% no necesita que un contador la mire — la
+    tarifa YA LO DICE. La ambigüedad real (exento vs. excluido vs. no
+    gravado) es solo al 0%, y esa sigue sin sugerirse acá: se necesita el
+    catálogo o el criterio del contador, nunca se adivina.
+    """
+    if pct is None or round(pct, 2) == 0.0:
+        return None
+    return ("gravado_5", "tarifa") if round(pct, 2) == 5.0 else ("gravado_general", "tarifa")
+
+
 # ── La cadena de resolución ──────────────────────────────────────────────────
 
 def clasificar(
@@ -170,6 +211,7 @@ def clasificar(
     fecha: date,
     nit_tercero: str | None = None,
     referencia: str | None = None,
+    pct: float | None = None,
     cuenta_id: int | None = None,
 ) -> Clasificacion:
     """Tratamiento que aplica a un concepto, para una empresa, en una fecha.
@@ -185,10 +227,14 @@ def clasificar(
          campo, o cuando el XML no la trae).
       3. Lo que ESTA empresa decidió para el concepto, con cualquier proveedor
       4. Lo que dice el catálogo (propio de la firma primero, luego la semilla)
-      5. Nada: queda pendiente
+      5. Lo que dice la tarifa (5%/19% → gravado obvio; al 0% sigue pendiente)
+      6. Nada: queda pendiente
 
     La `fecha` es la del DOCUMENTO, no la de hoy. Es lo que hace que reclasificar
     hacia adelante no altere un periodo ya declarado.
+
+    `pct` es la tarifa del ítem — sirve para el escalón 5 y para sugerir el
+    IVA descontable (Fase 2) cuando nadie clasificó todavía.
     """
     norm = normalizar_concepto(concepto)
     if not norm:
@@ -235,6 +281,8 @@ def clasificar(
                 es_excepcion=fila.es_excepcion,
                 tipo_item=fila.tipo_item,
                 tipo_item_confirmado=fila.tipo_item is not None,
+                iva_descontable=fila.iva_descontable or sugerir_iva_descontable(fila.tratamiento),
+                iva_descontable_confirmado=fila.iva_descontable is not None,
             )
 
     # 4 — el catálogo. Nunca se devuelve como "validada": aunque la entrada del
@@ -250,9 +298,21 @@ def clasificar(
             norma=entrada.fuente_normativa,
             catalogo_id=entrada.id,
             tipo_item=sugerir_tipo_item(concepto),
+            iva_descontable=sugerir_iva_descontable(entrada.tratamiento),
         )
 
-    # 5 — nadie sabe el tratamiento de IVA. Se dice, no se inventa. La
+    # 5 — nadie clasificó el concepto, pero la tarifa ya lo dice (5%/19% no
+    # necesitan que un contador los mire). Al 0% sigue sin poder adivinarse.
+    por_tarifa = sugerir_tratamiento_por_tarifa(pct)
+    if por_tarifa is not None:
+        tratamiento_tarifa, origen_tarifa = por_tarifa
+        return Clasificacion(
+            tratamiento=tratamiento_tarifa, estado="sugerida", origen=origen_tarifa,
+            tipo_item=sugerir_tipo_item(concepto),
+            iva_descontable=sugerir_iva_descontable(tratamiento_tarifa),
+        )
+
+    # 6 — nadie sabe el tratamiento de IVA. Se dice, no se inventa. La
     # sugerencia de bien/servicio es independiente del tratamiento y se
     # ofrece igual, para no obligar al contador a resolver las dos cosas.
     return Clasificacion(

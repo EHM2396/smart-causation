@@ -19,6 +19,14 @@
  * proveedor": un mismo proveedor puede vender bienes y servicios con
  * tratamientos distintos.
  *
+ * Fase 2: en Compras, además del tratamiento de IVA, se confirma si el IVA
+ * facturado cuenta como descontable. Por eso Compras trae TODAS las tarifas
+ * (no solo 0%): la clasificación de IVA descontable aplica sobre todo a lo
+ * GRAVADO. La tarifa por sí sola ya resuelve el tratamiento de los ítems
+ * gravados (5%/19%), así que ahí no hace falta que el contador intervenga —
+ * solo en la duda real (0%: exento/excluido/no gravado) y en confirmar el
+ * IVA descontable.
+ *
  * Solo para el administrador de la cuenta por ahora (lo exige el backend):
  * es donde se toman decisiones de clasificación que se comparten con toda la
  * firma, y conviene que pase por quien lleva impuestos antes de abrirlo a
@@ -37,8 +45,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
-import type { ConceptoF300, OrigenF300, ProveedorF300, TipoItem, TratamientoIVA } from "@/lib/types";
-import { TIPO_ITEM_LABEL, TRATAMIENTO_LABEL } from "@/lib/types";
+import type { ConceptoF300, IvaDescontable, OrigenF300, ProveedorF300, TipoItem, TratamientoIVA } from "@/lib/types";
+import { IVA_DESCONTABLE_LABEL, TIPO_ITEM_LABEL, TRATAMIENTO_LABEL } from "@/lib/types";
 
 // En ventas, cada tratamiento es su propio botón — exento y excluido nunca se
 // confunden. En compras se agrupan visualmente exento+excluido+no gravado
@@ -87,7 +95,7 @@ function ConceptoRow({
   seleccionado: boolean; onToggleSeleccion: () => void; onValidado: () => void;
 }) {
   const [soloEsteProveedor, setSoloEsteProveedor] = useState(true);
-  const [guardando, setGuardando] = useState<TratamientoIVA | "tipo_item" | null>(null);
+  const [guardando, setGuardando] = useState<TratamientoIVA | "tipo_item" | "iva_descontable" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const clasificar = async (tratamiento: TratamientoIVA) => {
@@ -125,6 +133,27 @@ function ConceptoRow({
       onValidado();
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo guardar el tipo de ítem.");
+    } finally {
+      setGuardando(null);
+    }
+  };
+
+  const confirmarIvaDescontable = async (valor: IvaDescontable | null) => {
+    if (!c.tratamiento) return; // sin tratamiento todavía no hay nada que guardar
+    setGuardando("iva_descontable");
+    setError(null);
+    try {
+      await api.f300Clasificar({
+        empresa_id: empresaId,
+        concepto: c.concepto,
+        tratamiento: c.tratamiento,
+        nit_tercero: soloEsteProveedor ? c.nit_proveedor : null,
+        referencia: c.referencia,
+        iva_descontable: valor,
+      });
+      onValidado();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar el IVA descontable.");
     } finally {
       setGuardando(null);
     }
@@ -198,6 +227,39 @@ function ConceptoRow({
         )}
       </div>
 
+      {origen === "compras" && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="text-xs" style={{ color: "var(--text-muted)" }}>IVA:</span>
+          {(["descontable", "no_descontable"] as IvaDescontable[]).map((valor) => {
+            const activo = c.iva_descontable === valor;
+            return (
+              <button key={valor} type="button" onClick={() => confirmarIvaDescontable(valor)}
+                disabled={guardando !== null || !c.tratamiento}
+                title={!c.tratamiento ? "Clasificá primero el tratamiento de IVA" : undefined}
+                className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50"
+                style={{
+                  backgroundColor: activo ? "var(--brand-muted)" : "transparent",
+                  color: activo ? "var(--brand)" : "var(--text-muted)",
+                  border: `1px dashed ${activo ? "var(--brand)" : "var(--border-soft)"}`,
+                }}>
+                {guardando === "iva_descontable" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                {IVA_DESCONTABLE_LABEL[valor]}
+              </button>
+            );
+          })}
+          {c.iva_descontable && (
+            <button type="button" onClick={() => confirmarIvaDescontable(null)}
+              disabled={guardando !== null || !c.tratamiento}
+              className="text-[11px] underline decoration-dotted" style={{ color: "var(--text-muted)" }}>
+              volver a pendiente
+            </button>
+          )}
+          {c.iva_descontable && !c.iva_descontable_confirmado && (
+            <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>(sugerido, sin confirmar)</span>
+          )}
+        </div>
+      )}
+
       <label className="mt-2.5 flex items-center gap-1.5 text-xs" style={{ color: "var(--text-muted)" }}>
         <input type="checkbox" checked={soloEsteProveedor} onChange={(e) => setSoloEsteProveedor(e.target.checked)} />
         Solo para este proveedor (si lo destildás, se propone como regla general del concepto para toda la firma)
@@ -232,7 +294,9 @@ function ProveedorCard({
         <div className="flex shrink-0 items-center gap-3">
           <div className="text-right">
             <p className="text-sm font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>{fmt(p.base_total)}</p>
-            <p className="text-xs" style={{ color: "var(--text-muted)" }}>a tarifa 0%</p>
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+              {origen === "compras" ? "todas las tarifas" : "a tarifa 0%"}
+            </p>
           </div>
           {p.pendientes > 0 ? (
             <Badge variant="warning">{p.pendientes} pendiente{p.pendientes === 1 ? "" : "s"}</Badge>
@@ -337,9 +401,14 @@ export default function Formulario300Page() {
   const presetActivo = presets.find((p) => p.desde === desde && p.hasta === hasta)?.id ?? "personalizado";
 
   const { data: empresas } = useQuery({ queryKey: ["admin-empresas"], queryFn: api.adminEmpresas });
+  // Compras trae todas las tarifas: la Fase 2 (IVA descontable) aplica sobre
+  // todo a lo gravado (5%/19%), que el filtro de tarifa 0% de siempre nunca
+  // mostraba. Ventas sigue solo en 0%, que es donde de verdad hay ambigüedad
+  // (exento vs. excluido) — un ítem gravado de venta no necesita revisión.
+  const todasTarifas = origen === "compras";
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["f300-proveedores", desde, hasta, empresaId, origen],
-    queryFn: () => api.f300Proveedores(desde, hasta, empresaId, 0, origen),
+    queryFn: () => api.f300Proveedores(desde, hasta, empresaId, 0, origen, todasTarifas),
     enabled: empresaId != null,
   });
 
@@ -369,7 +438,7 @@ export default function Formulario300Page() {
         <div>
           <h1 className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>Formulario 300</h1>
           <p className="mt-0.5 text-sm" style={{ color: "var(--text-secondary)" }}>
-            Clasifica las operaciones a tarifa 0% por proveedor: exento, excluido, no gravado o gravado.
+            Clasifica las operaciones por proveedor —exento, excluido, no gravado o gravado— y, en compras, si el IVA es descontable.
           </p>
         </div>
       </div>
@@ -436,7 +505,7 @@ export default function Formulario300Page() {
         <div className="rounded-xl border px-4 py-16 text-center" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
           <Check className="mx-auto mb-3 h-8 w-8" style={{ color: "var(--text-muted)" }} />
           <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-            Sin operaciones de {origen} a tarifa 0% en este periodo
+            Sin operaciones de {origen} en este periodo
           </p>
           <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
             Si esperabas ver algo, confirmá que ya trajiste la información de la DIAN en Analítica para este periodo.

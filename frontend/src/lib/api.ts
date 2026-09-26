@@ -147,7 +147,7 @@ export const api = {
 
   f300Proveedores: (
     desde?: string, hasta?: string, empresaId?: number | null, tarifa: number = 0,
-    origen: import("@/lib/types").OrigenF300 = "compras",
+    origen: import("@/lib/types").OrigenF300 = "compras", todasTarifas: boolean = false,
   ) => {
     const qs = new URLSearchParams();
     if (desde) qs.set("desde", desde);
@@ -155,17 +155,20 @@ export const api = {
     if (empresaId != null) qs.set("empresa_id", String(empresaId));
     qs.set("tarifa", String(tarifa));
     qs.set("origen", origen);
+    qs.set("todas_tarifas", String(todasTarifas));
     return req<import("@/lib/types").ResumenF300>(`/formulario-300/proveedores?${qs.toString()}`);
   },
   f300Clasificar: (body: {
     empresa_id: number; concepto: string; tratamiento: string;
     nit_tercero?: string | null; referencia?: string | null;
     tipo_item?: import("@/lib/types").TipoItem | null;
+    iva_descontable?: import("@/lib/types").IvaDescontable | null;
     articulo_et?: string | null; norma?: string | null;
   }) =>
-    req<{ id: number; tratamiento: string; estado: string; es_excepcion: boolean; tipo_item: string | null }>(
-      "/formulario-300/clasificar", { method: "POST", body: JSON.stringify(body) }
-    ),
+    req<{
+      id: number; tratamiento: string; estado: string; es_excepcion: boolean;
+      tipo_item: string | null; iva_descontable: string | null;
+    }>("/formulario-300/clasificar", { method: "POST", body: JSON.stringify(body) }),
   adminDashboard: (desde?: string, hasta?: string) => {
     const qs = new URLSearchParams();
     if (desde) qs.set("desde", desde);

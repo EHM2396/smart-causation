@@ -79,6 +79,7 @@ def resumen_por_proveedor(
     desde: date,
     hasta: date,
     tarifa: float = 0.0,
+    todas_tarifas: bool = False,
     origen: str = "compras",
     cuenta_id: int | None = None,
 ) -> list[ProveedorResumen]:
@@ -88,6 +89,13 @@ def resumen_por_proveedor(
     `origen` separa Ventas de Compras — son dos flujos de clasificación
     distintos (en ventas exento y excluido nunca se agrupan; en compras sí,
     en la presentación principal) y nunca se mezclan en una misma pantalla.
+
+    `todas_tarifas` ignora el filtro de `tarifa` y trae conceptos de
+    cualquier tarifa. Hace falta para la Fase 2 (IVA descontable): esa
+    clasificación aplica sobre todo a los ítems GRAVADOS (5%/19%), que el
+    filtro de tarifa=0% de siempre nunca mostraba — la pantalla de
+    clasificación de tratamiento (exento/excluido/no gravado) seguía
+    necesitando solo el 0%, así que ese filtro se mantiene por defecto.
 
     Se usa la fecha de EMISIÓN de cada documento para resolver el tratamiento
     vigente en ese momento — no la de hoy. Un documento de marzo se clasifica
@@ -130,8 +138,10 @@ def resumen_por_proveedor(
                 pct = float(pct) if pct is not None else None
             except (TypeError, ValueError):
                 pct = None
-            if pct is None or round(pct, 2) != round(tarifa, 2):
+            if not todas_tarifas and (pct is None or round(pct, 2) != round(tarifa, 2)):
                 continue
+            if todas_tarifas and pct is None:
+                continue  # sin tarifa conocida no se puede clasificar razonablemente
 
             concepto = str(it.get("descripcion") or "").strip()
             if not concepto:
@@ -146,7 +156,7 @@ def resumen_por_proveedor(
             acc = acumulado.setdefault(clave, {
                 "concepto": concepto, "concepto_norm": norm, "nit": nit,
                 "razon_social": doc.razon_social or "", "base": 0.0, "documentos": 0,
-                "fecha_referencia": fecha_doc, "referencia": referencia,
+                "fecha_referencia": fecha_doc, "referencia": referencia, "pct": pct,
             })
             acc["base"] += base
             acc["documentos"] += 1
@@ -170,7 +180,8 @@ def resumen_por_proveedor(
         clas = clasificar(
             db, empresa_id=empresa_ids[0] if len(empresa_ids) == 1 else _empresa_de(db, empresa_ids, nit),
             concepto=acc["concepto"], fecha=acc["fecha_referencia"],
-            nit_tercero=nit, referencia=acc.get("referencia"), cuenta_id=cuenta_id,
+            nit_tercero=nit, referencia=acc.get("referencia"), pct=acc.get("pct"),
+            cuenta_id=cuenta_id,
         )
         cr = ConceptoResumen(
             concepto=acc["concepto"], concepto_norm=acc["concepto_norm"], nit_proveedor=nit,
@@ -225,13 +236,21 @@ def validar_clasificacion(
     nit_tercero: str | None = None,
     referencia: str | None = None,
     tipo_item: str | None = None,
+    iva_descontable: str | None = None,
     articulo_et: str | None = None,
     norma: str | None = None,
 ) -> ClasificacionEmpresa:
     """El contador confirma (o corrige) el tratamiento de un concepto para esta
-    empresa, y de paso puede confirmar si es bien o servicio (`tipo_item`,
-    opcional — son dos ejes independientes, pero se guardan en la misma fila
-    porque se clasifican al mismo nivel: proveedor + referencia + concepto).
+    empresa, y de paso puede confirmar si es bien o servicio (`tipo_item`) o
+    si el IVA facturado cuenta como descontable (`iva_descontable`) —
+    opcionales, son ejes independientes, pero se guardan en la misma fila
+    porque se clasifican al mismo nivel: proveedor + referencia + concepto.
+
+    `iva_descontable` NUNCA se propaga al catálogo de la firma, ni siquiera
+    sin `nit_tercero`: a diferencia del tratamiento de IVA (una regla
+    normativa, válida para cualquier empresa que compre lo mismo), si un IVA
+    es descontable depende de la situación propia de CADA empresa — no es
+    algo que otra empresa de la cuenta deba heredar como sugerencia.
 
     Si la validación NO está atada a un proveedor puntual (`nit_tercero=None`),
     también enriquece el catálogo de la firma: es una regla general del
@@ -255,7 +274,7 @@ def validar_clasificacion(
     fila = ClasificacionEmpresa(
         empresa_id=empresa.id, nit_tercero=nit_tercero, referencia=ref,
         concepto_norm=norm, concepto=concepto, tratamiento=tratamiento,
-        tipo_item=tipo_item,
+        tipo_item=tipo_item, iva_descontable=iva_descontable,
         origen="manual", estado="validada",
         catalogo_id=sugerencia.id if sugerencia else None,
         es_excepcion=es_excepcion,
