@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from db.models.auth import Empresa, Usuario
 from db.models.contabilidad import DocumentoDian
+from services.analitica_service import SIGNO
 from services.catalogo_tributario_service import (
     Clasificacion, buscar_en_catalogo, clasificar, normalizar_concepto,
     registrar_cambio, nueva_version,
@@ -222,6 +223,127 @@ def _empresa_de(db: Session, empresa_ids: list[int], nit: str) -> int:
         .limit(1)
     )
     return fila or empresa_ids[0]
+
+
+# ── Balance de IVA (Fase 3) ──────────────────────────────────────────────────
+
+def _balance_vacio() -> dict:
+    return {
+        "iva_generado": 0.0, "iva_facturado_compras": 0.0, "iva_descontable": 0.0,
+        "balance_analitico_iva": 0.0, "documentos_ventas": 0, "documentos_compras": 0,
+    }
+
+
+def balance_iva(
+    db: Session, *, empresa_ids: list[int], desde: date, hasta: date, cuenta_id: int | None = None,
+) -> dict:
+    """IVA generado (ventas) contra IVA descontable (compras), para el periodo.
+
+    Se llama "BALANCE ANALÍTICO DE IVA" a propósito, en todo el sistema —
+    nunca "saldo a pagar" ni "saldo a favor": el resultado fiscal definitivo
+    del Formulario 300 depende de otros conceptos de la liquidación que este
+    número no cubre (ver Fase 5 y 6 del plan: AIU, importaciones, zonas
+    francas, reconciliación con las casillas del formulario).
+
+    El IVA generado se toma tal cual viene facturado (no hay nada que
+    clasificar en una venta). El IVA descontable, en cambio, usa la MISMA
+    clasificación de la pantalla de compras (Fase 2): solo cuenta el IVA de
+    los conceptos que están —confirmados o sugeridos— como "descontable". Un
+    concepto sin clasificar todavía no suma acá, tal como pide Andrés: no
+    asumir automáticamente que todo IVA de una compra es descontable.
+    """
+    if not empresa_ids:
+        return _balance_vacio()
+
+    docs = db.execute(
+        select(DocumentoDian).where(
+            DocumentoDian.empresa_id.in_(empresa_ids),
+            DocumentoDian.tipo.in_(TIPOS_VENTAS + TIPOS_COMPRAS),
+            DocumentoDian.fecha_emision >= desde,
+            DocumentoDian.fecha_emision <= hasta,
+        )
+    ).scalars().all()
+
+    iva_generado = 0.0
+    documentos_ventas = documentos_compras = 0
+
+    # Los ítems de compra se agrupan por (nit, concepto) para resolver la
+    # clasificación UNA vez por concepto — el mismo concepto puede repetirse
+    # en decenas de documentos, y no hace falta preguntarle al mismo tratamiento
+    # una vez por cada línea.
+    acumulado_compras: dict[tuple[str, str], dict] = {}
+
+    for doc in docs:
+        if not doc.items_json:
+            continue
+        try:
+            items = json.loads(doc.items_json)
+        except ValueError:
+            continue
+
+        signo = SIGNO.get(doc.tipo, 1)
+
+        if doc.tipo in TIPOS_VENTAS:
+            documentos_ventas += 1
+            for it in items:
+                iva_generado += signo * float(it.get("valor_impuesto") or 0)
+            continue
+
+        documentos_compras += 1
+        nit = (doc.nit_contraparte or "").strip()
+        if not nit:
+            continue
+        fecha_doc = doc.fecha_emision or hasta
+
+        for it in items:
+            concepto = str(it.get("descripcion") or "").strip()
+            if not concepto:
+                continue
+            norm = normalizar_concepto(concepto)
+            if not norm:
+                continue
+
+            pct = it.get("porcentaje")
+            try:
+                pct = float(pct) if pct is not None else None
+            except (TypeError, ValueError):
+                pct = None
+            referencia = str(it.get("referencia") or "").strip() or None
+
+            clave = (nit, norm)
+            acc = acumulado_compras.setdefault(clave, {
+                "concepto": concepto, "nit": nit, "fecha_referencia": fecha_doc,
+                "referencia": referencia, "pct": pct, "iva": 0.0,
+            })
+            acc["iva"] += signo * float(it.get("valor_impuesto") or 0)
+            if fecha_doc < acc["fecha_referencia"]:
+                acc["fecha_referencia"] = fecha_doc
+            if not acc.get("referencia") and referencia:
+                acc["referencia"] = referencia
+            if acc.get("pct") is None:
+                acc["pct"] = pct
+
+    iva_facturado_compras = sum(acc["iva"] for acc in acumulado_compras.values())
+
+    iva_descontable = 0.0
+    for (nit, _norm), acc in acumulado_compras.items():
+        clas = clasificar(
+            db, empresa_id=empresa_ids[0] if len(empresa_ids) == 1 else _empresa_de(db, empresa_ids, nit),
+            concepto=acc["concepto"], fecha=acc["fecha_referencia"],
+            nit_tercero=nit, referencia=acc.get("referencia"), pct=acc.get("pct"),
+            cuenta_id=cuenta_id,
+        )
+        if clas.iva_descontable == "descontable":
+            iva_descontable += acc["iva"]
+
+    return {
+        "iva_generado": round(iva_generado, 2),
+        "iva_facturado_compras": round(iva_facturado_compras, 2),
+        "iva_descontable": round(iva_descontable, 2),
+        "balance_analitico_iva": round(iva_generado - iva_descontable, 2),
+        "documentos_ventas": documentos_ventas,
+        "documentos_compras": documentos_compras,
+    }
 
 
 # ── Validar una clasificación ────────────────────────────────────────────────

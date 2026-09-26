@@ -30,7 +30,7 @@ from db.models.auth import Empresa, Usuario
 from db.session import get_db, SessionLocal
 from services import (
     analitica_service, causacion_service, dian_service, documentos_dian_service,
-    informe_analitica_service, informe_pdf_service,
+    formulario_300_service, informe_analitica_service, informe_pdf_service,
 )
 from services.dian_service import DianError
 
@@ -120,6 +120,32 @@ def resumen(
         } if sinc else None,
         **datos,
     }
+
+
+@router.get("/balance-iva")
+def balance_iva(
+    db: DB,
+    current_user: CurrentUser,
+    desde: str | None = None,
+    hasta: str | None = None,
+    empresa_id: int | None = None,
+):
+    """IVA generado, IVA descontable y el balance del periodo (Fase 3 del
+    módulo de IVA). Abierto a cualquier rol, igual que /resumen — la
+    clasificación tributaria en sí (Formulario 300) sigue siendo solo del
+    administrador; esto es de solo lectura."""
+    d, h = _parse_rango(desde, hasta)
+    visibles = analitica_service.empresas_visibles(db, current_user, current_user.cuenta_id)
+
+    if empresa_id is not None:
+        if empresa_id not in visibles:
+            raise HTTPException(status_code=404, detail="Empresa no encontrada")
+        visibles = [empresa_id]
+
+    datos = formulario_300_service.balance_iva(
+        db, empresa_ids=visibles, desde=d, hasta=h, cuenta_id=current_user.cuenta_id,
+    )
+    return {"periodo": {"desde": d.isoformat(), "hasta": h.isoformat()}, **datos}
 
 
 @router.get("/informe.xlsx")

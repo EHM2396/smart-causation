@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from services.formulario_300_service import (
-    TIPOS_COMPRAS, TIPOS_VENTAS, ConceptoResumen, ProveedorResumen,
+    TIPOS_COMPRAS, TIPOS_VENTAS, ConceptoResumen, ProveedorResumen, _balance_vacio,
 )
 from services.catalogo_tributario_service import PENDIENTE, Clasificacion
 from services.analitica_service import ORDEN as TIPOS_DOCUMENTO_DIAN
@@ -137,3 +137,30 @@ def test_concepto_conserva_la_referencia_del_producto():
         base_acumulada=1000, documentos=1, clasificacion=PENDIENTE, referencia="ABC123",
     )
     assert c.referencia == "ABC123"
+
+
+# ─── Balance de IVA (Fase 3) ──────────────────────────────────────────────────
+#
+# Andrés fue explícito, dos veces: el resultado NUNCA se llama "saldo a
+# pagar" ni "saldo a favor" — el Formulario 300 depende de otros conceptos de
+# la liquidación que este número no cubre. Se llama únicamente "BALANCE
+# ANALÍTICO DE IVA".
+
+def test_sin_empresas_el_balance_queda_vacio_no_inventa():
+    v = _balance_vacio()
+    assert v["iva_generado"] == 0.0
+    assert v["iva_facturado_compras"] == 0.0
+    assert v["iva_descontable"] == 0.0
+    assert v["balance_analitico_iva"] == 0.0
+    assert v["documentos_ventas"] == 0
+    assert v["documentos_compras"] == 0
+
+
+def test_el_campo_del_balance_se_llama_balance_analitico_iva():
+    """Guarda de regresión: el campo que devuelve balance_iva() tiene que
+    seguir llamándose así — nunca "saldo_a_pagar" ni "saldo_a_favor", que es
+    justo el nombre que Andrés pidió no usar (el Formulario 300 depende de
+    otros conceptos de la liquidación que este número no cubre)."""
+    v = _balance_vacio()
+    assert "balance_analitico_iva" in v
+    assert not any("saldo" in clave for clave in v)

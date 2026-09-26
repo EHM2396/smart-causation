@@ -551,6 +551,20 @@ export interface AnaliticaResumen {
   por_tercero: AnaliticaTercero[];
 }
 
+// Fase 3 del módulo de IVA: IVA generado vs. IVA descontable, para el
+// periodo. Se llama "balance_analitico_iva" a propósito — nunca "saldo a
+// pagar" ni "saldo a favor": el resultado fiscal definitivo del Formulario
+// 300 depende de otros conceptos de la liquidación que este número no cubre.
+export interface BalanceIVA {
+  periodo: { desde: string; hasta: string };
+  iva_generado: number;
+  iva_facturado_compras: number;
+  iva_descontable: number;
+  balance_analitico_iva: number;
+  documentos_ventas: number;
+  documentos_compras: number;
+}
+
 export interface AnaliticaEmpresaOpcion {
   id: number;
   nombre: string;

@@ -19,7 +19,8 @@ import {
 } from "recharts";
 import {
   ArrowDownRight, ArrowUpRight, Building2, CalendarCheck, CalendarDays, DownloadCloud,
-  FileSpreadsheet, FileStack, FileText, Info, KeyRound, Loader2, Scale, Share2, TriangleAlert,
+  FileSpreadsheet, FileStack, FileText, Info, KeyRound, Loader2, Percent, Receipt,
+  Scale, Share2, TriangleAlert,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -173,6 +174,16 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
     // Mientras se trae de la DIAN NO se consulta: los documentos se van
     // guardando de a uno, y refrescar en medio mostraría cifras a medio armar
     // que parecen definitivas. Se vuelve a consultar cuando termina.
+    enabled: !faltaElegir && !trayendo,
+    refetchOnWindowFocus: !trayendo,
+  });
+
+  // Fase 3 del módulo de IVA: se recalcula solo con el mismo periodo/empresa
+  // de arriba — no hay botón aparte, es justo lo que Andrés pidió ("después
+  // de seleccionar el período, recalcular automáticamente").
+  const { data: balance, isLoading: cargandoBalance } = useQuery({
+    queryKey: ["analitica-balance-iva", desde, hasta, empresaId],
+    queryFn: () => api.analiticaBalanceIva(desde, hasta, empresaId),
     enabled: !faltaElegir && !trayendo,
     refetchOnWindowFocus: !trayendo,
   });
@@ -490,6 +501,38 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
               nota={margen !== null ? `Margen ${margen.toFixed(1)}% sobre ingresos` : "Sin ingresos en el periodo"} />
             <Kpi icon={FileStack} label="Documentos" value={String(k?.documentos ?? 0)} accent="#7c3aed"
               nota={data?.alcance === "cuenta" ? `${data.empresas} empresas` : "Empresa seleccionada"} />
+          </div>
+
+          {/* ── Balance de IVA (Fase 3) ──────────────────────────────────
+              Nunca "saldo a pagar" ni "saldo a favor" — el Formulario 300
+              depende de otros conceptos de la liquidación que este número
+              no cubre. Se recalcula solo con el mismo periodo de arriba. */}
+          <div className="mb-4 overflow-hidden rounded-xl border" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)", boxShadow: "var(--shadow-card)" }}>
+            <div className="border-b px-4 py-3" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
+              <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Analítica de IVA</span>
+              <span className="ml-2 text-xs" style={{ color: "var(--text-muted)" }}>· generado contra descontable del periodo</span>
+            </div>
+            <div className="p-4">
+              {cargandoBalance ? (
+                <div className="py-6 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin" style={{ color: "var(--brand)" }} /></div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <Kpi icon={ArrowUpRight} label="IVA generado" value={fmt(balance?.iva_generado ?? 0)} accent={COLOR_INGRESOS}
+                    nota={`${balance?.documentos_ventas ?? 0} documento(s) de venta`} />
+                  <Kpi icon={Percent} label="IVA descontable" value={fmt(balance?.iva_descontable ?? 0)} accent="#3b82f6"
+                    nota={`de ${fmt(balance?.iva_facturado_compras ?? 0)} facturado en compras`} />
+                  <Kpi icon={Scale} label="Balance analítico de IVA" value={fmt(balance?.balance_analitico_iva ?? 0)} accent={COLOR_RESULTADO}
+                    nota={`${balance?.documentos_compras ?? 0} documento(s) de compra`} />
+                </div>
+              )}
+              <p className="mt-3 flex items-start gap-1.5 text-xs leading-relaxed" style={{ color: "var(--text-muted)" }}>
+                <Receipt className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                IVA generado − IVA descontable = Balance analítico de IVA. No es el saldo fiscal
+                final del Formulario 300 — ese depende de otros conceptos de la liquidación. El IVA
+                descontable solo cuenta lo ya clasificado (o sugerido) como tal en Formulario 300 ·
+                Compras; lo que sigue pendiente de confirmar no suma acá.
+              </p>
+            </div>
           </div>
 
           {/* ── Evolución + composición ───────────────────────────────── */}

@@ -193,6 +193,14 @@ export const api = {
   },
   analiticaEmpresas: () =>
     req<import("@/lib/types").AnaliticaEmpresaOpcion[]>("/analitica/empresas"),
+  analiticaBalanceIva: (desde?: string, hasta?: string, empresaId?: number | null) => {
+    const qs = new URLSearchParams();
+    if (desde) qs.set("desde", desde);
+    if (hasta) qs.set("hasta", hasta);
+    if (empresaId != null) qs.set("empresa_id", String(empresaId));
+    const q = qs.toString();
+    return req<import("@/lib/types").BalanceIVA>(`/analitica/balance-iva${q ? `?${q}` : ""}`);
+  },
 
   analiticaInformeXlsx: (desde?: string, hasta?: string, empresaId?: number | null) => {
     const qs = new URLSearchParams();

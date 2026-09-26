@@ -47,8 +47,13 @@ export interface PeriodoPreset {
 
 /**
  * Los periodos de la pantalla de Analítica y de Formulario 300: "Este mes"
- * (en curso) y los dos periodos REALES de declaración de IVA (Art. 600 ET),
- * pero del último que ya CERRÓ, no del que está corriendo.
+ * (en curso), los dos periodos REALES de declaración de IVA (Art. 600 ET) —
+ * bimestre y cuatrimestre, del último que ya CERRÓ, no del que está
+ * corriendo— y tres periodos de conveniencia para analizar (Trimestre,
+ * Semestre, Año) que NO son periodos legales de declaración en Colombia (el
+ * IVA solo se declara bimestral o cuatrimestral), así que van EN CURSO, igual
+ * que "Este mes": no hay nada que "cerrar" en ellos, son solo un rango más
+ * cómodo para mirar hacia atrás.
  *
  * Antes mostraban el bimestre/cuatrimestre EN CURSO, y en cualquier mes que
  * fuera el primero de ambos periodos a la vez (enero, mayo, septiembre) los
@@ -64,6 +69,8 @@ export function periodosIVA(): PeriodoPreset[] {
 
   const inicioBimestreActual = Math.floor(m / 2) * 2;
   const inicioCuatrimestreActual = Math.floor(m / 4) * 4;
+  const inicioTrimestreActual = Math.floor(m / 3) * 3;
+  const inicioSemestreActual = Math.floor(m / 6) * 6;
 
   // `new Date(y, mes, 0)` es el último día del mes ANTERIOR a `mes` — así se
   // consigue el cierre del periodo previo sin tener que manejar a mano el
@@ -82,5 +89,8 @@ export function periodosIVA(): PeriodoPreset[] {
     { id: "mes", label: "Este mes", desde: localYMD(new Date(y, m, 1)), hasta: localYMD(now) },
     { id: "bimestre", label: "Último bimestre", desde: localYMD(inicioBimestreAnterior), hasta: localYMD(finBimestreAnterior) },
     { id: "cuatrimestre", label: "Último cuatrimestre", desde: localYMD(inicioCuatrimestreAnterior), hasta: localYMD(finCuatrimestreAnterior) },
+    { id: "trimestre", label: "Este trimestre", desde: localYMD(new Date(y, inicioTrimestreActual, 1)), hasta: localYMD(now) },
+    { id: "semestre", label: "Este semestre", desde: localYMD(new Date(y, inicioSemestreActual, 1)), hasta: localYMD(now) },
+    { id: "anio", label: "Este año", desde: localYMD(new Date(y, 0, 1)), hasta: localYMD(now) },
   ];
 }
