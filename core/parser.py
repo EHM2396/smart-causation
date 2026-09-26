@@ -155,6 +155,11 @@ def _extraer_party_xml(party) -> dict:
     legal = party.find("cac:PartyLegalEntity", _NS)
     if legal is not None:
         d["razon_social"] = _xml_text(legal.find("cbc:RegistrationName", _NS))
+    if not d["razon_social"] and tax_scheme is not None:
+        # Caso real de producción: el cliente de una nota crédito de venta no
+        # siempre trae PartyLegalEntity, y el nombre —persona jurídica o
+        # natural, completo, no repartido en nombre/apellido— queda solo acá.
+        d["razon_social"] = _xml_text(tax_scheme.find("cbc:RegistrationName", _NS))
     pname = party.find("cac:PartyName", _NS)
     if pname is not None:
         candidate = _xml_text(pname.find("cbc:Name", _NS))
@@ -974,6 +979,12 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
         legal = supplier.find("cac:PartyLegalEntity", _NS)
         if legal is not None:
             razon_social = _xml_text(legal.find("cbc:RegistrationName", _NS))
+        if not razon_social and tax_scheme is not None:
+            # Caso real de producción: varias notas crédito de venta no traen
+            # PartyLegalEntity para el tercero, y el nombre —persona jurídica
+            # o natural, completo— queda solo acá. Sin este respaldo el
+            # tercero quedaba sin nombre aunque el XML sí lo traía.
+            razon_social = _xml_text(tax_scheme.find("cbc:RegistrationName", _NS))
         # Nombre comercial (PartyName puede ser diferente de RegistrationName)
         pname = supplier.find("cac:PartyName", _NS)
         if pname is not None:

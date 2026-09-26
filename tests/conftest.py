@@ -83,6 +83,24 @@ def linea_xml(
     return f"<cac:{tag}>{''.join(partes)}</cac:{tag}>"
 
 
+def _party_xml(nit: str, solo_en_tax_scheme: str | None, nombre_legal: str) -> str:
+    """Bloque de un tercero (emisor o receptor) de factura_xml().
+
+    Normalmente trae PartyLegalEntity con la razón social. Pero hay XML
+    reales (varias notas crédito de venta en producción) que NO lo traen, y
+    el nombre queda solo dentro de PartyTaxScheme/RegistrationName —
+    `solo_en_tax_scheme` arma ese caso para poder probar el respaldo."""
+    if solo_en_tax_scheme:
+        return (
+            f'<cac:PartyTaxScheme><cbc:CompanyID schemeID="31">{nit}</cbc:CompanyID>'
+            f"<cbc:RegistrationName>{solo_en_tax_scheme}</cbc:RegistrationName></cac:PartyTaxScheme>"
+        )
+    return (
+        f'<cac:PartyTaxScheme><cbc:CompanyID schemeID="31">{nit}</cbc:CompanyID></cac:PartyTaxScheme>'
+        f"<cac:PartyLegalEntity><cbc:RegistrationName>{nombre_legal}</cbc:RegistrationName></cac:PartyLegalEntity>"
+    )
+
+
 def factura_xml(
     lineas: list[str],
     *,
@@ -94,6 +112,13 @@ def factura_xml(
     customization: str | None = None,
     descuento_global: float = 0.0,
     recargo_global: float = 0.0,
+    # Caso real de producción: varias notas crédito de venta NO traen
+    # PartyLegalEntity para el tercero, y el nombre queda solo dentro de
+    # PartyTaxScheme/RegistrationName. `None` (default) mantiene el
+    # PartyLegalEntity de siempre; con un texto, se arma ese tercero SIN
+    # PartyLegalEntity y con el nombre ahí, para probar ese respaldo.
+    emisor_solo_en_tax_scheme: str | None = None,
+    receptor_solo_en_tax_scheme: str | None = None,
 ) -> bytes:
     """Arma un XML UBL de la DIAN con la forma que usa el parser."""
     raiz = "CreditNote" if nota_credito else "Invoice"
@@ -120,12 +145,10 @@ def factura_xml(
   <cbc:IssueDate>2026-09-15</cbc:IssueDate>
   {cust}{tipo_nota}
   <cac:AccountingSupplierParty><cac:Party>
-    <cac:PartyTaxScheme><cbc:CompanyID schemeID="31">{nit_emisor}</cbc:CompanyID></cac:PartyTaxScheme>
-    <cac:PartyLegalEntity><cbc:RegistrationName>Proveedor de Prueba SAS</cbc:RegistrationName></cac:PartyLegalEntity>
+    {_party_xml(nit_emisor, emisor_solo_en_tax_scheme, "Proveedor de Prueba SAS")}
   </cac:Party></cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty><cac:Party>
-    <cac:PartyTaxScheme><cbc:CompanyID schemeID="31">{nit_receptor}</cbc:CompanyID></cac:PartyTaxScheme>
-    <cac:PartyLegalEntity><cbc:RegistrationName>Cliente de Prueba SAS</cbc:RegistrationName></cac:PartyLegalEntity>
+    {_party_xml(nit_receptor, receptor_solo_en_tax_scheme, "Cliente de Prueba SAS")}
   </cac:Party></cac:AccountingCustomerParty>
   {cargos}
   <cac:LegalMonetaryTotal><cbc:PayableAmount currencyID="COP">{total}</cbc:PayableAmount></cac:LegalMonetaryTotal>
