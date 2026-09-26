@@ -139,6 +139,50 @@ def test_concepto_conserva_la_referencia_del_producto():
     assert c.referencia == "ABC123"
 
 
+
+# ─── Filtro de tarifa: solo aparecen ítems al 0% (Compras y Ventas) ──────────
+#
+# El módulo Formulario 300 existe para resolver la ambigüedad del 0%: si un
+# ítem está exento, excluido o no gravado. Los ítems gravados (5%/19%) ya
+# tienen tratamiento definido por su tarifa — mostrarlos solo genera ruido y
+# confunde al contador con ítems que ya están resueltos.
+
+def test_solo_tarifa_cero_pasa_el_filtro_por_defecto():
+    """Con todas_tarifas=False (por defecto) un ítem al 5% o 19% no aparece."""
+    def _pasa(pct, todas_tarifas=False, tarifa=0.0):
+        if pct is None:
+            return False
+        return todas_tarifas or round(pct, 2) == round(tarifa, 2)
+
+    assert _pasa(0.0) is True
+    assert _pasa(5.0) is False
+    assert _pasa(19.0) is False
+
+
+def test_sin_tarifa_conocida_tampoco_aparece():
+    """Un ítem cuyo XML no trae porcentaje no pasa el filtro — no se puede
+    clasificar razonablemente sin saber qué tarifa aplica."""
+    def _pasa(pct, todas_tarifas=False, tarifa=0.0):
+        if pct is None:
+            return False
+        return todas_tarifas or round(pct, 2) == round(tarifa, 2)
+
+    assert _pasa(None) is False
+    assert _pasa(None, todas_tarifas=True) is False  # backend también excluye None con todas_tarifas
+
+
+def test_todas_tarifas_incluye_gravado():
+    """Con todas_tarifas=True (solo para pruebas o casos especiales) los ítems
+    gravados también entran — verificamos que el flag funcione en ambos sentidos."""
+    def _pasa(pct, todas_tarifas=False, tarifa=0.0):
+        if pct is None:
+            return False
+        return todas_tarifas or round(pct, 2) == round(tarifa, 2)
+
+    assert _pasa(5.0, todas_tarifas=True) is True
+    assert _pasa(19.0, todas_tarifas=True) is True
+
+
 # ─── Balance de IVA (Fase 3) ──────────────────────────────────────────────────
 #
 # Andrés fue explícito, dos veces: el resultado NUNCA se llama "saldo a

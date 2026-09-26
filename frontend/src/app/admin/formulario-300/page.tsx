@@ -19,13 +19,12 @@
  * proveedor": un mismo proveedor puede vender bienes y servicios con
  * tratamientos distintos.
  *
- * Fase 2: en Compras, además del tratamiento de IVA, se confirma si el IVA
- * facturado cuenta como descontable. Por eso Compras trae TODAS las tarifas
- * (no solo 0%): la clasificación de IVA descontable aplica sobre todo a lo
- * GRAVADO. La tarifa por sí sola ya resuelve el tratamiento de los ítems
- * gravados (5%/19%), así que ahí no hace falta que el contador intervenga —
- * solo en la duda real (0%: exento/excluido/no gravado) y en confirmar el
- * IVA descontable.
+ * Fase 2: en Compras se confirma también si el IVA facturado es descontable.
+ * El módulo sigue filtrando a tarifa 0%: los ítems gravados (5%/19%) ya
+ * tienen tratamiento definido por su tarifa y no necesitan revisión manual —
+ * el balance_iva() del backend los toma directamente usando la sugerencia
+ * automática (gravado → descontable). Aquí solo aparece lo ambiguo: los
+ * ítems al 0% que necesitan separarse en exento / excluido / no gravado.
  *
  * Solo para el administrador de la cuenta por ahora (lo exige el backend):
  * es donde se toman decisiones de clasificación que se comparten con toda la
@@ -294,9 +293,7 @@ function ProveedorCard({
         <div className="flex shrink-0 items-center gap-3">
           <div className="text-right">
             <p className="text-sm font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>{fmt(p.base_total)}</p>
-            <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-              {origen === "compras" ? "todas las tarifas" : "a tarifa 0%"}
-            </p>
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>a tarifa 0%</p>
           </div>
           {p.pendientes > 0 ? (
             <Badge variant="warning">{p.pendientes} pendiente{p.pendientes === 1 ? "" : "s"}</Badge>
@@ -401,11 +398,11 @@ export default function Formulario300Page() {
   const presetActivo = presets.find((p) => p.desde === desde && p.hasta === hasta)?.id ?? "personalizado";
 
   const { data: empresas } = useQuery({ queryKey: ["admin-empresas"], queryFn: api.adminEmpresas });
-  // Compras trae todas las tarifas: la Fase 2 (IVA descontable) aplica sobre
-  // todo a lo gravado (5%/19%), que el filtro de tarifa 0% de siempre nunca
-  // mostraba. Ventas sigue solo en 0%, que es donde de verdad hay ambigüedad
-  // (exento vs. excluido) — un ítem gravado de venta no necesita revisión.
-  const todasTarifas = origen === "compras";
+  // Ambos flujos (Compras y Ventas) filtran a tarifa 0%: son los únicos ítems
+  // que necesitan revisión manual (exento / excluido / no gravado). Los ítems
+  // gravados (5%/19%) ya tienen tratamiento definido por su tarifa; el balance
+  // de IVA los toma directamente con la sugerencia automática del backend.
+  const todasTarifas = false;
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["f300-proveedores", desde, hasta, empresaId, origen],
     queryFn: () => api.f300Proveedores(desde, hasta, empresaId, 0, origen, todasTarifas),
