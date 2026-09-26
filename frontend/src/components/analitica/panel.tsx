@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 
 import { api } from "@/lib/api";
-import { fmt, periodosAnalitica } from "@/lib/utils";
+import { fmt, periodosIVA } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -141,7 +141,7 @@ function SinDatos({ mensaje }: { mensaje: string }) {
 }
 
 export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" }) {
-  const presets = useMemo(periodosAnalitica, []);
+  const presets = useMemo(periodosIVA, []);
   const [desde, setDesde] = useState(presets[2].desde);
   const [hasta, setHasta] = useState(presets[2].hasta);
   const [empresaId, setEmpresaId] = useState<number | null>(null);

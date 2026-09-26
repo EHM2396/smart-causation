@@ -46,9 +46,12 @@ export interface PeriodoPreset {
 }
 
 /**
- * Los periodos de la pantalla de Formulario 300: "Este mes" (en curso) y los
- * dos periodos REALES de declaración de IVA (Art. 600 ET) — bimestre y
- * cuatrimestre, del último que ya CERRÓ, no del que está corriendo.
+ * Los periodos de Formulario 300 y de Analítica (incluida la Analítica de
+ * IVA): "Este mes" (en curso) y los dos periodos REALES de declaración de
+ * IVA (Art. 600 ET) — bimestre y cuatrimestre, del último que ya CERRÓ, no
+ * del que está corriendo. Nada de Trimestre/Semestre/Año: no se pidieron
+ * para ninguna de las dos pantallas — el rango personalizado (los DatePicker
+ * de al lado) ya cubre cualquier otro periodo que haga falta mirar.
  *
  * Antes mostraban el bimestre/cuatrimestre EN CURSO, y en cualquier mes que
  * fuera el primero de ambos periodos a la vez (enero, mayo, septiembre) los
@@ -59,48 +62,6 @@ export interface PeriodoPreset {
  * terminó, no el que todavía está corriendo.
  */
 export function periodosIVA(): PeriodoPreset[] {
-  const { y, m, now, inicioBimestreAnterior, finBimestreAnterior,
-          inicioCuatrimestreAnterior, finCuatrimestreAnterior } = _cierresDeclaracion();
-
-  return [
-    { id: "mes", label: "Este mes", desde: localYMD(new Date(y, m, 1)), hasta: localYMD(now) },
-    { id: "bimestre", label: "Último bimestre", desde: localYMD(inicioBimestreAnterior), hasta: localYMD(finBimestreAnterior) },
-    { id: "cuatrimestre", label: "Último cuatrimestre", desde: localYMD(inicioCuatrimestreAnterior), hasta: localYMD(finCuatrimestreAnterior) },
-  ];
-}
-
-/**
- * Los periodos de la pantalla de Analítica (incluida la Analítica de IVA):
- * los mismos tres de `periodosIVA()` más tres de conveniencia para analizar
- * —Trimestre, Semestre, Año— que NO son periodos legales de declaración en
- * Colombia (el IVA solo se declara bimestral o cuatrimestral), así que van EN
- * CURSO, igual que "Este mes": no hay nada que "cerrar" en ellos, son solo un
- * rango más cómodo para mirar hacia atrás.
- *
- * Aparte de `periodosIVA()` a propósito: Formulario 300 es la pantalla de
- * CLASIFICACIÓN y no necesita estos tres — agregarlos ahí solo sería ruido.
- */
-export function periodosAnalitica(): PeriodoPreset[] {
-  const { y, m, now, inicioBimestreAnterior, finBimestreAnterior,
-          inicioCuatrimestreAnterior, finCuatrimestreAnterior } = _cierresDeclaracion();
-
-  const inicioTrimestreActual = Math.floor(m / 3) * 3;
-  const inicioSemestreActual = Math.floor(m / 6) * 6;
-
-  return [
-    { id: "mes", label: "Este mes", desde: localYMD(new Date(y, m, 1)), hasta: localYMD(now) },
-    { id: "bimestre", label: "Último bimestre", desde: localYMD(inicioBimestreAnterior), hasta: localYMD(finBimestreAnterior) },
-    { id: "cuatrimestre", label: "Último cuatrimestre", desde: localYMD(inicioCuatrimestreAnterior), hasta: localYMD(finCuatrimestreAnterior) },
-    { id: "trimestre", label: "Este trimestre", desde: localYMD(new Date(y, inicioTrimestreActual, 1)), hasta: localYMD(now) },
-    { id: "semestre", label: "Este semestre", desde: localYMD(new Date(y, inicioSemestreActual, 1)), hasta: localYMD(now) },
-    { id: "anio", label: "Este año", desde: localYMD(new Date(y, 0, 1)), hasta: localYMD(now) },
-  ];
-}
-
-/** Los cierres de bimestre/cuatrimestre, compartidos por periodosIVA() y
- * periodosAnalitica() para no calcularlos dos veces con la posibilidad de
- * que se desincronicen. */
-function _cierresDeclaracion() {
   const now = new Date();
   const y = now.getFullYear(), m = now.getMonth();
 
@@ -120,5 +81,9 @@ function _cierresDeclaracion() {
     finCuatrimestreAnterior.getFullYear(), finCuatrimestreAnterior.getMonth() - 3, 1
   );
 
-  return { y, m, now, inicioBimestreAnterior, finBimestreAnterior, inicioCuatrimestreAnterior, finCuatrimestreAnterior };
+  return [
+    { id: "mes", label: "Este mes", desde: localYMD(new Date(y, m, 1)), hasta: localYMD(now) },
+    { id: "bimestre", label: "Último bimestre", desde: localYMD(inicioBimestreAnterior), hasta: localYMD(finBimestreAnterior) },
+    { id: "cuatrimestre", label: "Último cuatrimestre", desde: localYMD(inicioCuatrimestreAnterior), hasta: localYMD(finCuatrimestreAnterior) },
+  ];
 }
