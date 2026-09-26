@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 
 import { api } from "@/lib/api";
-import { fmt, periodosIVA } from "@/lib/utils";
+import { fmt, periodosAnalitica } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -141,7 +141,7 @@ function SinDatos({ mensaje }: { mensaje: string }) {
 }
 
 export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" }) {
-  const presets = useMemo(periodosIVA, []);
+  const presets = useMemo(periodosAnalitica, []);
   const [desde, setDesde] = useState(presets[2].desde);
   const [hasta, setHasta] = useState(presets[2].hasta);
   const [empresaId, setEmpresaId] = useState<number | null>(null);
@@ -261,6 +261,13 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
     ...t, montoNeto: t.monto * t.signo,
   }));
   const hayDatos = (k?.documentos ?? 0) > 0;
+
+  // El balance de IVA en gráfico, mismos colores que sus KPI.
+  const datosBalanceIva = [
+    { nombre: "IVA generado", valor: balance?.iva_generado ?? 0, color: COLOR_INGRESOS },
+    { nombre: "IVA descontable", valor: balance?.iva_descontable ?? 0, color: "#3b82f6" },
+    { nombre: "Balance analítico de IVA", valor: balance?.balance_analitico_iva ?? 0, color: COLOR_RESULTADO },
+  ];
 
   // Recharts entrega la fila original dentro de `payload`, y tipa el evento de
   // forma genérica; de ahí el acceso defensivo.
@@ -516,14 +523,31 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
               {cargandoBalance ? (
                 <div className="py-6 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin" style={{ color: "var(--brand)" }} /></div>
               ) : (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <Kpi icon={ArrowUpRight} label="IVA generado" value={fmt(balance?.iva_generado ?? 0)} accent={COLOR_INGRESOS}
-                    nota={`${balance?.documentos_ventas ?? 0} documento(s) de venta`} />
-                  <Kpi icon={Percent} label="IVA descontable" value={fmt(balance?.iva_descontable ?? 0)} accent="#3b82f6"
-                    nota={`de ${fmt(balance?.iva_facturado_compras ?? 0)} facturado en compras`} />
-                  <Kpi icon={Scale} label="Balance analítico de IVA" value={fmt(balance?.balance_analitico_iva ?? 0)} accent={COLOR_RESULTADO}
-                    nota={`${balance?.documentos_compras ?? 0} documento(s) de compra`} />
-                </div>
+                <>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <Kpi icon={ArrowUpRight} label="IVA generado" value={fmt(balance?.iva_generado ?? 0)} accent={COLOR_INGRESOS}
+                      nota={`${balance?.documentos_ventas ?? 0} documento(s) de venta`} />
+                    <Kpi icon={Percent} label="IVA descontable" value={fmt(balance?.iva_descontable ?? 0)} accent="#3b82f6"
+                      nota={`de ${fmt(balance?.iva_facturado_compras ?? 0)} facturado en compras`} />
+                    <Kpi icon={Scale} label="Balance analítico de IVA" value={fmt(balance?.balance_analitico_iva ?? 0)} accent={COLOR_RESULTADO}
+                      nota={`${balance?.documentos_compras ?? 0} documento(s) de compra`} />
+                  </div>
+
+                  {/* El mismo balance, en gráfico — no solo en número. */}
+                  <div className="mt-4" style={{ height: 180 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={datosBalanceIva} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border-soft)" horizontal={false} />
+                        <XAxis type="number" tickFormatter={fmtCorto} tick={{ fontSize: 11, fill: "var(--text-muted)" }} tickLine={false} axisLine={false} />
+                        <YAxis type="category" dataKey="nombre" width={150} tick={{ fontSize: 11, fill: "var(--text-muted)" }} tickLine={false} axisLine={false} />
+                        <Tooltip content={<TooltipCifras />} cursor={{ fill: "var(--bg-elevated)", opacity: 0.5 }} />
+                        <Bar dataKey="valor" name="Monto" radius={[0, 4, 4, 0]} maxBarSize={28}>
+                          {datosBalanceIva.map((d) => <Cell key={d.nombre} fill={d.color} />)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </>
               )}
               <p className="mt-3 flex items-start gap-1.5 text-xs leading-relaxed" style={{ color: "var(--text-muted)" }}>
                 <Receipt className="mt-0.5 h-3.5 w-3.5 shrink-0" />
