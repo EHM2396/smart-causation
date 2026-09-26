@@ -13,7 +13,7 @@ import pytest
 from db.models.contabilidad import FacturaCausada
 from services.analitica_service import ETIQUETA, NATURALEZA, ORDEN, SIGNO
 from services.causacion_service import base_gravable_de, columna_fecha
-from services.documentos_dian_service import clasificar
+from services.documentos_dian_service import clasificar, nombre_contraparte
 
 pytestmark = pytest.mark.analitica
 
@@ -131,6 +131,62 @@ def test_analitica_aplica_el_reemplazo_de_tercero_en_ventas():
         "analitica.py dejó de llamar a usar_cliente_como_tercero: "
         "las ventas volverían a guardarse con el NIT de la propia empresa"
     )
+
+
+def test_persona_natural_sin_razon_social_arma_el_nombre_con_person():
+    """Bug real de producción: en 'Terceros con mayor peso' varias barras
+    salían sin nombre ('—') a pesar de que la información descargada estaba
+    completa.
+
+    Cuando la contraparte es una persona natural, el XML no trae razón social
+    (PartyLegalEntity) sino nombre y apellido (cac:Person) — típico del
+    documento soporte, que se emite a personas no obligadas a facturar. El
+    parser ya guardaba esos campos aparte (nombres_tercero/apellidos_tercero),
+    pero nadie los usaba para completar el nombre a mostrar."""
+    factura = {
+        "nit": "1020304050", "razon_social": "",
+        "nombres_tercero": "Jose Alberto", "apellidos_tercero": "Alvarez Cortes",
+    }
+    assert nombre_contraparte(factura) == "Jose Alberto Alvarez Cortes"
+
+
+def test_con_razon_social_no_hace_falta_el_respaldo():
+    """El respaldo es solo eso — un respaldo. No debe pisar una razón social
+    que sí vino en el XML. Reproduce exactamente `guardar_documento`:
+    `factura.get("razon_social") or nombre_contraparte(factura)`."""
+    factura = {"razon_social": "PROVEEDOR S.A.S.", "nombres_tercero": "Otro", "apellidos_tercero": "Nombre"}
+    razon_social_guardada = factura.get("razon_social") or nombre_contraparte(factura)
+    assert razon_social_guardada == "PROVEEDOR S.A.S."
+
+
+def test_sin_ningun_nombre_el_respaldo_queda_vacio_no_inventa():
+    """Sin razón social ni persona, mejor un campo vacío (se ve como '—') que
+    un nombre inventado."""
+    assert nombre_contraparte({}) == ""
+    assert nombre_contraparte({"nombres_tercero": "  ", "apellidos_tercero": ""}) == ""
+
+
+def test_solo_nombre_o_solo_apellido_no_deja_espacio_suelto():
+    assert nombre_contraparte({"nombres_tercero": "Ana", "apellidos_tercero": ""}) == "Ana"
+    assert nombre_contraparte({"nombres_tercero": "", "apellidos_tercero": "Gómez"}) == "Gómez"
+
+
+def test_el_respaldo_tambien_aplica_a_ventas_con_cliente_natural():
+    """El mismo respaldo sirve para los dos lados: en una venta a un cliente
+    persona natural, usar_cliente_como_tercero ya intercambia estos mismos
+    campos (nombres_tercero/apellidos_tercero van entre los que se
+    sustituyen), así que guardar_documento los completa igual."""
+    from core.parser import usar_cliente_como_tercero
+
+    factura = {
+        "nit": "900123456", "razon_social": "MI EMPRESA S.A.S.",
+        "comprador_nit": "1098765432", "comprador_razon_social": "",
+        "comprador_nombres_tercero": "Laura", "comprador_apellidos_tercero": "Pérez",
+        "tipo_documento": "factura",
+    }
+    corregida = usar_cliente_como_tercero(dict(factura))
+    assert corregida["razon_social"] == ""
+    assert nombre_contraparte(corregida) == "Laura Pérez"
 
 
 def test_todo_lo_que_clasifica_tiene_signo_y_naturaleza():

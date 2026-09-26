@@ -51,6 +51,23 @@ def clasificar(factura: dict, origen: str) -> str:
     return "ventas" if es_venta else "compras"
 
 
+def nombre_contraparte(factura: dict) -> str:
+    """El nombre para mostrar de la contraparte, con el mismo respaldo para
+    persona natural en los dos lados (compra y venta).
+
+    Cuando la contraparte es una persona natural, el XML no trae razón social
+    (`cac:PartyLegalEntity/RegistrationName`) sino nombre y apellido
+    (`cac:Person`) — el parser los guarda aparte en `nombres_tercero` /
+    `apellidos_tercero`. Es el caso típico del documento soporte (se emite a
+    personas no obligadas a facturar) y también pasa en ventas a un cliente
+    natural. Sin este respaldo, esas filas quedaban con la razón social vacía
+    y quien las viera perdía de vista a qué proveedor o cliente correspondían.
+    """
+    nombres = (factura.get("nombres_tercero") or "").strip()
+    apellidos = (factura.get("apellidos_tercero") or "").strip()
+    return f"{nombres} {apellidos}".strip()
+
+
 def _fecha(valor: str | None) -> date | None:
     """La fecha del parser viene como DD/MM/YYYY."""
     if not valor:
@@ -108,7 +125,7 @@ def guardar_documento(
     doc.cufe = factura.get("cufe")
     doc.fecha_emision = _fecha(factura.get("fecha"))
     doc.nit_contraparte = factura.get("nit")
-    doc.razon_social = factura.get("razon_social")
+    doc.razon_social = factura.get("razon_social") or nombre_contraparte(factura)
     doc.total = factura.get("total") or 0.0
     doc.base_gravable = base_gravable_de(factura)
     doc.items_json = json.dumps(factura.get("items") or [], ensure_ascii=False, default=str)
