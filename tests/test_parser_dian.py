@@ -176,6 +176,43 @@ def test_sin_referencia_en_el_xml_queda_en_none():
     assert f["items"][0]["referencia"] is None
 
 
+def test_proveedor_sin_partylegalentity_usa_el_nombre_de_partytaxscheme():
+    """Bug real de producción: varias notas crédito de venta traían el
+    proveedor sin PartyLegalEntity y con el nombre solo dentro de
+    PartyTaxScheme/RegistrationName — el emisor quedaba sin razón social."""
+    xml = factura_xml(
+        [linea_xml("Producto", 100000, iva_pct=19, iva_valor=19000)], total=119000,
+        emisor_solo_en_tax_scheme="PROVEEDOR SOLO EN TAX SCHEME SAS",
+    )
+    f = _parsear_xml_dian(xml, "prueba.xml")
+    assert f["razon_social"] == "PROVEEDOR SOLO EN TAX SCHEME SAS"
+
+
+def test_cliente_sin_partylegalentity_usa_el_nombre_de_partytaxscheme():
+    """El mismo caso pero del lado del cliente, tal como aparece en una nota
+    crédito de venta real: sin este respaldo, usar_cliente_como_tercero deja
+    el tercero sin nombre aunque el XML sí lo trae."""
+    xml = factura_xml(
+        [linea_xml("Producto", 100000, iva_pct=19, iva_valor=19000)],
+        nota_credito=True, total=119000,
+        receptor_solo_en_tax_scheme="JUAN DIEGO CARDONA LOPEZ",
+    )
+    f = _parsear_xml_dian(xml, "prueba.xml")
+    assert f["comprador_razon_social"] == "JUAN DIEGO CARDONA LOPEZ"
+
+    from core.parser import usar_cliente_como_tercero
+    corregida = usar_cliente_como_tercero(f)
+    assert corregida["razon_social"] == "JUAN DIEGO CARDONA LOPEZ"
+
+
+def test_con_partylegalentity_no_hace_falta_el_respaldo_de_tax_scheme():
+    """El respaldo es solo eso — no debe pisar una razón social que ya vino
+    bien desde PartyLegalEntity (el caso normal, de siempre)."""
+    xml = factura_xml([linea_xml("Producto", 100000, iva_pct=19, iva_valor=19000)], total=119000)
+    f = _parsear_xml_dian(xml, "prueba.xml")
+    assert f["comprador_razon_social"] == "Cliente de Prueba SAS"
+
+
 def test_referencia_no_reemplaza_la_descripcion_cuando_ambas_existen():
     """La referencia es un dato aparte, no un respaldo de la descripción — eso
     solo pasa cuando el XML no trae Description en absoluto."""
