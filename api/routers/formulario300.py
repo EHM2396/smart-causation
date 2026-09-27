@@ -172,6 +172,27 @@ def reporte(
     return f300.reporte_resumen(db, empresa_ids=empresas, desde=d, hasta=h, cuenta_id=cuenta.id)
 
 
+@router.get("/tributos-adicionales")
+def tributos_adicionales(
+    db: DB, admin: OrgAdmin,
+    desde: str | None = None, hasta: str | None = None,
+    empresa_id: int | None = None,
+):
+    """Consolida los tributos distintos al IVA (INC, IBUA, ICUI, INPP, bolsas,
+    etc.) extraídos de los XML del periodo. Devuelve compras y ventas separadas,
+    agrupadas por código DIAN, con drilldown por proveedor."""
+    cuenta = _cuenta_de(db, admin)
+    d, h = _parse_rango(desde, hasta)
+    empresas = _empresas_de_cuenta(db, cuenta.id)
+    if empresa_id is not None:
+        if empresa_id not in empresas:
+            raise HTTPException(status_code=404, detail="Empresa no encontrada")
+        empresas = [empresa_id]
+    return f300.tributos_adicionales_resumen(
+        db, empresa_ids=empresas, desde=d, hasta=h, cuenta_id=cuenta.id
+    )
+
+
 @router.get("/reporte/excel")
 def reporte_excel(
     db: DB, admin: OrgAdmin,
@@ -305,33 +326,55 @@ def _generar_excel(datos: dict, nombre_empresa: str) -> io.BytesIO:
         fila += 2
 
     cats = f300.CATS_LABEL
+    ROJO = "FCE4EC"
 
     # --- VENTAS ---
     v = datos["ventas"]
+    dev_v = datos.get("devoluciones", {}).get("ventas", {})
     filas_v = [
         [cats[cat], v[cat]["base"], v[cat]["iva"]]
         for cat in f300._CATS_REPORTE
         if v[cat]["base"] != 0 or v[cat]["iva"] != 0
     ]
+    if dev_v.get("base", 0) > 0:
+        filas_v.append(["(−) Devoluciones en ventas", -dev_v["base"], -dev_v.get("iva", 0)])
     total_base_v = sum(v[cat]["base"] for cat in f300._CATS_REPORTE)
     total_iva_v = datos["totales"]["iva_generado"]
     _seccion("VENTAS E INGRESOS", ["Tratamiento", "Base gravable (COP)", "IVA generado (COP)"],
-             filas_v, ["TOTAL", total_base_v, total_iva_v])
+             filas_v, ["TOTAL NETO", total_base_v, total_iva_v])
+
+    # Colorear fila de devoluciones ventas si existe
+    if dev_v.get("base", 0) > 0:
+        fila_dev_v = fila - 2 - 1  # fila actual - espacio - 1 (fila de devolucion antes del total)
+        for ci in range(1, 4):
+            _fill(ws.cell(row=fila_dev_v, column=ci), ROJO)
 
     # --- COMPRAS ---
     c = datos["compras"]
+    dev_c = datos.get("devoluciones", {}).get("compras", {})
     filas_c = [
         [cats[cat], c[cat]["base"], c[cat]["iva_facturado"], c[cat]["iva_descontable"]]
         for cat in f300._CATS_REPORTE
         if c[cat]["base"] != 0 or c[cat]["iva_facturado"] != 0
     ]
+    if dev_c.get("base", 0) > 0:
+        filas_c.append([
+            "(−) Devoluciones en compras",
+            -dev_c["base"], -dev_c.get("iva_facturado", 0), -dev_c.get("iva_descontable", 0),
+        ])
     total_base_c = sum(c[cat]["base"] for cat in f300._CATS_REPORTE)
     _seccion(
         "COMPRAS Y COSTOS",
         ["Tratamiento", "Base (COP)", "IVA facturado (COP)", "IVA descontable (COP)"],
         filas_c,
-        ["TOTAL", total_base_c, datos["totales"]["iva_descontable"], datos["totales"]["iva_descontable"]],
+        ["TOTAL NETO", total_base_c, datos["totales"]["iva_descontable"], datos["totales"]["iva_descontable"]],
     )
+
+    # Colorear fila de devoluciones compras si existe
+    if dev_c.get("base", 0) > 0:
+        fila_dev_c = fila - 2 - 1
+        for ci in range(1, 6):
+            _fill(ws.cell(row=fila_dev_c, column=ci), ROJO)
 
     # --- BALANCE ---
     ws.merge_cells(f"A{fila}:F{fila}")
@@ -462,36 +505,66 @@ def _generar_pdf(datos: dict, nombre_empresa: str) -> io.BytesIO:
     ))
     story.append(Spacer(1, 0.4*cm))
 
+    ROJO_PDF = colors.HexColor("#FCE4EC")
+
     # VENTAS
     v = datos["ventas"]
+    dev_v = datos.get("devoluciones", {}).get("ventas", {})
     filas_v = [
         [cats[cat], _cop(v[cat]["base"]), _cop(v[cat]["iva"])]
         for cat in f300._CATS_REPORTE
         if v[cat]["base"] != 0 or v[cat]["iva"] != 0
     ]
+    n_filas_v = len(filas_v)
+    if dev_v.get("base", 0) > 0:
+        filas_v.append([
+            "(−) Devoluciones en ventas",
+            f'−{_cop(dev_v["base"])}',
+            f'−{_cop(dev_v.get("iva", 0))}',
+        ])
     total_base_v = sum(v[cat]["base"] for cat in f300._CATS_REPORTE)
     _tabla_seccion(
         "VENTAS E INGRESOS",
         ["Tratamiento", "Base gravable (COP)", "IVA generado (COP)"],
         filas_v,
-        ["TOTAL", _cop(total_base_v), _cop(datos["totales"]["iva_generado"])],
+        ["TOTAL NETO", _cop(total_base_v), _cop(datos["totales"]["iva_generado"])],
     )
+
+    # Colorear fila de devoluciones en PDF (ventas): la fila n_filas_v+1 del body (1-indexed encabezado)
+    if dev_v.get("base", 0) > 0:
+        story[-1].setStyle(TableStyle([
+            ("BACKGROUND", (0, n_filas_v + 1), (-1, n_filas_v + 1), ROJO_PDF),
+        ]))
 
     # COMPRAS
     c = datos["compras"]
+    dev_c = datos.get("devoluciones", {}).get("compras", {})
     filas_c = [
         [cats[cat], _cop(c[cat]["base"]), _cop(c[cat]["iva_facturado"]), _cop(c[cat]["iva_descontable"])]
         for cat in f300._CATS_REPORTE
         if c[cat]["base"] != 0 or c[cat]["iva_facturado"] != 0
     ]
+    n_filas_c = len(filas_c)
+    if dev_c.get("base", 0) > 0:
+        filas_c.append([
+            "(−) Devoluciones en compras",
+            f'−{_cop(dev_c["base"])}',
+            f'−{_cop(dev_c.get("iva_facturado", 0))}',
+            f'−{_cop(dev_c.get("iva_descontable", 0))}',
+        ])
     total_base_c = sum(c[cat]["base"] for cat in f300._CATS_REPORTE)
     _tabla_seccion(
         "COMPRAS Y COSTOS",
         ["Tratamiento", "Base (COP)", "IVA facturado (COP)", "IVA descontable (COP)"],
         filas_c,
-        ["TOTAL", _cop(total_base_c), _cop(datos["totales"]["iva_descontable"]),
+        ["TOTAL NETO", _cop(total_base_c), _cop(datos["totales"]["iva_descontable"]),
          _cop(datos["totales"]["iva_descontable"])],
     )
+
+    if dev_c.get("base", 0) > 0:
+        story[-1].setStyle(TableStyle([
+            ("BACKGROUND", (0, n_filas_c + 1), (-1, n_filas_c + 1), ROJO_PDF),
+        ]))
 
     # BALANCE
     story.append(Spacer(1, 0.4*cm))

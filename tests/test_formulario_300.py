@@ -11,7 +11,7 @@ import pytest
 
 from services.formulario_300_service import (
     TIPOS_COMPRAS, TIPOS_VENTAS, ConceptoResumen, ProveedorResumen, _balance_vacio,
-    _CATS_REPORTE, _reporte_vacio,
+    _CATS_REPORTE, _reporte_vacio, tributos_adicionales_resumen,
 )
 
 from services.catalogo_tributario_service import PENDIENTE, Clasificacion
@@ -313,3 +313,86 @@ def test_reporte_periodo_queda_en_el_resultado():
     r = _reporte_vacio(date(2026, 1, 1), date(2026, 9, 30))
     assert r["periodo"]["desde"] == "2026-01-01"
     assert r["periodo"]["hasta"] == "2026-09-30"
+
+
+def test_reporte_vacio_tiene_devoluciones():
+    """El reporte vacío expone el bloque 'devoluciones' con ventas y compras —
+    si faltara, el frontend lo leería como undefined y fallaría al renderizar
+    la fila de devoluciones aunque no haya ninguna."""
+    from datetime import date
+    r = _reporte_vacio(date(2026, 1, 1), date(2026, 9, 30))
+    assert "devoluciones" in r
+    assert "ventas" in r["devoluciones"]
+    assert "compras" in r["devoluciones"]
+
+
+def test_reporte_devoluciones_ventas_tiene_base_e_iva():
+    """devoluciones.ventas necesita 'base' e 'iva' para que el frontend pueda
+    mostrar la fila '(−) Devoluciones en ventas' sin verificar si existen."""
+    from datetime import date
+    r = _reporte_vacio(date(2026, 1, 1), date(2026, 9, 30))
+    assert "base" in r["devoluciones"]["ventas"]
+    assert "iva" in r["devoluciones"]["ventas"]
+    assert r["devoluciones"]["ventas"]["base"] == 0.0
+    assert r["devoluciones"]["ventas"]["iva"] == 0.0
+
+
+def test_reporte_devoluciones_compras_tiene_tres_campos():
+    """devoluciones.compras necesita los tres campos que usa la tabla: base,
+    iva_facturado e iva_descontable — igual que cada categoría de compras."""
+    from datetime import date
+    r = _reporte_vacio(date(2026, 1, 1), date(2026, 9, 30))
+    dev_c = r["devoluciones"]["compras"]
+    assert "base" in dev_c
+    assert "iva_facturado" in dev_c
+    assert "iva_descontable" in dev_c
+    assert dev_c["base"] == 0.0
+    assert dev_c["iva_facturado"] == 0.0
+    assert dev_c["iva_descontable"] == 0.0
+
+
+# ─── Tributos adicionales (Fase 5) ────────────────────────────────────────────
+#
+# tributos_adicionales_resumen() extrae INC, IBUA, ICUI, INPP, bolsas y
+# cualquier otro tributo del campo otros_tributos dentro de items_json.
+# El caso más importante es empresa_ids vacío: nunca debe inventar datos.
+
+def test_tributos_adicionales_sin_empresas_devuelve_vacio():
+    """Sin empresas el resultado no inventa tributos — listas vacías y ceros."""
+    from datetime import date
+    from unittest.mock import MagicMock
+    db = MagicMock()
+    r = tributos_adicionales_resumen(
+        db, empresa_ids=[], desde=date(2026, 1, 1), hasta=date(2026, 9, 30), cuenta_id=1,
+    )
+    assert r["compras"] == []
+    assert r["ventas"] == []
+    assert r["total_compras"] == 0.0
+    assert r["total_ventas"] == 0.0
+    assert r["hay_no_parametrizados"] is False
+
+
+def test_tributos_adicionales_estructura_minima():
+    """El resultado siempre incluye periodo, compras, ventas, totales y flag."""
+    from datetime import date
+    from unittest.mock import MagicMock
+    db = MagicMock()
+    r = tributos_adicionales_resumen(
+        db, empresa_ids=[], desde=date(2026, 1, 1), hasta=date(2026, 9, 30), cuenta_id=1,
+    )
+    assert "periodo" in r
+    assert "compras" in r and "ventas" in r
+    assert "total_compras" in r and "total_ventas" in r
+    assert "hay_no_parametrizados" in r
+
+
+def test_tributos_adicionales_periodo_en_resultado():
+    """El periodo queda reflejado en el resultado — igual que reporte_resumen."""
+    from datetime import date
+    from unittest.mock import MagicMock
+    db = MagicMock()
+    r = tributos_adicionales_resumen(
+        db, empresa_ids=[], desde=date(2026, 3, 1), hasta=date(2026, 6, 30), cuenta_id=1,
+    )
+    assert r["periodo"]["desde"] == "2026-03-01"
+    assert r["periodo"]["hasta"] == "2026-06-30"
