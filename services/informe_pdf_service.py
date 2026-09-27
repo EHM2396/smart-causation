@@ -184,10 +184,10 @@ def generar_pdf(
 
     hist = []
     hist.append(Paragraph("Ciolix", titulo))
-    hist.append(Paragraph("Informe de costos, gastos e ingresos", sub))
-    hist.append(Paragraph(f"<b>{nombre_empresa}</b>", sub))
     hist.append(Paragraph(
-        f"Periodo {desde.strftime('%d/%m/%Y')} a {hasta.strftime('%d/%m/%Y')} · por fecha de emisión", sub))
+        f"Informe de costos, gastos e ingresos · {desde.strftime('%d/%m/%Y')} – {hasta.strftime('%d/%m/%Y')}", sub))
+    hist.append(Paragraph(f"<b>{nombre_empresa}</b>", sub))
+    hist.append(Paragraph("Por fecha de emisión", sub))
     hist.append(Paragraph(f"Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}", sub))
     hist.append(Spacer(1, 12))
 
@@ -224,21 +224,20 @@ def generar_pdf(
     hist.append(_grafico_tipos(datos["por_tipo"], doc.width))
 
     # ── Tabla por tipo ──────────────────────────────────────────────────────
-    hist.append(Paragraph("Detalle por tipo de documento", seccion))
-    filas = [["Documento", "Naturaleza", "Efecto", "Cantidad", "Valor"]]
+    hist.append(Paragraph("Por tipo de documento", seccion))
+    filas = [["Documento", "Naturaleza", "Cantidad", "Valor"]]
     for t in datos["por_tipo"]:
         filas.append([
             t["label"],
             "Ingresos" if t["naturaleza"] == "ingresos" else "Costos y gastos",
-            "Suma" if t["signo"] == 1 else "Resta",
             f'{t["documentos"]:,}'.replace(",", "."),
-            _pesos(t["monto"] * t["signo"]),
+            _pesos(t["monto"]),
         ])
-    hist.append(_tabla(filas, [doc.width * x for x in (0.30, 0.22, 0.13, 0.15, 0.20)]))
+    hist.append(_tabla(filas, [doc.width * x for x in (0.35, 0.25, 0.15, 0.25)]))
 
     # ── Terceros ────────────────────────────────────────────────────────────
     if datos["por_tercero"]:
-        hist.append(Paragraph("Terceros con mayor peso en costos y gastos", seccion))
+        hist.append(Paragraph("Terceros en costos y gastos", seccion))
         filas = [["NIT", "Nombre", "Documentos", "Valor"]]
         for t in datos["por_tercero"]:
             filas.append([t["nit"], t["nombre"][:46],

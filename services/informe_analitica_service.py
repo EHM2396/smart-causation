@@ -76,7 +76,7 @@ def _hoja_resumen(wb, fmt, *, datos: dict, nombre_empresa: str, desde: date, has
 
     ws.set_row(0, 30)
     ws.write("A1", "Ciolix", fmt["titulo"])
-    ws.write("A2", "Informe de costos, gastos e ingresos", fmt["subtitulo"])
+    ws.write("A2", f"Informe de costos, gastos e ingresos · {desde.isoformat()} a {hasta.isoformat()}", fmt["subtitulo"])
     ws.write("A3", nombre_empresa, fmt["subtitulo"])
     ws.write("A4", f"Periodo {desde.isoformat()} a {hasta.isoformat()} (por fecha de emisión)", fmt["subtitulo"])
     ws.write("A5", f"Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}", fmt["subtitulo"])
@@ -96,21 +96,20 @@ def _hoja_resumen(wb, fmt, *, datos: dict, nombre_empresa: str, desde: date, has
             ws.write_number(9, col, valor, fmt[estilo])
 
     fila = 12
-    ws.merge_range(fila, 0, fila, 4, "Por tipo de documento", fmt["seccion"])
+    ws.merge_range(fila, 0, fila, 3, "Por tipo de documento", fmt["seccion"])
     fila += 1
-    for col, titulo in enumerate(["Documento", "Naturaleza", "Efecto", "Cantidad", "Valor"]):
+    for col, titulo in enumerate(["Documento", "Naturaleza", "Cantidad", "Valor"]):
         ws.write(fila, col, titulo, fmt["encabezado"])
     fila += 1
     for t in datos["por_tipo"]:
         ws.write(fila, 0, t["label"], fmt["texto"])
         ws.write(fila, 1, "Ingresos" if t["naturaleza"] == "ingresos" else "Costos y gastos", fmt["texto"])
-        ws.write(fila, 2, "Suma" if t["signo"] == 1 else "Resta", fmt["texto"])
-        ws.write_number(fila, 3, t["documentos"], fmt["entero"])
-        ws.write_number(fila, 4, t["monto"] * t["signo"], fmt["dinero"])
+        ws.write_number(fila, 2, t["documentos"], fmt["entero"])
+        ws.write_number(fila, 3, t["monto"], fmt["dinero"])
         fila += 1
 
     fila += 2
-    ws.merge_range(fila, 0, fila, 4, "Mes a mes", fmt["seccion"])
+    ws.merge_range(fila, 0, fila, 3, "Mes a mes", fmt["seccion"])
     fila += 1
     for col, titulo in enumerate(["Mes", "Ingresos", "Costos y gastos", "Resultado"]):
         ws.write(fila, col, titulo, fmt["encabezado"])
@@ -123,7 +122,7 @@ def _hoja_resumen(wb, fmt, *, datos: dict, nombre_empresa: str, desde: date, has
         fila += 1
 
     fila += 2
-    ws.merge_range(fila, 0, fila, 4, "Terceros con mayor peso en costos y gastos", fmt["seccion"])
+    ws.merge_range(fila, 0, fila, 3, "Terceros en costos y gastos", fmt["seccion"])
     fila += 1
     for col, titulo in enumerate(["NIT", "Nombre", "Documentos", "Valor"]):
         ws.write(fila, col, titulo, fmt["encabezado"])
