@@ -142,6 +142,7 @@ def proveedores(
                 "base_total": p.base_total,
                 "documentos": p.documentos,
                 "pendientes": p.pendientes,
+                "tipos_documento": p.tipos_documento,
                 "predominante": _concepto(p.predominante),
                 "secundarios": [_concepto(c) for c in p.secundarios],
             }

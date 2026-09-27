@@ -12,6 +12,7 @@ import pytest
 from services.formulario_300_service import (
     TIPOS_COMPRAS, TIPOS_VENTAS, ConceptoResumen, ProveedorResumen, _balance_vacio,
 )
+
 from services.catalogo_tributario_service import PENDIENTE, Clasificacion
 from services.analitica_service import ORDEN as TIPOS_DOCUMENTO_DIAN
 
@@ -93,6 +94,34 @@ def test_lo_pendiente_de_verdad_cuenta_como_pendiente():
     p = ProveedorResumen(nit="1", razon_social="X", base_total=100, documentos=1,
                          predominante=_concepto("sin clasificar", 100), secundarios=[])
     assert p.pendientes == 1
+
+
+# ─── Etiquetas de tipo de documento (para identificar facturas vs. soportes) ─
+
+def test_proveedor_sin_documentos_tiene_lista_vacia_de_tipos():
+    p = ProveedorResumen(nit="1", razon_social="X", base_total=0, documentos=0,
+                         predominante=_concepto("a", 0))
+    assert p.tipos_documento == []
+
+
+def test_proveedor_puede_tener_varios_tipos_de_documento():
+    """Un proveedor que tiene factura de compra Y nota crédito muestra los dos
+    tipos, para que el contador identifique de qué vienen sus ítems."""
+    p = ProveedorResumen(nit="1", razon_social="X", base_total=100, documentos=2,
+                         predominante=_concepto("a", 100),
+                         tipos_documento=["compras", "nc"])
+    assert "compras" in p.tipos_documento
+    assert "nc" in p.tipos_documento
+
+
+def test_tipos_documento_no_tiene_duplicados():
+    """El mismo tipo no debe repetirse aunque el proveedor tenga varios
+    documentos de ese tipo en el periodo."""
+    tipos = sorted({"compras", "compras", "nc"})
+    p = ProveedorResumen(nit="1", razon_social="X", base_total=100, documentos=3,
+                         predominante=_concepto("a", 100),
+                         tipos_documento=tipos)
+    assert p.tipos_documento.count("compras") == 1
 
 
 # ─── Ventas y Compras nunca se mezclan (Fase 1) ──────────────────────────────

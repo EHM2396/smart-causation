@@ -63,6 +63,10 @@ class ProveedorResumen:
     documentos: int
     predominante: ConceptoResumen
     secundarios: list[ConceptoResumen] = field(default_factory=list)
+    # Tipos de documento DIAN que aportaron ítems a este proveedor en el
+    # periodo — se usa en la pantalla para mostrar etiquetas que ayuden a
+    # identificar si el proveedor vino de una factura, una nota o un soporte.
+    tipos_documento: list[str] = field(default_factory=list)
 
     @property
     def pendientes(self) -> int:
@@ -119,6 +123,10 @@ def resumen_por_proveedor(
     # (nit, concepto_norm) → acumulador. El nit es el eje; el concepto separa
     # dentro de él sin fusionar nada.
     acumulado: dict[tuple[str, str], dict] = {}
+    # nit → tipos de documento DIAN que aportaron ítems al proveedor (solo los
+    # que pasaron el filtro de tarifa — un soporte con tarifa 19% y sin ítems
+    # al 0% no debe aparecer como etiqueta si no aporta nada a la vista).
+    tipos_por_nit: dict[str, set[str]] = {}
 
     for doc in docs:
         if not doc.items_json:
@@ -150,6 +158,9 @@ def resumen_por_proveedor(
             norm = normalizar_concepto(concepto)
             if not norm:
                 continue
+
+            # Registrar el tipo de documento solo cuando el ítem pasa el filtro.
+            tipos_por_nit.setdefault(nit, set()).add(doc.tipo)
 
             base = float(it.get("base") or 0)
             referencia = str(it.get("referencia") or "").strip() or None
@@ -192,6 +203,8 @@ def resumen_por_proveedor(
         conceptos_por_nit.setdefault(nit, []).append(cr)
         razon_social_por_nit[nit] = acc["razon_social"]
 
+    _orden_tipos = {t: i for i, t in enumerate(TIPOS_VENTAS + TIPOS_COMPRAS)}
+
     proveedores: list[ProveedorResumen] = []
     for nit, conceptos in conceptos_por_nit.items():
         base_total = sum(c.base_acumulada for c in conceptos)
@@ -206,6 +219,7 @@ def resumen_por_proveedor(
             documentos=sum(c.documentos for c in conceptos),
             predominante=conceptos[0],
             secundarios=conceptos[1:],
+            tipos_documento=sorted(tipos_por_nit.get(nit, set()), key=lambda t: _orden_tipos.get(t, 99)),
         ))
 
     proveedores.sort(key=lambda p: p.base_total, reverse=True)

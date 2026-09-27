@@ -423,12 +423,27 @@ export interface ConceptoF300 {
   iva_descontable_confirmado: boolean;
 }
 
+/** Etiquetas cortas para cada tipo de documento DIAN que puede aparecer en
+ * las etiquetas de un proveedor en Formulario 300. */
+export const TIPO_DOC_LABEL: Record<string, string> = {
+  compras:    "Factura compra",
+  nc:         "NC compra",
+  nd:         "ND compra",
+  soporte:    "Soporte",
+  nc_soporte: "NC soporte",
+  ventas:     "Factura venta",
+  nc_ventas:  "NC venta",
+  nd_ventas:  "ND venta",
+};
+
 export interface ProveedorF300 {
   nit: string;
   razon_social: string;
   base_total: number;
   documentos: number;
   pendientes: number;
+  /** Tipos de documento DIAN que aportaron ítems a este proveedor en el periodo. */
+  tipos_documento: string[];
   predominante: ConceptoF300;
   secundarios: ConceptoF300[];
 }

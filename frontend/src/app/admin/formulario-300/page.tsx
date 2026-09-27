@@ -45,7 +45,7 @@ import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
 import type { ConceptoF300, IvaDescontable, OrigenF300, ProveedorF300, TipoItem, TratamientoIVA } from "@/lib/types";
-import { IVA_DESCONTABLE_LABEL, TIPO_ITEM_LABEL, TRATAMIENTO_LABEL } from "@/lib/types";
+import { IVA_DESCONTABLE_LABEL, TIPO_DOC_LABEL, TIPO_ITEM_LABEL, TRATAMIENTO_LABEL } from "@/lib/types";
 
 // En ventas, cada tratamiento es su propio botón — exento y excluido nunca se
 // confunden. En compras se agrupan visualmente exento+excluido+no gravado
@@ -289,6 +289,16 @@ function ProveedorCard({
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{p.razon_social}</p>
           <p className="text-xs" style={{ color: "var(--text-muted)" }}>NIT {p.nit} · {p.documentos} documento(s)</p>
+          {p.tipos_documento.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {p.tipos_documento.map((t) => (
+                <span key={t} className="rounded px-1.5 py-0.5 text-[10px] font-medium"
+                  style={{ backgroundColor: "var(--bg-elevated)", color: "var(--text-muted)", border: "1px solid var(--border-soft)" }}>
+                  {TIPO_DOC_LABEL[t] ?? t}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-3">
           <div className="text-right">
