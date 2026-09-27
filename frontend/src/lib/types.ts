@@ -423,17 +423,16 @@ export interface ConceptoF300 {
   iva_descontable_confirmado: boolean;
 }
 
-/** Etiquetas cortas para cada tipo de documento DIAN que puede aparecer en
- * las etiquetas de un proveedor en Formulario 300. */
+/** Nomenclatura completa DIAN para cada tipo de documento en Formulario 300. */
 export const TIPO_DOC_LABEL: Record<string, string> = {
-  compras:    "Factura compra",
-  nc:         "NC compra",
-  nd:         "ND compra",
-  soporte:    "Soporte",
-  nc_soporte: "NC soporte",
-  ventas:     "Factura venta",
-  nc_ventas:  "NC venta",
-  nd_ventas:  "ND venta",
+  compras:    "Factura Electrónica de Compra",
+  nc:         "Nota Crédito de Compra",
+  nd:         "Nota Débito de Compra",
+  soporte:    "Documento Soporte y Documentos Equivalentes",
+  nc_soporte: "Nota de Ajuste de Documento Soporte",
+  ventas:     "Factura Electrónica de Venta",
+  nc_ventas:  "Nota Crédito de Venta",
+  nd_ventas:  "Nota Débito de Venta",
 };
 
 export interface ProveedorF300 {
@@ -482,12 +481,41 @@ export interface ReporteF300 {
   periodo: { desde: string; hasta: string };
   ventas: Record<CatReporte, CatReporteVentas>;
   compras: Record<CatReporte, CatReporteCompras>;
+  devoluciones: {
+    ventas: { base: number; iva: number };
+    compras: { base: number; iva_facturado: number; iva_descontable: number };
+  };
   totales: {
     iva_generado: number;
     iva_descontable: number;
     balance_analitico_iva: number;
   };
   conceptos_pendientes: number;
+}
+
+export interface TributoProveedorDetalle {
+  nit: string;
+  razon_social: string;
+  valor: number;
+  documentos: number;
+}
+
+export interface TributoAdicional {
+  cod_dian: string;
+  nombre: string;
+  grupo: string;          // "independiente" | "costo" | "retencion"
+  conocido: boolean;
+  valor_total: number;
+  por_proveedor: TributoProveedorDetalle[];
+}
+
+export interface TributosAdicionalesResumen {
+  periodo: { desde: string; hasta: string };
+  compras: TributoAdicional[];
+  ventas: TributoAdicional[];
+  total_compras: number;
+  total_ventas: number;
+  hay_no_parametrizados: boolean;
 }
 
 export interface AdminUsuario {

@@ -165,6 +165,15 @@ export const api = {
     if (empresaId != null) qs.set("empresa_id", String(empresaId));
     return req<import("@/lib/types").ReporteF300>(`/formulario-300/reporte?${qs.toString()}`);
   },
+  f300TributosAdicionales: (desde: string, hasta: string, empresaId?: number | null) => {
+    const qs = new URLSearchParams();
+    qs.set("desde", desde);
+    qs.set("hasta", hasta);
+    if (empresaId != null) qs.set("empresa_id", String(empresaId));
+    return req<import("@/lib/types").TributosAdicionalesResumen>(
+      `/formulario-300/tributos-adicionales?${qs.toString()}`
+    );
+  },
   f300ReporteDescargar: async (
     formato: "excel" | "pdf", desde: string, hasta: string, empresaId?: number | null,
   ): Promise<void> => {

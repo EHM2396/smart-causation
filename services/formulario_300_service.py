@@ -264,6 +264,10 @@ def _reporte_vacio(desde: date | None = None, hasta: date | None = None) -> dict
         },
         "ventas": {cat: {"base": 0.0, "iva": 0.0} for cat in _CATS_REPORTE},
         "compras": {cat: {"base": 0.0, "iva_facturado": 0.0, "iva_descontable": 0.0} for cat in _CATS_REPORTE},
+        "devoluciones": {
+            "ventas": {"base": 0.0, "iva": 0.0},
+            "compras": {"base": 0.0, "iva_facturado": 0.0, "iva_descontable": 0.0},
+        },
         "totales": {"iva_generado": 0.0, "iva_descontable": 0.0, "balance_analitico_iva": 0.0},
         "conceptos_pendientes": 0,
     }
@@ -305,6 +309,9 @@ def reporte_resumen(
 
     v = {cat: {"base": 0.0, "iva": 0.0} for cat in _CATS_REPORTE}
     c = {cat: {"base": 0.0, "iva_facturado": 0.0, "iva_descontable": 0.0} for cat in _CATS_REPORTE}
+    # Devoluciones (NC) separadas para mostrar bruto - devolucion = neto
+    dev_v = {"base": 0.0, "iva": 0.0}
+    dev_c = {"base": 0.0, "iva_facturado": 0.0, "iva_descontable": 0.0}
 
     # Ítems al 0%: se agrupan por (es_venta, nit, concepto_norm) para
     # llamar a clasificar() UNA vez por par — evita N consultas por ítem.
@@ -320,6 +327,7 @@ def reporte_resumen(
 
         signo = SIGNO.get(doc.tipo, 1)
         es_venta = doc.tipo in TIPOS_VENTAS
+        es_nc = signo < 0  # NC/ajuste — devolucion
         nit = (doc.nit_contraparte or "").strip()
         fecha_doc = doc.fecha_emision or hasta
 
@@ -341,10 +349,17 @@ def reporte_resumen(
                 if es_venta:
                     v[cat]["base"] += base
                     v[cat]["iva"] += iva
+                    if es_nc:
+                        dev_v["base"] += abs(base)
+                        dev_v["iva"] += abs(iva)
                 else:
                     c[cat]["base"] += base
                     c[cat]["iva_facturado"] += iva
                     c[cat]["iva_descontable"] += iva  # gravado → descontable por defecto
+                    if es_nc:
+                        dev_c["base"] += abs(base)
+                        dev_c["iva_facturado"] += abs(iva)
+                        dev_c["iva_descontable"] += abs(iva)
             else:
                 if not nit:
                     continue
@@ -359,10 +374,13 @@ def reporte_resumen(
                 acc = pending.setdefault(clave, {
                     "es_venta": es_venta, "nit": nit, "concepto": concepto,
                     "referencia": referencia, "fecha": fecha_doc, "pct": pct,
-                    "base": 0.0, "iva": 0.0,
+                    "base": 0.0, "iva": 0.0, "nc_base": 0.0, "nc_iva": 0.0,
                 })
                 acc["base"] += base
                 acc["iva"] += iva
+                if es_nc:
+                    acc["nc_base"] += abs(base)
+                    acc["nc_iva"] += abs(iva)
                 if fecha_doc < acc["fecha"]:
                     acc["fecha"] = fecha_doc
                 if not acc.get("referencia") and referencia:
@@ -385,11 +403,15 @@ def reporte_resumen(
         if es_venta:
             v[cat]["base"] += acc["base"]
             v[cat]["iva"] += acc["iva"]
+            dev_v["base"] += acc["nc_base"]
+            dev_v["iva"] += acc["nc_iva"]
         else:
             c[cat]["base"] += acc["base"]
             c[cat]["iva_facturado"] += acc["iva"]
             if clas.iva_descontable == "descontable":
                 c[cat]["iva_descontable"] += acc["iva"]
+            dev_c["base"] += acc["nc_base"]
+            dev_c["iva_facturado"] += acc["nc_iva"]
 
     for cat in _CATS_REPORTE:
         for k in v[cat]:
@@ -404,12 +426,130 @@ def reporte_resumen(
         "periodo": {"desde": desde.isoformat(), "hasta": hasta.isoformat()},
         "ventas": v,
         "compras": c,
+        "devoluciones": {
+            "ventas": {k: round(val, 2) for k, val in dev_v.items()},
+            "compras": {k: round(val, 2) for k, val in dev_c.items()},
+        },
         "totales": {
             "iva_generado": round(iva_generado, 2),
             "iva_descontable": round(iva_descontable_total, 2),
             "balance_analitico_iva": round(iva_generado - iva_descontable_total, 2),
         },
         "conceptos_pendientes": conceptos_pendientes,
+    }
+
+
+# ── Tributos adicionales (INC, IBUA, ICUI, INPP, bolsas, etc.) ───────────────
+
+def tributos_adicionales_resumen(
+    db: Session,
+    *,
+    empresa_ids: list[int],
+    desde: date,
+    hasta: date,
+    cuenta_id: int,
+) -> dict:
+    """Consolida todos los tributos distintos al IVA que aparecen en los XML
+    del periodo.  Separa compras de ventas; agrupa por código DIAN; mantiene
+    el desglose por proveedor para el drilldown.
+
+    Ningún tributo se pierde: los códigos no reconocidos quedan como
+    ``conocido=False`` y se marcan como 'Tributo no parametrizado (XXXX)'."""
+    from core.parser import clasificar_tributo_dian
+
+    _vacio = {
+        "periodo": {
+            "desde": desde.isoformat() if desde else None,
+            "hasta": hasta.isoformat() if hasta else None,
+        },
+        "compras": [],
+        "ventas": [],
+        "total_compras": 0.0,
+        "total_ventas": 0.0,
+        "hay_no_parametrizados": False,
+    }
+    if not empresa_ids:
+        return _vacio
+
+    docs = db.execute(
+        select(DocumentoDian).where(
+            DocumentoDian.empresa_id.in_(empresa_ids),
+            DocumentoDian.fecha_emision >= desde,
+            DocumentoDian.fecha_emision <= hasta,
+        )
+    ).scalars().all()
+
+    # acc[lado][cod_dian] = {nombre, grupo, conocido, valor_total, por_nit: {...}}
+    acc: dict[str, dict[str, dict]] = {"ventas": {}, "compras": {}}
+
+    for doc in docs:
+        es_venta = doc.tipo in TIPOS_VENTAS
+        lado = "ventas" if es_venta else "compras"
+        signo = SIGNO.get(doc.tipo, 1)
+
+        try:
+            items = json.loads(doc.items_json or "[]")
+        except (ValueError, TypeError):
+            continue
+
+        for it in items:
+            for trib in (it.get("otros_tributos") or []):
+                cod = str(trib.get("cod_dian") or "??").strip()
+                valor = float(trib.get("valor") or 0) * signo
+
+                if cod not in acc[lado]:
+                    nombre, grupo, conocido = clasificar_tributo_dian(cod)
+                    if not conocido:
+                        nombre = f"Tributo no parametrizado ({cod})"
+                    acc[lado][cod] = {
+                        "cod_dian": cod,
+                        "nombre": nombre,
+                        "grupo": grupo,
+                        "conocido": conocido,
+                        "valor_total": 0.0,
+                        "por_nit": {},
+                    }
+
+                acc[lado][cod]["valor_total"] += valor
+
+                nit = doc.nit_contraparte or "SIN NIT"
+                if nit not in acc[lado][cod]["por_nit"]:
+                    acc[lado][cod]["por_nit"][nit] = {
+                        "nit": nit,
+                        "razon_social": doc.razon_social or "",
+                        "valor": 0.0,
+                        "documentos": 0,
+                    }
+                acc[lado][cod]["por_nit"][nit]["valor"] += valor
+                acc[lado][cod]["por_nit"][nit]["documentos"] += 1
+
+    def _serializar(lado_dict: dict) -> list[dict]:
+        out = []
+        for entry in sorted(lado_dict.values(), key=lambda e: e["valor_total"], reverse=True):
+            por_prov = sorted(entry["por_nit"].values(), key=lambda p: p["valor"], reverse=True)
+            out.append({
+                "cod_dian": entry["cod_dian"],
+                "nombre": entry["nombre"],
+                "grupo": entry["grupo"],
+                "conocido": entry["conocido"],
+                "valor_total": round(entry["valor_total"], 2),
+                "por_proveedor": [
+                    {**p, "valor": round(p["valor"], 2)}
+                    for p in por_prov
+                ],
+            })
+        return out
+
+    compras = _serializar(acc["compras"])
+    ventas = _serializar(acc["ventas"])
+
+    return {
+        "periodo": {"desde": desde.isoformat(), "hasta": hasta.isoformat()},
+        "compras": compras,
+        "ventas": ventas,
+        "total_compras": round(sum(e["valor_total"] for e in compras), 2),
+        "total_ventas": round(sum(e["valor_total"] for e in ventas), 2),
+        "hay_no_parametrizados": any(not e["conocido"] for e in compras + ventas),
     }
 
 

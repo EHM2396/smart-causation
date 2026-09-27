@@ -397,17 +397,158 @@ function BarraSeleccion({
 }
 
 const CATS_ORDEN: CatReporte[] = ["gravado_general", "gravado_5", "exento", "excluido", "no_gravado", "pendiente"];
+const COLOR_IVA_GENERADO = "#10B981";
+const COLOR_IVA_DESCONTABLE = "#F43F5E";
+const COLOR_TRIBUTO = "#F59E0B";
 
-function FilaMoneda({ label, valor, negrita }: { label: string; valor: number; negrita?: boolean }) {
+function TributosAdicionalesSection({
+  desde, hasta, empresaId,
+}: { desde: string; hasta: string; empresaId: number | null }) {
+  const [expandidos, setExpandidos] = useState<Record<string, boolean>>({});
+
+  const { data, isLoading } = useQuery<import("@/lib/types").TributosAdicionalesResumen>({
+    queryKey: ["f300-tributos", desde, hasta, empresaId],
+    queryFn: () => api.f300TributosAdicionales(desde, hasta, empresaId),
+    enabled: empresaId != null,
+  });
+
+  if (isLoading) return (
+    <div className="flex items-center gap-2 text-sm" style={{ color: "var(--text-muted)" }}>
+      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando tributos adicionales…
+    </div>
+  );
+
+  if (!data) return null;
+
+  const tieneCompras = data.compras.length > 0;
+  const tieneVentas = data.ventas.length > 0;
+  if (!tieneCompras && !tieneVentas) return null;
+
+  const toggle = (key: string) => setExpandidos((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  function TributoBloque({ tributos, total, lado }: {
+    tributos: import("@/lib/types").TributoAdicional[];
+    total: number;
+    lado: "compras" | "ventas";
+  }) {
+    return (
+      <div className="space-y-1">
+        {tributos.map((t) => {
+          const key = `${lado}-${t.cod_dian}`;
+          const abierto = !!expandidos[key];
+          return (
+            <div key={key}>
+              <button type="button" onClick={() => toggle(key)}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-opacity-60"
+                style={{ backgroundColor: abierto ? "var(--bg-elevated)" : "transparent" }}>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 transition-transform"
+                  style={{ color: "var(--text-muted)", transform: abierto ? "rotate(180deg)" : "rotate(-90deg)" }} />
+                <span className="flex-1 text-sm" style={{ color: "var(--text-secondary)" }}>
+                  {t.nombre}
+                  {!t.conocido && (
+                    <span className="ml-2 rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700">
+                      no parametrizado
+                    </span>
+                  )}
+                </span>
+                <span className="text-sm font-semibold tabular-nums" style={{ color: COLOR_TRIBUTO }}>
+                  {fmt(t.valor_total)}
+                </span>
+              </button>
+
+              {abierto && (
+                <div className="ml-5 mt-0.5 overflow-hidden rounded-lg border"
+                  style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
+                  <table className="w-full">
+                    <thead>
+                      <tr className="text-xs" style={{ color: "var(--text-muted)", borderBottom: "1px solid var(--border-soft)" }}>
+                        <th className="px-3 py-1.5 text-left font-medium">NIT</th>
+                        <th className="px-3 py-1.5 text-left font-medium">Nombre</th>
+                        <th className="px-3 py-1.5 text-right font-medium">Docs</th>
+                        <th className="px-3 py-1.5 text-right font-medium">Valor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {t.por_proveedor.map((p, i) => (
+                        <tr key={p.nit} className="border-t text-sm"
+                          style={{ borderColor: "var(--border-soft)", backgroundColor: i % 2 === 0 ? "transparent" : "var(--bg-elevated)" }}>
+                          <td className="px-3 py-1.5 font-mono text-xs" style={{ color: "var(--text-muted)" }}>{p.nit}</td>
+                          <td className="px-3 py-1.5" style={{ color: "var(--text-secondary)" }}>{p.razon_social || "—"}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: "var(--text-muted)" }}>{p.documentos}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums font-medium" style={{ color: "var(--text-secondary)" }}>{fmt(p.valor)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        <div className="flex items-center justify-between border-t px-3 pt-2"
+          style={{ borderColor: "var(--border-soft)" }}>
+          <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
+            Total tributos adicionales
+          </span>
+          <span className="text-sm font-bold tabular-nums" style={{ color: COLOR_TRIBUTO }}>
+            {fmt(total)}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <tr>
-      <td className="py-1.5 pr-4 text-sm" style={{ color: negrita ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: negrita ? 600 : 400 }}>
-        {label}
-      </td>
-      <td className="py-1.5 text-right text-sm tabular-nums" style={{ color: negrita ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: negrita ? 600 : 400 }}>
-        {fmt(valor)}
-      </td>
-    </tr>
+    <div className="overflow-hidden rounded-xl border" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
+      <div className="flex items-center gap-2 px-4 py-3"
+        style={{ backgroundColor: "var(--bg-elevated)", borderBottom: "1px solid var(--border-soft)" }}>
+        <AlertTriangle className="h-4 w-4 shrink-0" style={{ color: COLOR_TRIBUTO }} />
+        <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+          Impuestos adicionales
+        </span>
+        <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+          INC · IBUA · ICUI · INPP · Bolsas · otros
+        </span>
+        {data.hay_no_parametrizados && (
+          <span className="ml-auto rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+            hay tributos sin parametrizar
+          </span>
+        )}
+      </div>
+      <div className="divide-y" style={{ borderColor: "var(--border-soft)" }}>
+        {tieneCompras && (
+          <div className="px-3 py-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide px-1" style={{ color: COLOR_IVA_DESCONTABLE }}>
+              Compras
+            </p>
+            <TributoBloque tributos={data.compras} total={data.total_compras} lado="compras" />
+          </div>
+        )}
+        {tieneVentas && (
+          <div className="px-3 py-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide px-1" style={{ color: COLOR_IVA_GENERADO }}>
+              Ventas
+            </p>
+            <TributoBloque tributos={data.ventas} total={data.total_ventas} lado="ventas" />
+          </div>
+        )}
+      </div>
+      <div className="px-4 py-2" style={{ backgroundColor: "var(--bg-elevated)", borderTop: "1px solid var(--border-soft)" }}>
+        <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+          Estos tributos están discriminados en los XML. Ciolix los muestra para que el contador determine su tratamiento: mayor valor del costo/gasto, impuesto recuperable u otro, según la norma aplicable.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function KpiCard({ label, valor, color, sub }: { label: string; valor: number; color: string; sub?: string }) {
+  return (
+    <div className="flex flex-col gap-1 rounded-xl border p-4" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
+      <p className="text-xs font-semibold uppercase tracking-wide" style={{ color }}>{label}</p>
+      <p className="text-xl font-bold tabular-nums" style={{ color }}>{fmt(valor)}</p>
+      {sub && <p className="text-xs" style={{ color: "var(--text-muted)" }}>{sub}</p>}
+    </div>
   );
 }
 
@@ -448,37 +589,49 @@ function ReporteTab({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button"
-          onClick={() => setReporteKey((k) => k + 1)}
-          disabled={isLoading}
-          className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50"
-          style={{ backgroundColor: "var(--brand)", color: "#fff" }}>
-          {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScrollText className="h-4 w-4" />}
-          {isLoading ? "Generando…" : "Generar reporte"}
-        </button>
-
-        {data && (
-          <>
-            <button type="button" onClick={() => descargar("excel")} disabled={descargando !== null}
-              className="flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors disabled:opacity-50"
-              style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)", backgroundColor: "var(--bg-surface)" }}>
-              {descargando === "excel" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
-              Excel
-            </button>
-            <button type="button" onClick={() => descargar("pdf")} disabled={descargando !== null}
-              className="flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors disabled:opacity-50"
-              style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)", backgroundColor: "var(--bg-surface)" }}>
-              {descargando === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              PDF
-            </button>
-          </>
-        )}
-        {errDescarga && <span className="text-xs" style={{ color: "#dc2626" }}>{errDescarga}</span>}
+      {/* Encabezado: periodo + botones de acción */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3"
+        style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
+        <div className="flex items-center gap-2">
+          <CalendarDays className="h-4 w-4 shrink-0" style={{ color: "var(--brand)" }} />
+          <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+            {desde} — {hasta}
+          </span>
+          <span className="rounded-full px-2 py-0.5 text-xs font-medium"
+            style={{ backgroundColor: "var(--brand-muted)", color: "var(--brand)" }}>
+            Formulario 300
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => setReporteKey((k) => k + 1)} disabled={isLoading}
+            className="flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-medium transition-colors disabled:opacity-50"
+            style={{ backgroundColor: "var(--brand)", color: "#fff" }}>
+            {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ScrollText className="h-3.5 w-3.5" />}
+            {isLoading ? "Generando…" : "Generar"}
+          </button>
+          {data && (
+            <>
+              <button type="button" onClick={() => descargar("excel")} disabled={descargando !== null}
+                className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50"
+                style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)", backgroundColor: "var(--bg-elevated)" }}>
+                {descargando === "excel" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5" />}
+                Excel
+              </button>
+              <button type="button" onClick={() => descargar("pdf")} disabled={descargando !== null}
+                className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50"
+                style={{ borderColor: "var(--border-soft)", color: "var(--text-secondary)", backgroundColor: "var(--bg-elevated)" }}>
+                {descargando === "pdf" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                PDF
+              </button>
+            </>
+          )}
+          {errDescarga && <span className="text-xs" style={{ color: "#dc2626" }}>{errDescarga}</span>}
+        </div>
       </div>
 
       {error && (
-        <div className="flex items-center gap-2 rounded-lg border px-4 py-3 text-sm" style={{ borderColor: "#fca5a5", backgroundColor: "#fef2f2", color: "#dc2626" }}>
+        <div className="flex items-center gap-2 rounded-lg border px-4 py-3 text-sm"
+          style={{ borderColor: "#fca5a5", backgroundColor: "#fef2f2", color: "#dc2626" }}>
           <AlertTriangle className="h-4 w-4 shrink-0" />
           No se pudo generar el reporte. Intentalo de nuevo.
         </div>
@@ -487,51 +640,78 @@ function ReporteTab({
       {!data && !isLoading && !error && reporteKey === 0 && (
         <div className="rounded-xl border px-4 py-16 text-center" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
           <ScrollText className="mx-auto mb-3 h-8 w-8" style={{ color: "var(--text-muted)" }} />
-          <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>Hacé clic en "Generar reporte"</p>
-          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>El reporte consolida ventas y compras del periodo seleccionado.</p>
+          <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>Hacé clic en "Generar"</p>
+          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
+            Consolida ventas y compras del periodo seleccionado con sus devoluciones netas.
+          </p>
         </div>
       )}
 
       {data && (
         <>
           {data.conceptos_pendientes > 0 && (
-            <div className="flex items-center gap-2 rounded-lg border px-4 py-3 text-sm" style={{ borderColor: "#fbbf24", backgroundColor: "#fffbeb", color: "#92400e" }}>
+            <div className="flex items-center gap-2 rounded-lg border px-4 py-3 text-sm"
+              style={{ borderColor: "#fbbf24", backgroundColor: "#fffbeb", color: "#92400e" }}>
               <AlertTriangle className="h-4 w-4 shrink-0" />
-              {data.conceptos_pendientes} concepto(s) aún sin clasificar — el reporte puede estar incompleto.
+              {data.conceptos_pendientes} concepto(s) aún sin clasificar — las cifras de exento / excluido pueden estar incompletas.
             </div>
           )}
 
+          {/* KPIs */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <KpiCard label="IVA Generado" valor={data.totales.iva_generado}
+              color={COLOR_IVA_GENERADO} sub="ventas del periodo" />
+            <KpiCard label="IVA Descontable" valor={data.totales.iva_descontable}
+              color={COLOR_IVA_DESCONTABLE} sub="compras del periodo" />
+            <KpiCard label="Balance Analítico de IVA" valor={data.totales.balance_analitico_iva}
+              color="var(--brand)" sub="generado − descontable" />
+          </div>
+
           {/* VENTAS */}
           <div className="overflow-hidden rounded-xl border" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
-            <div className="flex items-center gap-2 px-4 py-3" style={{ backgroundColor: "var(--bg-elevated)", borderBottom: "1px solid var(--border-soft)" }}>
-              <ReceiptText className="h-4 w-4" style={{ color: "var(--brand)" }} />
+            <div className="flex items-center gap-2 px-4 py-3"
+              style={{ backgroundColor: "var(--bg-elevated)", borderBottom: "1px solid var(--border-soft)" }}>
+              <ReceiptText className="h-4 w-4" style={{ color: COLOR_IVA_GENERADO }} />
               <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Ventas e ingresos</span>
             </div>
             <div className="overflow-x-auto px-4 py-3">
-              <table className="w-full min-w-[400px]">
+              <table className="w-full min-w-[420px]">
                 <thead>
-                  <tr className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  <tr className="border-b text-xs" style={{ color: "var(--text-muted)", borderColor: "var(--border-soft)" }}>
                     <th className="pb-2 text-left font-medium">Tratamiento</th>
                     <th className="pb-2 text-right font-medium">Base gravable</th>
                     <th className="pb-2 text-right font-medium">IVA generado</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y" style={{ borderColor: "var(--border-soft)" }}>
+                <tbody>
                   {CATS_ORDEN.filter((cat) => data.ventas[cat].base !== 0 || data.ventas[cat].iva !== 0).map((cat) => (
-                    <tr key={cat}>
+                    <tr key={cat} className="border-b" style={{ borderColor: "var(--border-soft)" }}>
                       <td className="py-2 pr-4 text-sm" style={{ color: "var(--text-secondary)" }}>{CAT_REPORTE_LABEL[cat]}</td>
                       <td className="py-2 text-right text-sm tabular-nums" style={{ color: "var(--text-secondary)" }}>{fmt(data.ventas[cat].base)}</td>
                       <td className="py-2 text-right text-sm tabular-nums" style={{ color: "var(--text-secondary)" }}>{fmt(data.ventas[cat].iva)}</td>
                     </tr>
                   ))}
+                  {data.devoluciones.ventas.base > 0 && (
+                    <tr className="border-b" style={{ borderColor: "var(--border-soft)" }}>
+                      <td className="py-2 pr-4 text-sm italic" style={{ color: COLOR_IVA_DESCONTABLE }}>
+                        (−) Devoluciones en ventas
+                      </td>
+                      <td className="py-2 text-right text-sm tabular-nums italic" style={{ color: COLOR_IVA_DESCONTABLE }}>
+                        −{fmt(data.devoluciones.ventas.base)}
+                      </td>
+                      <td className="py-2 text-right text-sm tabular-nums italic" style={{ color: COLOR_IVA_DESCONTABLE }}>
+                        −{fmt(data.devoluciones.ventas.iva)}
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
                 <tfoot>
-                  <tr className="border-t font-semibold" style={{ borderColor: "var(--border-soft)" }}>
-                    <td className="pt-2 text-sm" style={{ color: "var(--text-primary)" }}>TOTAL</td>
-                    <td className="pt-2 text-right text-sm tabular-nums" style={{ color: "var(--text-primary)" }}>
+                  <tr>
+                    <td className="pt-2.5 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>TOTAL NETO</td>
+                    <td className="pt-2.5 text-right text-sm font-semibold tabular-nums" style={{ color: COLOR_IVA_GENERADO }}>
                       {fmt(CATS_ORDEN.reduce((s, c) => s + data.ventas[c].base, 0))}
                     </td>
-                    <td className="pt-2 text-right text-sm tabular-nums" style={{ color: "var(--text-primary)" }}>
+                    <td className="pt-2.5 text-right text-sm font-semibold tabular-nums" style={{ color: COLOR_IVA_GENERADO }}>
                       {fmt(data.totales.iva_generado)}
                     </td>
                   </tr>
@@ -542,40 +722,57 @@ function ReporteTab({
 
           {/* COMPRAS */}
           <div className="overflow-hidden rounded-xl border" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
-            <div className="flex items-center gap-2 px-4 py-3" style={{ backgroundColor: "var(--bg-elevated)", borderBottom: "1px solid var(--border-soft)" }}>
-              <ShoppingCart className="h-4 w-4" style={{ color: "var(--brand)" }} />
+            <div className="flex items-center gap-2 px-4 py-3"
+              style={{ backgroundColor: "var(--bg-elevated)", borderBottom: "1px solid var(--border-soft)" }}>
+              <ShoppingCart className="h-4 w-4" style={{ color: COLOR_IVA_DESCONTABLE }} />
               <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Compras y costos</span>
             </div>
             <div className="overflow-x-auto px-4 py-3">
-              <table className="w-full min-w-[540px]">
+              <table className="w-full min-w-[560px]">
                 <thead>
-                  <tr className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  <tr className="border-b text-xs" style={{ color: "var(--text-muted)", borderColor: "var(--border-soft)" }}>
                     <th className="pb-2 text-left font-medium">Tratamiento</th>
                     <th className="pb-2 text-right font-medium">Base</th>
                     <th className="pb-2 text-right font-medium">IVA facturado</th>
                     <th className="pb-2 text-right font-medium">IVA descontable</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y" style={{ borderColor: "var(--border-soft)" }}>
+                <tbody>
                   {CATS_ORDEN.filter((cat) => data.compras[cat].base !== 0 || data.compras[cat].iva_facturado !== 0).map((cat) => (
-                    <tr key={cat}>
+                    <tr key={cat} className="border-b" style={{ borderColor: "var(--border-soft)" }}>
                       <td className="py-2 pr-4 text-sm" style={{ color: "var(--text-secondary)" }}>{CAT_REPORTE_LABEL[cat]}</td>
                       <td className="py-2 text-right text-sm tabular-nums" style={{ color: "var(--text-secondary)" }}>{fmt(data.compras[cat].base)}</td>
                       <td className="py-2 text-right text-sm tabular-nums" style={{ color: "var(--text-secondary)" }}>{fmt(data.compras[cat].iva_facturado)}</td>
                       <td className="py-2 text-right text-sm tabular-nums" style={{ color: "var(--text-secondary)" }}>{fmt(data.compras[cat].iva_descontable)}</td>
                     </tr>
                   ))}
+                  {data.devoluciones.compras.base > 0 && (
+                    <tr className="border-b" style={{ borderColor: "var(--border-soft)" }}>
+                      <td className="py-2 pr-4 text-sm italic" style={{ color: COLOR_IVA_DESCONTABLE }}>
+                        (−) Devoluciones en compras
+                      </td>
+                      <td className="py-2 text-right text-sm tabular-nums italic" style={{ color: COLOR_IVA_DESCONTABLE }}>
+                        −{fmt(data.devoluciones.compras.base)}
+                      </td>
+                      <td className="py-2 text-right text-sm tabular-nums italic" style={{ color: COLOR_IVA_DESCONTABLE }}>
+                        −{fmt(data.devoluciones.compras.iva_facturado)}
+                      </td>
+                      <td className="py-2 text-right text-sm tabular-nums italic" style={{ color: COLOR_IVA_DESCONTABLE }}>
+                        −{fmt(data.devoluciones.compras.iva_descontable)}
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
                 <tfoot>
-                  <tr className="border-t font-semibold" style={{ borderColor: "var(--border-soft)" }}>
-                    <td className="pt-2 text-sm" style={{ color: "var(--text-primary)" }}>TOTAL</td>
-                    <td className="pt-2 text-right text-sm tabular-nums" style={{ color: "var(--text-primary)" }}>
+                  <tr>
+                    <td className="pt-2.5 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>TOTAL NETO</td>
+                    <td className="pt-2.5 text-right text-sm font-semibold tabular-nums" style={{ color: COLOR_IVA_DESCONTABLE }}>
                       {fmt(CATS_ORDEN.reduce((s, c) => s + data.compras[c].base, 0))}
                     </td>
-                    <td className="pt-2 text-right text-sm tabular-nums" style={{ color: "var(--text-primary)" }}>
+                    <td className="pt-2.5 text-right text-sm font-semibold tabular-nums" style={{ color: COLOR_IVA_DESCONTABLE }}>
                       {fmt(CATS_ORDEN.reduce((s, c) => s + data.compras[c].iva_facturado, 0))}
                     </td>
-                    <td className="pt-2 text-right text-sm tabular-nums" style={{ color: "var(--text-primary)" }}>
+                    <td className="pt-2.5 text-right text-sm font-semibold tabular-nums" style={{ color: COLOR_IVA_DESCONTABLE }}>
                       {fmt(data.totales.iva_descontable)}
                     </td>
                   </tr>
@@ -584,25 +781,14 @@ function ReporteTab({
             </div>
           </div>
 
-          {/* BALANCE */}
-          <div className="overflow-hidden rounded-xl border" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
-            <div className="flex items-center gap-2 px-4 py-3" style={{ backgroundColor: "var(--bg-elevated)", borderBottom: "1px solid var(--border-soft)" }}>
-              <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Balance analítico de IVA</span>
-            </div>
-            <div className="px-4 py-3">
-              <table className="w-full max-w-md">
-                <tbody>
-                  <FilaMoneda label="IVA generado (ventas)" valor={data.totales.iva_generado} />
-                  <FilaMoneda label="IVA descontable (compras)" valor={data.totales.iva_descontable} />
-                  <tr><td colSpan={2}><div className="my-1.5 border-t" style={{ borderColor: "var(--border-soft)" }} /></td></tr>
-                  <FilaMoneda label="Balance analítico de IVA" valor={data.totales.balance_analitico_iva} negrita />
-                </tbody>
-              </table>
-              <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>
-                Este valor no equivale al saldo a pagar ni al saldo a favor — el Formulario 300 depende de otros conceptos de la liquidación que este análisis no cubre.
-              </p>
-            </div>
-          </div>
+          {/* NOTA */}
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+            Balance analítico de IVA: <strong>{fmt(data.totales.balance_analitico_iva)}</strong> —
+            este valor no equivale al saldo a pagar ni al saldo a favor. El Formulario 300 depende
+            de otros conceptos de la liquidación que este análisis no cubre.
+          </p>
+
+          <TributosAdicionalesSection desde={desde} hasta={hasta} empresaId={empresaId} />
         </>
       )}
     </div>
