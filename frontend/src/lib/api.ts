@@ -158,6 +158,35 @@ export const api = {
     qs.set("todas_tarifas", String(todasTarifas));
     return req<import("@/lib/types").ResumenF300>(`/formulario-300/proveedores?${qs.toString()}`);
   },
+  f300Reporte: (desde: string, hasta: string, empresaId?: number | null) => {
+    const qs = new URLSearchParams();
+    qs.set("desde", desde);
+    qs.set("hasta", hasta);
+    if (empresaId != null) qs.set("empresa_id", String(empresaId));
+    return req<import("@/lib/types").ReporteF300>(`/formulario-300/reporte?${qs.toString()}`);
+  },
+  f300ReporteDescargar: async (
+    formato: "excel" | "pdf", desde: string, hasta: string, empresaId?: number | null,
+  ): Promise<void> => {
+    const { token, empresaId: empId } = useAuthStore.getState();
+    const qs = new URLSearchParams();
+    qs.set("desde", desde);
+    qs.set("hasta", hasta);
+    if (empresaId != null) qs.set("empresa_id", String(empresaId));
+    const headers: Record<string, string> = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (empId != null) headers["X-Empresa-Id"] = String(empId);
+    const res = await fetch(`${BASE}/formulario-300/reporte/${formato}?${qs.toString()}`, { headers });
+    if (!res.ok) throw new Error("No se pudo generar el archivo.");
+    const blob = await res.blob();
+    const ext = formato === "excel" ? "xlsx" : "pdf";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `formulario300_${desde}_${hasta}.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
   f300Clasificar: (body: {
     empresa_id: number; concepto: string; tratamiento: string;
     nit_tercero?: string | null; referencia?: string | null;
