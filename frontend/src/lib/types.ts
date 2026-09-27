@@ -456,6 +456,40 @@ export interface ResumenF300 {
   proveedores: ProveedorF300[];
 }
 
+export interface CatReporteVentas {
+  base: number;
+  iva: number;
+}
+
+export interface CatReporteCompras {
+  base: number;
+  iva_facturado: number;
+  iva_descontable: number;
+}
+
+export type CatReporte = "gravado_general" | "gravado_5" | "exento" | "excluido" | "no_gravado" | "pendiente";
+
+export const CAT_REPORTE_LABEL: Record<CatReporte, string> = {
+  gravado_general: "Gravado (tarifa general)",
+  gravado_5: "Gravado (5%)",
+  exento: "Exento",
+  excluido: "Excluido",
+  no_gravado: "No gravado",
+  pendiente: "Pendiente de clasificar",
+};
+
+export interface ReporteF300 {
+  periodo: { desde: string; hasta: string };
+  ventas: Record<CatReporte, CatReporteVentas>;
+  compras: Record<CatReporte, CatReporteCompras>;
+  totales: {
+    iva_generado: number;
+    iva_descontable: number;
+    balance_analitico_iva: number;
+  };
+  conceptos_pendientes: number;
+}
+
 export interface AdminUsuario {
   id: number;
   email: string;

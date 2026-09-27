@@ -11,6 +11,7 @@ import pytest
 
 from services.formulario_300_service import (
     TIPOS_COMPRAS, TIPOS_VENTAS, ConceptoResumen, ProveedorResumen, _balance_vacio,
+    _CATS_REPORTE, _reporte_vacio,
 )
 
 from services.catalogo_tributario_service import PENDIENTE, Clasificacion
@@ -237,3 +238,78 @@ def test_el_campo_del_balance_se_llama_balance_analitico_iva():
     v = _balance_vacio()
     assert "balance_analitico_iva" in v
     assert not any("saldo" in clave for clave in v)
+
+
+# ─── Reporte consolidado (Fase 4) ─────────────────────────────────────────────
+#
+# reporte_resumen() agrega ventas y compras por categoría tributaria.
+# El reporte vacío (sin empresas) es el caso más importante de cubrir: si la
+# función inventara datos cuando no hay nada, el contador vería cifras falsas.
+
+def test_reporte_vacio_sin_empresas_no_inventa():
+    """Con empresa_ids vacío el reporte devuelve ceros — nunca inventa datos."""
+    from datetime import date
+    r = _reporte_vacio(date(2026, 1, 1), date(2026, 9, 30))
+    assert r["totales"]["iva_generado"] == 0.0
+    assert r["totales"]["iva_descontable"] == 0.0
+    assert r["totales"]["balance_analitico_iva"] == 0.0
+    assert r["conceptos_pendientes"] == 0
+
+
+def test_reporte_vacio_tiene_todas_las_categorias():
+    """El reporte vacío expone todas las categorías para ventas y compras,
+    aunque estén en cero — el frontend las puede iterar sin verificar si existen."""
+    from datetime import date
+    r = _reporte_vacio(date(2026, 1, 1), date(2026, 9, 30))
+    for cat in _CATS_REPORTE:
+        assert cat in r["ventas"], f"Falta categoría '{cat}' en ventas"
+        assert cat in r["compras"], f"Falta categoría '{cat}' en compras"
+
+
+def test_reporte_ventas_tiene_base_e_iva():
+    """Cada categoría de ventas expone 'base' y 'iva' — si alguno faltara el
+    frontend lo leería como undefined y mostraría NaN en la tabla."""
+    from datetime import date
+    r = _reporte_vacio(date(2026, 1, 1), date(2026, 9, 30))
+    for cat in _CATS_REPORTE:
+        assert "base" in r["ventas"][cat]
+        assert "iva" in r["ventas"][cat]
+
+
+def test_reporte_compras_tiene_base_iva_facturado_e_iva_descontable():
+    """Cada categoría de compras expone tres cifras: base, IVA facturado e IVA
+    descontable. Si faltara cualquiera, el Excel y el PDF fallarían silenciosamente."""
+    from datetime import date
+    r = _reporte_vacio(date(2026, 1, 1), date(2026, 9, 30))
+    for cat in _CATS_REPORTE:
+        assert "base" in r["compras"][cat]
+        assert "iva_facturado" in r["compras"][cat]
+        assert "iva_descontable" in r["compras"][cat]
+
+
+def test_reporte_totales_tiene_los_tres_campos():
+    """El bloque 'totales' del reporte expone exactamente los tres campos que
+    muestra el balance — ni más ni menos, para que el frontend no tenga que
+    adivinar qué usar."""
+    from datetime import date
+    r = _reporte_vacio(date(2026, 1, 1), date(2026, 9, 30))
+    assert set(r["totales"].keys()) == {"iva_generado", "iva_descontable", "balance_analitico_iva"}
+
+
+def test_reporte_balance_nunca_usa_nombre_saldo():
+    """El campo del balance NUNCA se puede llamar 'saldo_a_pagar' ni
+    'saldo_a_favor' — el Formulario 300 depende de más conceptos que este
+    análisis no cubre y ese nombre induciría a error al contador."""
+    from datetime import date
+    r = _reporte_vacio(date(2026, 1, 1), date(2026, 9, 30))
+    assert not any("saldo" in k for k in r["totales"])
+    assert "balance_analitico_iva" in r["totales"]
+
+
+def test_reporte_periodo_queda_en_el_resultado():
+    """El reporte incluye el periodo consultado — es lo que el Excel y el PDF
+    usan para poner el encabezado con las fechas."""
+    from datetime import date
+    r = _reporte_vacio(date(2026, 1, 1), date(2026, 9, 30))
+    assert r["periodo"]["desde"] == "2026-01-01"
+    assert r["periodo"]["hasta"] == "2026-09-30"

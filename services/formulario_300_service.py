@@ -239,6 +239,180 @@ def _empresa_de(db: Session, empresa_ids: list[int], nit: str) -> int:
     return fila or empresa_ids[0]
 
 
+# ── Reporte consolidado por categoría (Fase 4) ───────────────────────────────
+
+# Categorías que puede tomar un concepto en el reporte. "pendiente" agrupa
+# los ítems al 0% que todavía no tienen clasificación validada ni sugerida.
+_CATS_REPORTE = ("gravado_general", "gravado_5", "exento", "excluido", "no_gravado", "pendiente")
+
+# Etiquetas para el reporte (Excel/PDF/pantalla).
+CATS_LABEL = {
+    "gravado_general": "Gravado (tarifa general)",
+    "gravado_5": "Gravado (5%)",
+    "exento": "Exento",
+    "excluido": "Excluido",
+    "no_gravado": "No gravado",
+    "pendiente": "Pendiente de clasificar",
+}
+
+
+def _reporte_vacio(desde: date | None = None, hasta: date | None = None) -> dict:
+    return {
+        "periodo": {
+            "desde": desde.isoformat() if desde else None,
+            "hasta": hasta.isoformat() if hasta else None,
+        },
+        "ventas": {cat: {"base": 0.0, "iva": 0.0} for cat in _CATS_REPORTE},
+        "compras": {cat: {"base": 0.0, "iva_facturado": 0.0, "iva_descontable": 0.0} for cat in _CATS_REPORTE},
+        "totales": {"iva_generado": 0.0, "iva_descontable": 0.0, "balance_analitico_iva": 0.0},
+        "conceptos_pendientes": 0,
+    }
+
+
+def reporte_resumen(
+    db: Session,
+    *,
+    empresa_ids: list[int],
+    desde: date,
+    hasta: date,
+    cuenta_id: int | None = None,
+) -> dict:
+    """Resumen consolidado de operaciones por categoría tributaria, listo para
+    construir el reporte del Formulario 300.
+
+    Separa ventas y compras. Dentro de cada lado:
+    - Ítems con tarifa ≠ 0% se resuelven directamente por tarifa (gravado_5 /
+      gravado_general) sin necesitar clasificación manual.
+    - Ítems con tarifa 0% usan la clasificación guardada en la empresa
+      (exento / excluido / no_gravado). Los que todavía no tienen tratamiento
+      van al bucket "pendiente".
+
+    Para compras, el IVA descontable se toma de la clasificación: los ítems
+    gravados (5%/19%) se marcan como descontable automáticamente; los exentos
+    y excluidos, como no descontable.
+    """
+    if not empresa_ids:
+        return _reporte_vacio(desde, hasta)
+
+    docs = db.execute(
+        select(DocumentoDian).where(
+            DocumentoDian.empresa_id.in_(empresa_ids),
+            DocumentoDian.tipo.in_(TIPOS_VENTAS + TIPOS_COMPRAS),
+            DocumentoDian.fecha_emision >= desde,
+            DocumentoDian.fecha_emision <= hasta,
+        )
+    ).scalars().all()
+
+    v = {cat: {"base": 0.0, "iva": 0.0} for cat in _CATS_REPORTE}
+    c = {cat: {"base": 0.0, "iva_facturado": 0.0, "iva_descontable": 0.0} for cat in _CATS_REPORTE}
+
+    # Ítems al 0%: se agrupan por (es_venta, nit, concepto_norm) para
+    # llamar a clasificar() UNA vez por par — evita N consultas por ítem.
+    pending: dict[tuple, dict] = {}
+
+    for doc in docs:
+        if not doc.items_json:
+            continue
+        try:
+            items = json.loads(doc.items_json)
+        except ValueError:
+            continue
+
+        signo = SIGNO.get(doc.tipo, 1)
+        es_venta = doc.tipo in TIPOS_VENTAS
+        nit = (doc.nit_contraparte or "").strip()
+        fecha_doc = doc.fecha_emision or hasta
+
+        for it in items:
+            pct_raw = it.get("porcentaje")
+            try:
+                pct = float(pct_raw) if pct_raw is not None else None
+            except (TypeError, ValueError):
+                pct = None
+            if pct is None:
+                continue
+
+            base = signo * float(it.get("base") or 0)
+            iva = signo * float(it.get("valor_impuesto") or 0)
+            pct_r = round(pct, 2)
+
+            if pct_r != 0.0:
+                cat = "gravado_5" if pct_r == 5.0 else "gravado_general"
+                if es_venta:
+                    v[cat]["base"] += base
+                    v[cat]["iva"] += iva
+                else:
+                    c[cat]["base"] += base
+                    c[cat]["iva_facturado"] += iva
+                    c[cat]["iva_descontable"] += iva  # gravado → descontable por defecto
+            else:
+                if not nit:
+                    continue
+                concepto = str(it.get("descripcion") or "").strip()
+                if not concepto:
+                    continue
+                norm = normalizar_concepto(concepto)
+                if not norm:
+                    continue
+                referencia = str(it.get("referencia") or "").strip() or None
+                clave = (es_venta, nit, norm)
+                acc = pending.setdefault(clave, {
+                    "es_venta": es_venta, "nit": nit, "concepto": concepto,
+                    "referencia": referencia, "fecha": fecha_doc, "pct": pct,
+                    "base": 0.0, "iva": 0.0,
+                })
+                acc["base"] += base
+                acc["iva"] += iva
+                if fecha_doc < acc["fecha"]:
+                    acc["fecha"] = fecha_doc
+                if not acc.get("referencia") and referencia:
+                    acc["referencia"] = referencia
+
+    conceptos_pendientes = 0
+    for (es_venta, nit, _norm), acc in pending.items():
+        empresa_id = empresa_ids[0] if len(empresa_ids) == 1 else _empresa_de(db, empresa_ids, nit)
+        clas = clasificar(
+            db, empresa_id=empresa_id, concepto=acc["concepto"],
+            fecha=acc["fecha"], nit_tercero=nit,
+            referencia=acc.get("referencia"), pct=acc.get("pct"),
+            cuenta_id=cuenta_id,
+        )
+        t = clas.tratamiento
+        cat = t if t in _CATS_REPORTE else "pendiente"
+        if cat == "pendiente":
+            conceptos_pendientes += 1
+
+        if es_venta:
+            v[cat]["base"] += acc["base"]
+            v[cat]["iva"] += acc["iva"]
+        else:
+            c[cat]["base"] += acc["base"]
+            c[cat]["iva_facturado"] += acc["iva"]
+            if clas.iva_descontable == "descontable":
+                c[cat]["iva_descontable"] += acc["iva"]
+
+    for cat in _CATS_REPORTE:
+        for k in v[cat]:
+            v[cat][k] = round(v[cat][k], 2)
+        for k in c[cat]:
+            c[cat][k] = round(c[cat][k], 2)
+
+    iva_generado = sum(v[cat]["iva"] for cat in _CATS_REPORTE)
+    iva_descontable_total = sum(c[cat]["iva_descontable"] for cat in _CATS_REPORTE)
+
+    return {
+        "periodo": {"desde": desde.isoformat(), "hasta": hasta.isoformat()},
+        "ventas": v,
+        "compras": c,
+        "totales": {
+            "iva_generado": round(iva_generado, 2),
+            "iva_descontable": round(iva_descontable_total, 2),
+            "balance_analitico_iva": round(iva_generado - iva_descontable_total, 2),
+        },
+        "conceptos_pendientes": conceptos_pendientes,
+    }
+
+
 # ── Balance de IVA (Fase 3) ──────────────────────────────────────────────────
 
 def _balance_vacio() -> dict:
