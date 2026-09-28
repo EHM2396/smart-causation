@@ -506,10 +506,10 @@ export const api = {
   // DIAN unificado — consultar TODO (recibidos + emitidos + soporte) con un solo token.
   dianConsultarTodo: (body: { auth_url: string; fecha_desde: string; fecha_hasta: string }) =>
     req<{
-      compras: { success: boolean; total: number; documents: DianDocumento[] };
-      ventas: { success: boolean; total: number; documents: DianDocumento[] };
-      soporte: { success: boolean; total: number; documents: DianDocumento[] };
-      soporte_ajuste: { success: boolean; total: number; documents: DianDocumento[] };
+      compras: { success: boolean; total: number; total_dian: number; incompleto: boolean; advertencia?: string; documents: DianDocumento[] };
+      ventas: { success: boolean; total: number; total_dian: number; incompleto: boolean; advertencia?: string; documents: DianDocumento[] };
+      soporte: { success: boolean; total: number; total_dian: number; incompleto: boolean; advertencia?: string; documents: DianDocumento[] };
+      soporte_ajuste: { success: boolean; total: number; total_dian: number; incompleto: boolean; advertencia?: string; documents: DianDocumento[] };
     }>("/dian/consultar-todo", { method: "POST", body: JSON.stringify(body) }),
 
   // DIAN unificado — traer y clasificar en 6 grupos (compras, nc, ventas, nc_ventas, soporte, nc_soporte).

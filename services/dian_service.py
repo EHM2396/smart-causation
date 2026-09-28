@@ -281,9 +281,18 @@ def _paginar_datatables(
         if total is None:
             total = payload.get("recordsTotal") or payload.get("recordsFiltered") or len(registros)
 
-        # Se corta cuando la página vino incompleta (era la última) o ya se
-        # juntó lo que la DIAN dijo que había.
-        if len(registros) < _PAGINA or (total and len(todos) >= total):
+        # Condición de parada robusta:
+        # 1. Página vacía → no hay más (señal definitiva).
+        # 2. Ya tenemos todos los que la DIAN dijo que había.
+        # 3. Página parcial SIN total conocido → asumir última página.
+        # IMPORTANTE: si la DIAN reportó total > 0 y la página vino parcial
+        # pero no vacía, se sigue intentando (la DIAN a veces devuelve páginas
+        # intermedias con menos de `length` registros sin que sea la última).
+        if len(registros) == 0:
+            break
+        if total is not None and len(todos) >= total:
+            break
+        if total is None and len(registros) < _PAGINA:
             break
         start += _PAGINA
         if start > 20_000:  # red de seguridad: nunca un bucle infinito
@@ -535,7 +544,23 @@ def consultar_documentos(auth_url: str, fecha_desde: str, fecha_hasta: str, modo
     except requests.RequestException:
         raise DianError("CONNECTION_ERROR", "No se pudo conectar con la DIAN (problema de red temporal).")
     docs = _normalizar_documentos(resultado, modo=modo)
-    return {"success": True, "total": len(docs), "documents": docs}
+    total_dian = resultado.get("recordsTotal") or len(docs)
+    incompleto = len(docs) < total_dian
+    respuesta: dict = {
+        "success": True,
+        "total": len(docs),
+        "total_dian": total_dian,
+        "incompleto": incompleto,
+        "documents": docs,
+    }
+    if incompleto:
+        respuesta["advertencia"] = (
+            f"⚠️ La DIAN reporta {total_dian} documentos en este periodo pero solo se "
+            f"pudieron traer {len(docs)}. Esto ocurre cuando el rango de fechas es muy "
+            f"amplio y el portal de la DIAN corta la respuesta. Importa en rangos más "
+            f"pequeños (máximo 2 meses) para garantizar que no quede ningún documento fuera."
+        )
+    return respuesta
 
 
 def _descargar_bytes(session: requests.Session, transaction_id: str, modo: str) -> bytes:

@@ -71,7 +71,7 @@ export function ImportarDian() {
   const [importando, setImportando] = useState(false);
   const [prog, setProg] = useState({ done: 0, total: 0 });
   const [error, setError] = useState("");
-  const [resultado, setResultado] = useState<{ compras: number; ventas: number; soporte: number; soporteAjuste: number; idsCompras: string[]; idsVentas: string[]; idsSoporte: string[]; idsSoporteAjuste: string[] } | null>(null);
+  const [resultado, setResultado] = useState<{ compras: number; ventas: number; soporte: number; soporteAjuste: number; idsCompras: string[]; idsVentas: string[]; idsSoporte: string[]; idsSoporteAjuste: string[]; advertenciasIncompleto: string[] } | null>(null);
   const [resumen, setResumen] = useState<{ encontradas: Record<Bucket, number>; agregadas: Record<Bucket, number> } | null>(null);
   const [erroresImport, setErroresImport] = useState(0);
   // Se cortó la conexión A MITAD del lote (no un documento puntual): lo ya
@@ -90,10 +90,17 @@ export function ImportarDian() {
       // Los DS y sus ajustes se consultan aparte (tipo 05/95): se quitan de ventas
       // por si aparecieran también en la bandeja de emitidos, para no duplicar.
       const idsVentas = res.ventas.documents.map((d) => d.id).filter((x): x is string => !!x && !emitidoAparte.has(x));
+      const advertenciasIncompleto = [
+        res.compras.advertencia,
+        res.ventas.advertencia,
+        res.soporte.advertencia,
+        res.soporte_ajuste.advertencia,
+      ].filter((a): a is string => !!a);
       setResultado({
         compras: res.compras.total, ventas: idsVentas.length,
         soporte: idsSoporte.length, soporteAjuste: idsSoporteAjuste.length,
         idsCompras, idsVentas, idsSoporte, idsSoporteAjuste,
+        advertenciasIncompleto,
       });
     } catch (e) {
       setError(limpiarError((e as Error).message));
@@ -291,6 +298,28 @@ export function ImportarDian() {
               )}
             </div>
           </div>
+          {/* Advertencia de importación incompleta — se muestra cuando la DIAN
+              reportó más documentos de los que pudo devolver. Es crítico que el
+              contador lo vea ANTES de traer, para que ajuste el rango. */}
+          {resultado.advertenciasIncompleto.length > 0 && (
+            <div className="rounded-xl border-2 p-4 space-y-2"
+              style={{ borderColor: "#F59E0B", backgroundColor: "#FEF3C7" }}
+              role="alert">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 shrink-0" style={{ color: "#B45309" }} />
+                <p className="text-sm font-bold" style={{ color: "#92400E" }}>
+                  Consulta incompleta — la DIAN no entregó todos los documentos
+                </p>
+              </div>
+              {resultado.advertenciasIncompleto.map((adv, i) => (
+                <p key={i} className="text-sm pl-7" style={{ color: "#92400E" }}>{adv}</p>
+              ))}
+              <p className="text-xs pl-7 font-semibold" style={{ color: "#92400E" }}>
+                Reduce el rango a máximo 2 meses y vuelve a consultar antes de traer.
+              </p>
+            </div>
+          )}
+
           <p className="text-xs" style={{ color: "var(--text-muted)" }}>
             Al traer, cada documento va a su módulo: facturas a Compras/Ventas, notas crédito a NC, y los documentos soporte (y sus ajustes) a Documento Soporte.
           </p>
