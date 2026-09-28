@@ -112,6 +112,7 @@ def factura_xml(
     customization: str | None = None,
     descuento_global: float = 0.0,
     recargo_global: float = 0.0,
+    tributos_header: list[tuple[str, float, float]] | None = None,
     # Caso real de producción: varias notas crédito de venta NO traen
     # PartyLegalEntity para el tercero, y el nombre queda solo dentro de
     # PartyTaxScheme/RegistrationName. `None` (default) mantiene el
@@ -138,6 +139,17 @@ def factura_xml(
             f"<cbc:Amount currencyID='COP'>{recargo_global}</cbc:Amount></cac:AllowanceCharge>"
         )
 
+    tributos_hdr_xml = ""
+    for cod, valor, pct in (tributos_header or []):
+        tributos_hdr_xml += (
+            "<cac:TaxTotal><cac:TaxSubtotal>"
+            f"<cbc:TaxableAmount currencyID='COP'>{valor}</cbc:TaxableAmount>"
+            f"<cbc:TaxAmount currencyID='COP'>{valor}</cbc:TaxAmount>"
+            f"<cac:TaxCategory><cbc:Percent>{pct}</cbc:Percent>"
+            f"<cac:TaxScheme><cbc:ID>{cod}</cbc:ID></cac:TaxScheme>"
+            "</cac:TaxCategory></cac:TaxSubtotal></cac:TaxTotal>"
+        )
+
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <{raiz} {ns}>
   <cbc:ID>{numero}</cbc:ID>
@@ -151,6 +163,7 @@ def factura_xml(
     {_party_xml(nit_receptor, receptor_solo_en_tax_scheme, "Cliente de Prueba SAS")}
   </cac:Party></cac:AccountingCustomerParty>
   {cargos}
+  {tributos_hdr_xml}
   <cac:LegalMonetaryTotal><cbc:PayableAmount currencyID="COP">{total}</cbc:PayableAmount></cac:LegalMonetaryTotal>
   {''.join(lineas)}
 </{raiz}>"""

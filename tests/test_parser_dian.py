@@ -222,3 +222,38 @@ def test_referencia_no_reemplaza_la_descripcion_cuando_ambas_existen():
     item = f["items"][0]
     assert item["descripcion"] == "Descripción real del ítem"
     assert item["referencia"] == "REF-9"
+
+
+def test_inc_solo_en_encabezado_se_captura_como_item_sintetico():
+    """Caso COMODIN/bolsas: el INC aparece únicamente en el cac:TaxTotal del
+    encabezado de la factura, sin repetirse en ninguna InvoiceLine. El parser
+    debe crearlo como ítem sintético para que el módulo de tributos adicionales
+    lo contabilice."""
+    xml = factura_xml(
+        [linea_xml("Pantalón", 748406, iva_pct=19, iva_valor=142197)],
+        total=890750,
+        tributos_header=[("04", 146, 100)],  # INC bolsas plásticas solo en header
+    )
+    f = _parsear_xml_dian(xml, "635563020.xml")
+
+    otros_por_item = [ot for it in f["items"] for ot in it.get("otros_tributos", [])]
+    inc_entries = [ot for ot in otros_por_item if ot["cod_dian"] == "04"]
+    assert inc_entries, "El INC del encabezado debe aparecer en otros_tributos"
+    assert round(sum(e["valor"] for e in inc_entries), 2) == 146.0
+
+
+def test_inc_en_linea_y_encabezado_no_se_duplica():
+    """Si el emisor pone el INC en la InvoiceLine Y en el encabezado como resumen,
+    solo debe contabilizarse una vez (el parser resta lo ya capturado en ítems)."""
+    xml = factura_xml(
+        [linea_xml("Bolsa plástica", 146, iva_pct=0, iva_valor=0,
+                   otros=[("04", 146, 100)])],
+        total=292,
+        tributos_header=[("04", 146, 100)],  # mismo INC resumido en header
+    )
+    f = _parsear_xml_dian(xml, "doble.xml")
+
+    otros_por_item = [ot for it in f["items"] for ot in it.get("otros_tributos", [])]
+    inc_entries = [ot for ot in otros_por_item if ot["cod_dian"] == "04"]
+    total_inc = round(sum(e["valor"] for e in inc_entries), 2)
+    assert total_inc == 146.0, f"Solo debe haber $146 de INC, no duplicado: {total_inc}"
