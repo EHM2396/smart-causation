@@ -1184,6 +1184,69 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
     if not items:
         advertencias.append("No se detectaron ítems en el XML DIAN.")
 
+    # ── Tributos adicionales declarados SOLO en el encabezado del documento ──
+    # Algunos emisores (p. ej. COMODIN con INC en bolsas plásticas) ponen el
+    # tributo únicamente en el cac:TaxTotal raíz de la factura, sin repetirlo
+    # en ningún cac:InvoiceLine. El loop de ítems no los captura; aquí se
+    # detecta la diferencia entre lo declarado en el encabezado y la suma de
+    # los ítems para evitar duplicar cuando el mismo tributo aparece en ambos.
+    _tributos_ya_en_items: dict[str, float] = {}
+    for _it in items:
+        for _ot in _it.get("otros_tributos", []):
+            _c = _ot["cod_dian"]
+            _tributos_ya_en_items[_c] = _tributos_ya_en_items.get(_c, 0.0) + _ot["valor"]
+
+    _tributos_header: list[dict] = []
+    for _tax_total in findall("cac:TaxTotal"):
+        for _sub in _tax_total.findall("cac:TaxSubtotal", _NS):
+            _cat = _sub.find("cac:TaxCategory", _NS)
+            if _cat is None:
+                continue
+            _scheme = _cat.find("cac:TaxScheme", _NS)
+            _scheme_id = _xml_text(_scheme.find("cbc:ID", _NS)) if _scheme is not None else ""
+            if _scheme_id in ("01", "", "05", "06", "07"):
+                continue  # IVA y retenciones: gestionados en otro lugar
+            _nombre, _grupo, _conocido = clasificar_tributo_dian(_scheme_id)
+            if _grupo == "retencion":
+                continue
+            _monto = _xml_float(_sub.find("cbc:TaxAmount", _NS))
+            if _monto == 0.0:
+                continue
+            _diferencia = round(_monto - _tributos_ya_en_items.get(_scheme_id, 0.0), 2)
+            if _diferencia <= 0:
+                continue  # ya cubierto íntegramente por los ítems
+            _taxable = _xml_float(_sub.find("cbc:TaxableAmount", _NS))
+            _pct = _xml_float(_cat.find("cbc:Percent", _NS))
+            _tributos_header.append({
+                "cod_dian":   _scheme_id,
+                "nombre":     _nombre,
+                "grupo":      _grupo,
+                "base":       round(_taxable or _diferencia, 2),
+                "valor":      _diferencia,
+                "porcentaje": _pct,
+            })
+            if not _conocido and _scheme_id not in _tributos_alertados:
+                _tributos_alertados.add(_scheme_id)
+                advertencias.append(
+                    f"Se detectó el tributo DIAN {_scheme_id} ({_nombre}), que no tiene "
+                    "un tratamiento contable definido: se sumó al costo/ingreso. "
+                    "Revisa la causación de esta factura."
+                )
+
+    if _tributos_header:
+        _valor_hdr = round(sum(t["valor"] for t in _tributos_header), 2)
+        items.append({
+            "descripcion":    "Tributos adicionales nivel documento",
+            "referencia":     None,
+            "base":           0.0,
+            "cod_impuesto":   "",
+            "porcentaje":     0.0,
+            "valor_impuesto": 0.0,
+            "otros_tributos": _tributos_header,
+            "descuento_item": 0.0,
+            "total_linea":    _valor_hdr,
+        })
+
     # Fallback: si el total no se pudo leer del XML, calcularlo desde los ítems
     if total == 0.0 and items:
         total = round(sum(i["total_linea"] for i in items), 2)
