@@ -257,6 +257,28 @@ def test_factura_normal_no_tiene_base_iva():
     assert item.get("base_iva") is None, "Factura normal no debe tener base_iva"
 
 
+def test_aiu_inferencia_sin_taxable_amount():
+    """Facturas AIU donde el emisor NO expone TaxableAmount separado (o lo pone
+    igual a la base completa). El parser debe inferir base_iva desde el cociente
+    TaxAmount / (Percent/100). Si el resultado difiere significativamente de la
+    base, es una factura AIU y hay que guardar la base inferida."""
+    # Mismos datos que CYC171, pero sin iva_taxable explícito: el constructor
+    # usará base=3_433_985.60 como TaxableAmount (como lo haría un emisor AIU
+    # que no desglosa la Utilidad en el XML de la línea).
+    xml = factura_xml(
+        [linea_xml("Excavación manual", 3_433_985.60,
+                   iva_pct=19, iva_valor=15_138.22)],  # sin iva_taxable
+        total=3_449_123.82,
+    )
+    f = _parsear_xml_dian(xml, "aiu_sin_taxable.xml")
+    item = f["items"][0]
+    assert "base_iva" in item, "Fallback AIU debe detectar base_iva aunque TaxableAmount no esté separado"
+    # Inferida desde 15_138.22 / 0.19 ≈ 79_675 — aceptamos ±2 por redondeo del XML
+    assert abs(item["base_iva"] - 79_674.84) < 2.0, f"base_iva inferida incorrecta: {item['base_iva']}"
+    assert item["valor_impuesto"] == 15_138.22
+    assert item["base"] == 3_433_985.60
+
+
 def test_inc_solo_en_encabezado_se_captura_como_item_sintetico():
     """Caso COMODIN/bolsas: el INC aparece únicamente en el cac:TaxTotal del
     encabezado de la factura, sin repetirse en ninguna InvoiceLine. El parser

@@ -1174,6 +1174,17 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
         if base == 0.0 and valor_impuesto == 0.0 and not otros_tributos:
             continue
 
+        # Fallback AIU: si el TaxableAmount no estaba en el XML (o era igual a la
+        # base), intentar inferir la base gravable real desde TaxAmount / Percent.
+        # En facturas normales la inferencia produce exactamente `base` (sin cambio).
+        # En facturas AIU el emisor declara un IVA mucho menor que base*tarifa, por
+        # lo que la inferencia detecta la Utilidad (base gravable real) y la guarda
+        # como base_iva para que el frontend no recalcule con la base completa.
+        if base_iva_linea == 0 and valor_impuesto > 0 and porcentaje > 0:
+            inferred = round(valor_impuesto / (porcentaje / 100.0), 2)
+            if abs(inferred - base) > 1.0:
+                base_iva_linea = inferred
+
         cod_impuesto = _inferir_cod_impuesto(porcentaje)
         valor_otros = round(sum(t["valor"] for t in otros_tributos), 2)
         item_dict: dict = {

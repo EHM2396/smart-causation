@@ -318,6 +318,15 @@ export const api = {
     return { guardados, errores };
   },
 
+  /** Re-parsea todos los documentos almacenados desde su XML crudo, actualizando
+   * items_json con el parser actual (sin ir a la DIAN). Retorna cuántos se
+   * actualizaron. Útil para enriquecer datos históricos (p.ej. base_iva en AIU). */
+  analiticaReprocesarXml: (empresaId?: number) =>
+    req<{ procesados: number; actualizados: number; sin_xml: number; errores: number }>(
+      `/analitica/reprocesar-desde-xml${empresaId != null ? `?empresa_id=${empresaId}` : ""}`,
+      { method: "POST" },
+    ),
+
   adminInformeXlsx: (desde?: string, hasta?: string) => {
     const qs = new URLSearchParams();
     if (desde) qs.set("desde", desde);

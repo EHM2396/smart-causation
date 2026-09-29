@@ -175,6 +175,59 @@ def ultima_sincronizacion(db: Session, empresa_id: int) -> SincronizacionDian | 
     )
 
 
+def reprocesar_desde_xml(
+    db: Session,
+    *,
+    empresa_id: int,
+) -> dict[str, int]:
+    """Re-parsea todos los documentos que tienen xml_crudo almacenado y actualiza
+    items_json con el parser actual. Útil para enriquecer datos históricos cuando
+    el parser aprendió a leer un campo nuevo (p.ej. base_iva en facturas AIU).
+
+    Devuelve {"procesados": N, "actualizados": N, "sin_xml": N, "errores": N}.
+    """
+    from services.causacion_service import parsear_archivo
+
+    docs = db.scalars(
+        select(DocumentoDian)
+        .where(
+            DocumentoDian.empresa_id == empresa_id,
+            DocumentoDian.xml_crudo.isnot(None),
+        )
+    ).all()
+
+    procesados = actualizados = sin_xml = errores = 0
+    for doc in docs:
+        procesados += 1
+        xml = xml_original(doc)
+        if not xml:
+            sin_xml += 1
+            continue
+        try:
+            nombre = f"{doc.tipo}_{doc.numero}.xml"
+            facturas = parsear_archivo(xml, nombre)
+            if not facturas:
+                continue
+            fac = facturas[0]
+            nuevo_json = json.dumps(fac.get("items") or [], ensure_ascii=False, default=str)
+            if nuevo_json != doc.items_json:
+                doc.items_json = nuevo_json
+                doc.base_gravable = base_gravable_de(fac)
+                actualizados += 1
+        except Exception:  # noqa: BLE001
+            errores += 1
+
+    if actualizados:
+        db.flush()
+
+    return {
+        "procesados": procesados,
+        "actualizados": actualizados,
+        "sin_xml": sin_xml,
+        "errores": errores,
+    }
+
+
 def listar_ids(auth_url: str, desde: str, hasta: str) -> dict[str, list[str]]:
     """IDs de todos los documentos del rango, por origen. Solo el listado: barato
     y sin descargar XML, sirve para saber cuánto falta antes de empezar."""
