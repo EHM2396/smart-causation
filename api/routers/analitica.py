@@ -341,3 +341,43 @@ def sincronizar(body: SincronizarRequest, db: DB, current_user: CurrentUser):
         media_type="application/x-ndjson",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
     )
+
+
+@router.post("/reprocesar-desde-xml")
+def reprocesar_desde_xml(db: DB, current_user: CurrentUser, empresa_id: int | None = None):
+    """Re-parsea los documentos almacenados de la empresa usando el parser actual.
+
+    Actualiza items_json en documentos_dian sin necesidad de volver a la DIAN.
+    Útil para enriquecer datos históricos cuando el parser aprendió a leer un
+    campo nuevo, como base_iva en facturas AIU.
+    """
+    empresas_ids: list[int]
+    if current_user.rol == "admin":
+        if empresa_id is not None:
+            empresas_ids = [empresa_id]
+        else:
+            # Todas las empresas accesibles para el admin
+            filas = db.execute(
+                select(Empresa.id).where(Empresa.cuenta_id == current_user.cuenta_id)
+            ).scalars().all()
+            empresas_ids = list(filas)
+    else:
+        emp = db.scalar(
+            select(Empresa)
+            .where(
+                Empresa.cuenta_id == current_user.cuenta_id,
+                Empresa.id == empresa_id if empresa_id else True,
+            )
+        )
+        if emp is None:
+            raise HTTPException(403, "Sin acceso a esa empresa.")
+        empresas_ids = [emp.id]
+
+    total = {"procesados": 0, "actualizados": 0, "sin_xml": 0, "errores": 0}
+    for eid in empresas_ids:
+        result = documentos_dian_service.reprocesar_desde_xml(db, empresa_id=eid)
+        for k in total:
+            total[k] += result[k]
+
+    db.commit()
+    return total

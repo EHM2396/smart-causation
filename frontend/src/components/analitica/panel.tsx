@@ -151,6 +151,8 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
   const [resultado, setResultado] = useState<{ guardados: number; errores: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [descargando, setDescargando] = useState<"xlsx" | "pdf" | null>(null);
+  const [reprocesando, setReprocesando] = useState(false);
+  const [reprocesadoResult, setReprocesadoResult] = useState<{ actualizados: number } | null>(null);
   const queryClient = useQueryClient();
 
   const presetActivo = presets.find((p) => p.desde === desde && p.hasta === hasta)?.id ?? "personalizado";
@@ -222,6 +224,21 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
       setError(e instanceof Error ? e.message : "No se pudo traer la información de la DIAN.");
     } finally {
       setTrayendo(false);
+    }
+  };
+
+  const reprocesar = async () => {
+    setReprocesando(true);
+    setReprocesadoResult(null);
+    try {
+      const r = await api.analiticaReprocesarXml(empresaId ?? undefined);
+      setReprocesadoResult({ actualizados: r.actualizados });
+      await queryClient.invalidateQueries({ queryKey: ["analitica"] });
+      await queryClient.invalidateQueries({ queryKey: ["analitica-balance-iva"] });
+    } catch {
+      // silencioso: el botón simplemente deja de girar
+    } finally {
+      setReprocesando(false);
     }
   };
 
@@ -425,7 +442,18 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
             {trayendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <DownloadCloud className="h-4 w-4" />}
             {trayendo ? "Trayendo..." : "Traer de la DIAN"}
           </Button>
+          <Button onClick={reprocesar} disabled={reprocesando || trayendo || empresaId == null}
+            variant="outline" className="gap-1.5" title="Actualiza los datos guardados con el parser más reciente sin ir a la DIAN. Útil para corregir IVA en facturas AIU.">
+            {reprocesando ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileStack className="h-4 w-4" />}
+            {reprocesando ? "Reprocesando..." : "Reprocesar XML guardado"}
+          </Button>
         </div>
+
+        {reprocesadoResult && !reprocesando && (
+          <p className="mt-2 text-xs" style={{ color: "var(--text-secondary)" }}>
+            Reprocesado: {reprocesadoResult.actualizados} documento(s) actualizados con el parser más reciente.
+          </p>
+        )}
 
         {empresaId == null && (
           <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>
