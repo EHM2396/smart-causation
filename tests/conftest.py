@@ -35,6 +35,7 @@ def linea_xml(
     *,
     iva_pct: float | None = None,
     iva_valor: float = 0.0,
+    iva_taxable: float | None = None,
     otros: list[tuple[str, float, float]] | None = None,
     descuento: float = 0.0,
     tag: str = "InvoiceLine",
@@ -43,6 +44,7 @@ def linea_xml(
     """Una línea de factura.
 
     `iva_pct=None` → la línea NO trae bloque de IVA (caso "sin tarifa").
+    `iva_taxable` → TaxableAmount del IVA cuando difiere de base (facturas AIU).
     `otros` → lista de (codigo_tributo_dian, valor, porcentaje) p. ej. INC, IBUA.
     """
     partes = [f"<cbc:LineExtensionAmount currencyID='COP'>{base}</cbc:LineExtensionAmount>"]
@@ -56,9 +58,10 @@ def linea_xml(
         )
 
     if iva_pct is not None:
+        taxable_str = iva_taxable if iva_taxable is not None else base
         partes.append(
             "<cac:TaxTotal><cac:TaxSubtotal>"
-            f"<cbc:TaxableAmount currencyID='COP'>{base}</cbc:TaxableAmount>"
+            f"<cbc:TaxableAmount currencyID='COP'>{taxable_str}</cbc:TaxableAmount>"
             f"<cbc:TaxAmount currencyID='COP'>{iva_valor}</cbc:TaxAmount>"
             f"<cac:TaxCategory><cbc:Percent>{iva_pct}</cbc:Percent>"
             "<cac:TaxScheme><cbc:ID>01</cbc:ID></cac:TaxScheme>"

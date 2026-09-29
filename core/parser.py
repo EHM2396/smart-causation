@@ -1109,6 +1109,7 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
         # Las retenciones (05/06/07) se ignoran aquí (se aplican en la interfaz).
         valor_impuesto = 0.0
         porcentaje = 0.0
+        base_iva_linea = 0.0  # TaxableAmount del IVA; distinto de base en facturas AIU
         otros_tributos: list[dict] = []
 
         for tax_total in line.findall("cac:TaxTotal", _NS):
@@ -1129,6 +1130,12 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
                     valor_impuesto += monto
                     if porcentaje == 0.0:
                         porcentaje = pct
+                    # En facturas AIU el TaxableAmount del IVA es la base especial
+                    # (solo la Utilidad), mucho menor que el LineExtensionAmount.
+                    # Se guarda para que el frontend calcule IVA sobre esa base real.
+                    taxable_iva = _xml_float(sub.find("cbc:TaxableAmount", _NS))
+                    if taxable_iva > 0 and abs(taxable_iva - base) > 1.0:
+                        base_iva_linea = taxable_iva
                     continue
 
                 nombre, grupo, conocido = clasificar_tributo_dian(scheme_id)
@@ -1169,7 +1176,7 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
 
         cod_impuesto = _inferir_cod_impuesto(porcentaje)
         valor_otros = round(sum(t["valor"] for t in otros_tributos), 2)
-        items.append({
+        item_dict: dict = {
             "descripcion":    desc,
             "referencia":     referencia or None,
             "base":           round(base, 2),
@@ -1179,7 +1186,10 @@ def _parsear_xml_dian(xml_bytes: bytes, nombre_archivo: str = "") -> dict:
             "otros_tributos": otros_tributos,
             "descuento_item": round(descuento_item, 2),
             "total_linea":    round(base + valor_impuesto + valor_otros, 2),
-        })
+        }
+        if base_iva_linea > 0:
+            item_dict["base_iva"] = round(base_iva_linea, 2)
+        items.append(item_dict)
 
     if not items:
         advertencias.append("No se detectaron ítems en el XML DIAN.")

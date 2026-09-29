@@ -224,6 +224,39 @@ def test_referencia_no_reemplaza_la_descripcion_cuando_ambas_existen():
     assert item["referencia"] == "REF-9"
 
 
+def test_aiu_captura_base_iva_especial():
+    """Factura AIU (CYC171): cada línea tiene LineExtensionAmount >> TaxableAmount.
+    El parser debe guardar el TaxableAmount del IVA como base_iva para que el
+    frontend lo use en el cálculo, en vez de recalcular desde LineExtensionAmount."""
+    # Línea 1 de CYC171: base=3_433_985.60, TaxableAmount=79_674.84, IVA=15_138.22
+    xml = factura_xml(
+        [linea_xml("Excavación manual", 3_433_985.60,
+                   iva_pct=19, iva_valor=15_138.22, iva_taxable=79_674.84)],
+        total=3_449_123.82,
+    )
+    f = _parsear_xml_dian(xml, "cyc171.xml")
+    item = f["items"][0]
+    assert "base_iva" in item, "La línea AIU debe exponer base_iva"
+    assert item["base_iva"] == 79_674.84
+    # El valor_impuesto sigue siendo el TaxAmount del XML, no recalculado
+    assert item["valor_impuesto"] == 15_138.22
+    # La base del gasto es el LineExtensionAmount completo (incluye A+I+U)
+    assert item["base"] == 3_433_985.60
+
+
+def test_factura_normal_no_tiene_base_iva():
+    """Una factura normal donde TaxableAmount == LineExtensionAmount no debe
+    generar base_iva (no aplica el tratamiento especial AIU)."""
+    xml = factura_xml(
+        [linea_xml("Producto normal", 100_000, iva_pct=19, iva_valor=19_000)],
+        total=119_000,
+    )
+    f = _parsear_xml_dian(xml, "normal.xml")
+    item = f["items"][0]
+    # base_iva solo aparece cuando TaxableAmount difiere materialmente de base
+    assert item.get("base_iva") is None, "Factura normal no debe tener base_iva"
+
+
 def test_inc_solo_en_encabezado_se_captura_como_item_sintetico():
     """Caso COMODIN/bolsas: el INC aparece únicamente en el cac:TaxTotal del
     encabezado de la factura, sin repetirse en ninguna InvoiceLine. El parser
