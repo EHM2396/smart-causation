@@ -441,6 +441,15 @@ export function Paso2() {
     return v > 0 ? v : item.base;
   };
 
+  // Base sobre la que se calcula el IVA. En facturas normales coincide con
+  // getEffBase. En facturas AIU la base gravable del IVA (TaxableAmount) es
+  // solo la Utilidad, mucho menor que el LineExtensionAmount: usar effBase
+  // daría un IVA ~20× más alto que el real declarado en el XML.
+  const getEffBaseIva = (key: string, item: ItemFactura): number => {
+    if (item.base_iva && item.base_iva > 0) return item.base_iva;
+    return getEffBase(key, item);
+  };
+
   // Divisor de la tarifa: el ICA / ReteICA se expresa POR MIL (ej. 7.7 x 1000 =
   // 0.77%), no en porcentaje. El resto (IVA, Retefuente, ReteIVA) es porcentaje.
   const esPorMil = (imp?: { tipo_impuesto: string | null }) =>
@@ -611,8 +620,9 @@ export function Paso2() {
                            : cuentaIvaPorDefecto;
 
       const effBase = getEffBase(key, item);
+      const effBaseIva = getEffBaseIva(key, item);
       const tarifa = impInfo?.tarifa ?? item.porcentaje ?? 0;
-      const valorIva = tarifa > 0 ? Math.round(effBase * tarifa / 100) : item.valor_impuesto;
+      const valorIva = tarifa > 0 ? Math.round(effBaseIva * tarifa / 100) : item.valor_impuesto;
 
       // Otros tributos de la línea (INC, bolsas, IBUA, ICUI, INPP, otros). Solo los
       // "independientes" en ventas necesitan cuenta propia del catálogo; el resto va
@@ -1259,12 +1269,13 @@ export function Paso2() {
   const totalCalculado = factura.items.reduce((sum, item, jdx) => {
     const k = `${selectedIdx}_${jdx}`;
     const effBase = getEffBase(k, item);
+    const effBaseIva = getEffBaseIva(k, item);
     const ivaGl = codImpuestoGlobal[selectedIdx];
     const ivaIt = codImpuestoItem[k];
     const codIva = (ivaGl && ivaGl !== "") ? ivaGl : (ivaIt && ivaIt !== "") ? ivaIt : item.cod_impuesto ?? "";
     const ivaInfo = codIva ? getImpInfo(codIva) : null;
     const tarifa = ivaInfo?.tarifa ?? 0;
-    const valorIva = tarifa > 0 ? Math.round(effBase * tarifa / 100) : item.valor_impuesto;
+    const valorIva = tarifa > 0 ? Math.round(effBaseIva * tarifa / 100) : item.valor_impuesto;
     const otros = (item.otros_tributos ?? []).reduce((s, t) => s + (t.valor || 0), 0);
     return sum + effBase + valorIva + otros;
   }, 0) - (factura.descuento_global || 0) + (factura.recargo_global || 0);
@@ -1901,7 +1912,7 @@ export function Paso2() {
                             IVA {ivaEfectivoInfo.tarifa}%
                           </span>
                           <span className="font-mono font-semibold tabular-nums" style={{ color: "var(--success)" }}>
-                            {fmt(Math.round(getEffBase(key, item) * (ivaEfectivoInfo.tarifa ?? 0) / 100))}
+                            {fmt(Math.round(getEffBaseIva(key, item) * (ivaEfectivoInfo.tarifa ?? 0) / 100))}
                           </span>
                         </div>
                       )}

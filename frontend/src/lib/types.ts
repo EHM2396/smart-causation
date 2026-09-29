@@ -87,6 +87,9 @@ export interface ItemFactura {
   porcentaje?: number;
   otros_tributos?: TributoItem[];
   descuento_item?: number;
+  /** Base especial del IVA (TaxableAmount del XML). Solo presente en facturas AIU
+   *  donde la base gravable del IVA es distinta del LineExtensionAmount. */
+  base_iva?: number | null;
 }
 
 export interface Factura {
