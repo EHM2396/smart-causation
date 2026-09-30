@@ -14,8 +14,10 @@ Flujo:
 
 from __future__ import annotations
 
+import calendar
 import json
 import re
+from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -48,6 +50,7 @@ class DocumentoDian(BaseModel):
     fecha: str
     proveedor: str
     tipo: str
+    clase: str = "desconocido"
 
 
 class ConsultarResponse(BaseModel):
@@ -63,10 +66,20 @@ class ImportarRequest(BaseModel):
 
 
 class ConsultarTodoRequest(BaseModel):
-    """Consulta unificada: recibidos (compras) + emitidos (ventas) con un solo token."""
+    """Consulta unificada: recibidos (compras) + emitidos (ventas) con un solo token.
+
+    ``fuentes`` deja al usuario elegir qué EXTRAER en vez de traer siempre todo:
+    un subconjunto de {compras, ventas, soporte, soporte_ajuste}. Vacío o None →
+    todas (comportamiento de siempre). Consultar solo lo necesario reduce el
+    volumen por consulta y, junto con la auto-división del rango, evita que se
+    pierdan documentos.
+    """
     auth_url: str = Field(..., description="URL completa de AuthToken de la DIAN")
     fecha_desde: str = Field(..., description="DD/MM/YYYY")
     fecha_hasta: str = Field(..., description="DD/MM/YYYY")
+    fuentes: list[str] | None = Field(
+        None, description="Subconjunto de: compras, ventas, soporte, soporte_ajuste. None = todas."
+    )
 
 
 class ImportarTodoRequest(BaseModel):
@@ -171,10 +184,13 @@ def _exigir_token_de_la_empresa(auth_url: str, empresa: Empresa) -> None:
 
 @router.post("/consultar", response_model=ConsultarResponse)
 def consultar(body: ConsultarRequest, empresa: EmpresaActiva):
-    """Lista las facturas recibidas de la DIAN en el rango de fechas (sin descargar XML)."""
+    """Lista las facturas recibidas de la DIAN en el rango de fechas (sin descargar XML).
+
+    Usa la consulta con auto-división del rango, que garantiza traer TODO el
+    listado aunque el periodo tenga más documentos que el tope de una página."""
     _exigir_token_de_la_empresa(body.auth_url, empresa)
     try:
-        return dian_service.consultar_documentos(
+        return dian_service.consultar_documentos_completo(
             body.auth_url, body.fecha_desde, body.fecha_hasta, modo=body.modo
         )
     except DianError as e:
@@ -239,28 +255,62 @@ def importar(body: ImportarRequest, empresa: EmpresaActiva):
 
 # ── Importación UNIFICADA (un solo token → compras, NC compras, ventas, NC ventas) ──
 
+# Fuentes válidas de consulta.
+_FUENTES_VALIDAS = ("compras", "ventas", "soporte", "soporte_ajuste")
+
+# Tope por consulta del importador (espejo de MAX_MESES_CONSULTA en importar-dian.tsx).
+_MAX_MESES_CONSULTA = 4
+
+
+def _validar_rango_consulta(fecha_desde: str, fecha_hasta: str) -> None:
+    """Rechaza rangos invertidos o de más de 4 meses (01/01 → 30/04 es el máximo)."""
+    try:
+        d1 = datetime.strptime(fecha_desde, "%d/%m/%Y").date()
+        d2 = datetime.strptime(fecha_hasta, "%d/%m/%Y").date()
+    except ValueError:
+        raise HTTPException(400, "Las fechas deben tener el formato DD/MM/AAAA.")
+    if d2 < d1:
+        raise HTTPException(400, "La fecha final no puede ser anterior a la inicial.")
+    mes = d1.month - 1 + _MAX_MESES_CONSULTA
+    anio, mes = d1.year + mes // 12, mes % 12 + 1
+    limite = date(anio, mes, min(d1.day, calendar.monthrange(anio, mes)[1]))
+    if d2 >= limite:
+        raise HTTPException(
+            400,
+            f"El periodo no puede ser mayor a {_MAX_MESES_CONSULTA} meses. "
+            f"Acorta las fechas o consulta por partes con el mismo token.",
+        )
+
+
+def _fuente_vacia() -> dict:
+    """Shape de una fuente no consultada (lista propia, no compartida)."""
+    return {"success": True, "total": 0, "total_dian": 0, "incompleto": False, "documents": []}
+
+
 @router.post("/consultar-todo")
 def consultar_todo(body: ConsultarTodoRequest, empresa: EmpresaActiva):
-    """Con un solo token, lista TODO en el rango: recibidos (compras) y emitidos
-    (ventas). La sesión DIAN se reutiliza (cacheada por token), así que las dos
-    consultas usan la misma autenticación."""
+    """Con un solo token, lista en el rango las fuentes seleccionadas: recibidos
+    (compras), emitidos (ventas) y documentos soporte. La sesión DIAN se reutiliza
+    (cacheada por token), así que todas las consultas usan la misma autenticación.
+
+    Cada fuente se consulta con auto-división del rango: si un subrango trae más
+    documentos que el tope de una página, se parte por fechas hasta traerlo
+    completo. Así ninguna factura queda fuera aunque el periodo sea amplio.
+
+    ``fuentes`` restringe qué se consulta; None/vacío = todas (compat)."""
+    _validar_rango_consulta(body.fecha_desde, body.fecha_hasta)
     _exigir_token_de_la_empresa(body.auth_url, empresa)
+    pedidas = set(body.fuentes) if body.fuentes else set(_FUENTES_VALIDAS)
+    resultados: dict[str, dict] = {f: _fuente_vacia() for f in _FUENTES_VALIDAS}
     try:
-        compras = dian_service.consultar_documentos(
-            body.auth_url, body.fecha_desde, body.fecha_hasta, modo="compras"
-        )
-        ventas = dian_service.consultar_documentos(
-            body.auth_url, body.fecha_desde, body.fecha_hasta, modo="ventas"
-        )
-        soporte = dian_service.consultar_documentos(
-            body.auth_url, body.fecha_desde, body.fecha_hasta, modo="soporte"
-        )
-        soporte_ajuste = dian_service.consultar_documentos(
-            body.auth_url, body.fecha_desde, body.fecha_hasta, modo="soporte_ajuste"
-        )
+        for fuente in _FUENTES_VALIDAS:
+            if fuente in pedidas:
+                resultados[fuente] = dian_service.consultar_documentos_completo(
+                    body.auth_url, body.fecha_desde, body.fecha_hasta, modo=fuente
+                )
     except DianError as e:
         raise _mapear_error(e)
-    return {"compras": compras, "ventas": ventas, "soporte": soporte, "soporte_ajuste": soporte_ajuste}
+    return resultados
 
 
 def _bucket_de(factura: dict, origen: str) -> str | None:

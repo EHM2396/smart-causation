@@ -513,7 +513,7 @@ export const api = {
   },
 
   // DIAN unificado — consultar TODO (recibidos + emitidos + soporte) con un solo token.
-  dianConsultarTodo: (body: { auth_url: string; fecha_desde: string; fecha_hasta: string }) =>
+  dianConsultarTodo: (body: { auth_url: string; fecha_desde: string; fecha_hasta: string; fuentes?: ("compras" | "ventas" | "soporte" | "soporte_ajuste")[] }) =>
     req<{
       compras: { success: boolean; total: number; total_dian: number; incompleto: boolean; advertencia?: string; documents: DianDocumento[] };
       ventas: { success: boolean; total: number; total_dian: number; incompleto: boolean; advertencia?: string; documents: DianDocumento[] };
