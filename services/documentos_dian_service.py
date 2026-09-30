@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import gzip
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -173,6 +173,29 @@ def ultima_sincronizacion(db: Session, empresa_id: int) -> SincronizacionDian | 
         .order_by(SincronizacionDian.ejecutado_at.desc())
         .limit(1)
     )
+
+
+def unir_periodos(periodos: list[tuple[date, date]]) -> list[tuple[date, date]]:
+    """Une periodos que se solapan o van seguidos (ene–abr + may–ago → ene–ago)."""
+    unidos: list[tuple[date, date]] = []
+    for d1, d2 in sorted(periodos):
+        if unidos and d1 <= unidos[-1][1] + timedelta(days=1):
+            if d2 > unidos[-1][1]:
+                unidos[-1] = (unidos[-1][0], d2)
+        else:
+            unidos.append((d1, d2))
+    return unidos
+
+
+def cobertura(db: Session, empresa_id: int) -> list[tuple[date, date]]:
+    """Todo lo que se ha traído de la DIAN para esta empresa, sumando cada
+    traída. Como el importe se limita a 4 meses, un año se trae por partes y el
+    informe tiene que reconocerlo como cubierto, no solo la última parte."""
+    filas = db.execute(
+        select(SincronizacionDian.fecha_desde, SincronizacionDian.fecha_hasta)
+        .where(SincronizacionDian.empresa_id == empresa_id)
+    ).all()
+    return unir_periodos([(f.fecha_desde, f.fecha_hasta) for f in filas])
 
 
 def reprocesar_desde_xml(

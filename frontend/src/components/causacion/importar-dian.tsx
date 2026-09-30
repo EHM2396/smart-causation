@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import type { DocTipo } from "@/stores/wizard";
 import type { DianDocumento, Factura } from "@/lib/types";
-import { ordenarPorFechaEmision, periodosIVA } from "@/lib/utils";
+import { ordenarPorFechaEmision, periodosIVA, MAX_MESES_CONSULTA, limiteHasta, AVISO_TOPE_CALENDARIO } from "@/lib/utils";
 
 // YYYY-MM-DD (input date) → DD/MM/YYYY (formato que espera el portal DIAN)
 function isoToDian(iso: string): string {
@@ -24,21 +24,6 @@ function hoyISO(offsetDias = 0): string {
   const d = new Date();
   d.setDate(d.getDate() + offsetDias);
   return d.toISOString().slice(0, 10);
-}
-function localYMD(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-// Tope por consulta: 4 meses (espejo de _MAX_MESES_CONSULTA en api/routers/dian.py).
-const MAX_MESES_CONSULTA = 4;
-// Último día permitido para "hasta": mismo día MAX meses después, menos uno
-// (01/01 → 30/04). Si ese día no existe en el mes destino, se usa el último.
-function limiteHasta(desdeISO: string): string {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(desdeISO)) return "9999-12-31";
-  const [y, m, d] = desdeISO.split("-").map(Number);
-  const ultimoDia = new Date(y, m - 1 + MAX_MESES_CONSULTA + 1, 0).getDate();
-  const f = new Date(y, m - 1 + MAX_MESES_CONSULTA, Math.min(d, ultimoDia));
-  f.setDate(f.getDate() - 1);
-  return localYMD(f);
 }
 function limpiarError(raw: string): string {
   const jsonPart = raw.replace(/^API\s+\d+:\s*/, "");
@@ -439,7 +424,7 @@ export function ImportarDian() {
           <span className="pb-2 text-xs" style={{ color: "var(--text-muted)" }}>hasta</span>
           <DatePicker
             label="Hasta" value={hasta} onChange={setHasta} min={desde} max={maxHasta}
-            hint={`Solo se permiten máximo ${MAX_MESES_CONSULTA} meses por consulta. Los días bloqueados quedan fuera de ese límite.`}
+            hint={AVISO_TOPE_CALENDARIO}
           />
         </div>
         <div className="flex items-start gap-2 rounded-lg border px-3 py-2"

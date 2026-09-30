@@ -17,10 +17,11 @@ Portado de dian_script.py (CLI) a un servicio reutilizable por la API.
 
 from __future__ import annotations
 
+import calendar
 import re
 import time
 import unicodedata
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from urllib.parse import urlparse, parse_qs
 
 import requests
@@ -134,6 +135,32 @@ def extraer_token_url(url: str) -> tuple[str, str, str]:
     if not (pk and rk and token):
         raise DianError("TOKEN_INVALID", "La URL de AuthToken está incompleta (faltan pk/rk/token).")
     return pk, rk, token
+
+
+# Tope de meses por consulta en los módulos que extraen con el token (importador
+# y Analítica). Espejo de MAX_MESES_CONSULTA en frontend/src/lib/utils.ts.
+MAX_MESES_CONSULTA = 4
+
+
+def validar_rango_consulta(fecha_desde: str, fecha_hasta: str) -> None:
+    """Rechaza rangos invertidos o de más de 4 meses (01/01 → 30/04 es el máximo).
+    Lanza DianError('RANGO_INVALIDO') con un mensaje listo para el usuario."""
+    try:
+        d1 = datetime.strptime(fecha_desde, "%d/%m/%Y").date()
+        d2 = datetime.strptime(fecha_hasta, "%d/%m/%Y").date()
+    except ValueError:
+        raise DianError("RANGO_INVALIDO", "Las fechas deben tener el formato DD/MM/AAAA.")
+    if d2 < d1:
+        raise DianError("RANGO_INVALIDO", "La fecha final no puede ser anterior a la inicial.")
+    mes = d1.month - 1 + MAX_MESES_CONSULTA
+    anio, mes = d1.year + mes // 12, mes % 12 + 1
+    limite = date(anio, mes, min(d1.day, calendar.monthrange(anio, mes)[1]))
+    if d2 >= limite:
+        raise DianError(
+            "RANGO_INVALIDO",
+            f"El periodo no puede ser mayor a {MAX_MESES_CONSULTA} meses. "
+            f"Acorta las fechas o consulta por partes con el mismo token.",
+        )
 
 
 def solo_digitos(nit: str | None) -> str:

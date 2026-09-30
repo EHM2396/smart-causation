@@ -108,7 +108,13 @@ def resumen(
         documentos_dian_service.ultima_sincronizacion(db, empresa_id)
         if empresa_id is not None else None
     )
+    # Suma de TODAS las traídas: un año se trae por partes de hasta 4 meses.
+    cubierto = (
+        documentos_dian_service.cobertura(db, empresa_id)
+        if empresa_id is not None else []
+    )
     return {
+        "cobertura_dian": [{"desde": a.isoformat(), "hasta": b.isoformat()} for a, b in cubierto],
         "periodo": {"desde": d.isoformat(), "hasta": h.isoformat()},
         "alcance": "cuenta" if es_admin and empresa_id is None else "empresa",
         "empresas": len(visibles),
@@ -246,6 +252,10 @@ def sincronizar(body: SincronizarRequest, db: DB, current_user: CurrentUser):
       {"type":"done","guardados":k,"errores":j}
       {"type":"error","code":"...","message":"..."}
     """
+    try:
+        dian_service.validar_rango_consulta(body.fecha_desde, body.fecha_hasta)
+    except DianError as e:
+        raise HTTPException(400, e.message)
     empresa = _empresa_visible(db, current_user, body.empresa_id)
 
     # El token tiene que ser el de esta empresa: si no, se guardarían los
