@@ -38,6 +38,23 @@ export function localYMD(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// Tope de meses por consulta en los módulos que extraen con el token DIAN
+// (espejo de MAX_MESES_CONSULTA en services/dian_service.py).
+export const MAX_MESES_CONSULTA = 4;
+export const AVISO_TOPE_CALENDARIO =
+  `Solo se permiten máximo ${MAX_MESES_CONSULTA} meses por consulta. Los días bloqueados quedan fuera de ese límite.`;
+
+/** Último "hasta" permitido: mismo día MAX meses después, menos uno (01/01 → 30/04).
+ * Si ese día no existe en el mes destino, se usa el último del mes. */
+export function limiteHasta(desdeISO: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(desdeISO)) return "9999-12-31";
+  const [y, m, d] = desdeISO.split("-").map(Number);
+  const ultimoDia = new Date(y, m - 1 + MAX_MESES_CONSULTA + 1, 0).getDate();
+  const f = new Date(y, m - 1 + MAX_MESES_CONSULTA, Math.min(d, ultimoDia));
+  f.setDate(f.getDate() - 1);
+  return localYMD(f);
+}
+
 export interface PeriodoPreset {
   id: string;
   label: string;

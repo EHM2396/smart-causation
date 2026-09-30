@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 
 import { api } from "@/lib/api";
-import { fmt, periodosIVA } from "@/lib/utils";
+import { fmt, periodosIVA, localYMD, MAX_MESES_CONSULTA, limiteHasta, AVISO_TOPE_CALENDARIO } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -156,6 +156,18 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
   const queryClient = useQueryClient();
 
   const presetActivo = presets.find((p) => p.desde === desde && p.hasta === hasta)?.id ?? "personalizado";
+  // Periodo a TRAER de la DIAN, aparte del filtro del informe: el informe lee lo
+  // ya guardado y puede abarcar el año entero; la descarga con el token se
+  // limita a 4 meses por vez (igual que el importador DIAN).
+  const [traerDesde, setTraerDesde] = useState(presets[2].desde);
+  const [traerHasta, setTraerHasta] = useState(presets[2].hasta);
+  const hoy = localYMD(new Date());
+  const topeHasta = (d: string) => (limiteHasta(d) < hoy ? limiteHasta(d) : hoy);
+  const cambiarTraerDesde = (v: string) => {
+    setTraerDesde(v);
+    if (traerHasta > topeHasta(v)) setTraerHasta(topeHasta(v));
+  };
+  const rangoExcedido = traerHasta > limiteHasta(traerDesde);
 
   const { data: empresas } = useQuery({ queryKey: ["analitica-empresas"], queryFn: api.analiticaEmpresas });
 
@@ -203,6 +215,10 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
   // ── Traer de la DIAN ──────────────────────────────────────────────────────
   const traer = async () => {
     if (empresaId == null || !token.trim()) return;
+    if (rangoExcedido) {
+      setError(`El periodo no puede ser mayor a ${MAX_MESES_CONSULTA} meses. Acorta las fechas o trae por partes con el mismo token.`);
+      return;
+    }
     setError(null);
     setTrayendo(true);
     setProgreso({ done: 0, total: 0 });
@@ -211,8 +227,8 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
         {
           auth_url: token.trim(),
           empresa_id: empresaId,
-          fecha_desde: aDDMMYYYY(desde),
-          fecha_hasta: aDDMMYYYY(hasta),
+          fecha_desde: aDDMMYYYY(traerDesde),
+          fecha_hasta: aDDMMYYYY(traerHasta),
         },
         (done, total) => setProgreso({ done, total }),
       );
@@ -246,7 +262,9 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
   // ¿El rango que se está mirando cae dentro de lo que se trajo? Si no, las
   // cifras van a salir cortas y hay que avisarlo, no dejar que se interprete
   // como que no hubo movimiento.
-  const cubrePeriodo = !sinc || (sinc.desde <= desde && sinc.hasta >= hasta);
+  // Se mira la suma de todas las traídas (un año se baja por partes de 4 meses).
+  const cobertura = data?.cobertura_dian ?? (sinc ? [{ desde: sinc.desde, hasta: sinc.hasta }] : []);
+  const cubrePeriodo = !sinc || cobertura.some((c) => c.desde <= desde && c.hasta >= hasta);
 
   const descargar = async (formato: "xlsx" | "pdf") => {
     setDescargando(formato);
@@ -397,10 +415,11 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
               <>
                 <span className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
                   <CalendarCheck className="h-4 w-4" style={{ color: "var(--brand)" }} />
-                  Datos cargados del {fechaCorta(sinc.desde)} al {fechaCorta(sinc.hasta)}
+                  Datos cargados{" "}
+                  {cobertura.map((c) => `del ${fechaCorta(c.desde)} al ${fechaCorta(c.hasta)}`).join(" · ")}
                 </span>
                 <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                  {sinc.documentos} documento(s) · traídos el{" "}
+                  Última traída: {sinc.documentos} documento(s) el{" "}
                   {new Date(sinc.ejecutado_at).toLocaleString("es-CO", {
                     day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
                   })}
@@ -422,9 +441,28 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
         )}
 
         <p className="mb-3 text-xs" style={{ color: "var(--text-secondary)" }}>
-          Pegá el enlace de la DIAN de la empresa seleccionada y traé los documentos del periodo.
-          Se descarga cada documento, así que un rango largo puede tardar varios minutos.
+          Pegá el enlace de la DIAN de la empresa seleccionada, elegí el periodo a traer y traé los documentos.
+          Se descarga cada documento, así que un rango largo puede tardar varios minutos. Lo que traigas se suma a
+          lo que ya estaba: para ver un año completo, tráelo por partes con el mismo enlace.
         </p>
+
+        <div className="mb-3 space-y-2">
+          <div className="flex flex-wrap items-end gap-2">
+            <span className="pb-2 text-xs font-medium" style={{ color: "var(--text-muted)" }}>Periodo a traer</span>
+            <DatePicker label="Desde" value={traerDesde} onChange={cambiarTraerDesde} max={traerHasta} />
+            <span className="pb-2 text-xs" style={{ color: "var(--text-muted)" }}>hasta</span>
+            <DatePicker label="Hasta" value={traerHasta} onChange={setTraerHasta} min={traerDesde}
+              max={topeHasta(traerDesde)} hint={AVISO_TOPE_CALENDARIO} />
+          </div>
+          <div className="flex items-start gap-2 rounded-lg border px-3 py-2"
+            style={{ borderColor: "var(--info-border)", backgroundColor: "var(--info-bg)" }}>
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: "var(--info-text)" }} />
+            <p className="text-xs leading-relaxed" style={{ color: "var(--info-text)" }}>
+              <strong>Máximo {MAX_MESES_CONSULTA} meses por descarga.</strong> Por eso el calendario bloquea los días
+              que se pasan de ese límite. El filtro del informe de arriba no tiene límite: muestra todo lo que ya se trajo.
+            </p>
+          </div>
+        </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <input

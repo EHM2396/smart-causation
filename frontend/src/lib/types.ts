@@ -623,6 +623,8 @@ export interface AnaliticaResumen {
     documentos: number;
     ejecutado_at: string;
   } | null;
+  /** Periodos ya traídos de la DIAN (unidos), sumando todas las traídas. */
+  cobertura_dian?: { desde: string; hasta: string }[];
   /** "cuenta" = todas las empresas (admin); "empresa" = una sola. */
   alcance: "cuenta" | "empresa";
   empresas: number;

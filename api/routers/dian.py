@@ -14,10 +14,8 @@ Flujo:
 
 from __future__ import annotations
 
-import calendar
 import json
 import re
-from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -258,28 +256,11 @@ def importar(body: ImportarRequest, empresa: EmpresaActiva):
 # Fuentes válidas de consulta.
 _FUENTES_VALIDAS = ("compras", "ventas", "soporte", "soporte_ajuste")
 
-# Tope por consulta del importador (espejo de MAX_MESES_CONSULTA en importar-dian.tsx).
-_MAX_MESES_CONSULTA = 4
-
-
 def _validar_rango_consulta(fecha_desde: str, fecha_hasta: str) -> None:
-    """Rechaza rangos invertidos o de más de 4 meses (01/01 → 30/04 es el máximo)."""
     try:
-        d1 = datetime.strptime(fecha_desde, "%d/%m/%Y").date()
-        d2 = datetime.strptime(fecha_hasta, "%d/%m/%Y").date()
-    except ValueError:
-        raise HTTPException(400, "Las fechas deben tener el formato DD/MM/AAAA.")
-    if d2 < d1:
-        raise HTTPException(400, "La fecha final no puede ser anterior a la inicial.")
-    mes = d1.month - 1 + _MAX_MESES_CONSULTA
-    anio, mes = d1.year + mes // 12, mes % 12 + 1
-    limite = date(anio, mes, min(d1.day, calendar.monthrange(anio, mes)[1]))
-    if d2 >= limite:
-        raise HTTPException(
-            400,
-            f"El periodo no puede ser mayor a {_MAX_MESES_CONSULTA} meses. "
-            f"Acorta las fechas o consulta por partes con el mismo token.",
-        )
+        dian_service.validar_rango_consulta(fecha_desde, fecha_hasta)
+    except DianError as e:
+        raise HTTPException(400, e.message)
 
 
 def _fuente_vacia() -> dict:
