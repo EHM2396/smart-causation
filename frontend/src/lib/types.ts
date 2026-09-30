@@ -122,6 +122,8 @@ export interface DianDocumento {
   fecha: string;
   proveedor: string;
   tipo: string;
+  // Clase deducida del listado DIAN; "desconocido" se descarga igual y la decide el XML.
+  clase?: "factura" | "nota_credito" | "nota_debito" | "desconocido";
 }
 
 // ─── Sugerencia IA ────────────────────────────────────────────────────────────

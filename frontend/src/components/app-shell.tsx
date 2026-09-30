@@ -29,9 +29,29 @@ const PAGE_META: Record<string, { title: string; description: string }> = {
     title: "Importar DIAN",
     description: "Traé compras y ventas con un solo token",
   },
+  "/causacion-nc-ventas": {
+    title: "NC Ventas",
+    description: "Devoluciones en ventas",
+  },
+  "/causacion-nc-soporte": {
+    title: "Ajuste Soporte",
+    description: "Notas de ajuste al documento soporte",
+  },
+  "/causacion-nc": {
+    title: "NC Compras",
+    description: "Notas crédito de compra",
+  },
+  "/causacion-ventas": {
+    title: "Causación Ventas",
+    description: "Facturas de venta DIAN",
+  },
+  "/causacion-soporte": {
+    title: "Documento Soporte",
+    description: "Compras a no obligados (tipo 05)",
+  },
   "/causacion": {
-    title: "Causación",
-    description: "Procesá facturas DIAN y generá archivos SIIGO",
+    title: "Causación Compras",
+    description: "Facturas de compra DIAN",
   },
   "/catalogos": {
     title: "Catálogos",
@@ -154,6 +174,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // El panel de administración y el perfil son a nivel de cuenta: no exigen empresa.
   const empresaScoped = !pathname.startsWith("/admin") && !pathname.startsWith("/perfil") && !pathname.startsWith("/empresas");
   const necesitaElegirEmpresa = !esAdmin && empresaScoped && !empresaConfirmada && (misEmpresas?.length ?? 0) > 1;
+
+  // Mientras no sepamos cuántas empresas tiene el causador, no renderizamos
+  // el contenido de la ruta para evitar el flash causación→EmpresaGate.
+  if (!esAdmin && empresaScoped && !empresaConfirmada && misEmpresas === undefined) {
+    return null;
+  }
 
   return (
     <div

@@ -8,7 +8,7 @@ import { Paso2 } from "./paso2";
 import { Paso3 } from "./paso3";
 import { Paso4 } from "./paso4";
 import { ConfigPanel } from "./config-panel";
-import { FileText, Layers, CheckCircle2, Tag, AlertTriangle, BookOpen, FileMinus2, ArrowRight, X } from "lucide-react";
+import { FileText, Layers, CheckCircle2, Tag, AlertTriangle, BookOpen, FileMinus2, ArrowRight, X, FileSpreadsheet, ReceiptText, FileCheck2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import Link from "next/link";
@@ -166,6 +166,15 @@ function NcRuteadasAviso() {
   );
 }
 
+const MODULE_META: Record<DocTipo, { label: string; desc: string; color: string; icon: React.ElementType }> = {
+  compras:    { label: "Causación Compras",  desc: "Facturas de compra",      color: "#4F46E5", icon: FileSpreadsheet },
+  nc:         { label: "NC Compras",         desc: "Notas crédito de compra", color: "#7c3aed", icon: FileMinus2 },
+  ventas:     { label: "Causación Ventas",   desc: "Facturas de venta",       color: "#059669", icon: ReceiptText },
+  nc_ventas:  { label: "NC Ventas",          desc: "Devoluciones en ventas",  color: "#0d9488", icon: FileMinus2 },
+  soporte:    { label: "Documento Soporte",  desc: "Compras a no obligados",  color: "#d97706", icon: FileCheck2 },
+  nc_soporte: { label: "Ajuste Soporte",     desc: "Notas de ajuste al DS",   color: "#ea580c", icon: FileMinus2 },
+};
+
 export function CausacionWizard({ docTipo = "compras" }: { docTipo?: DocTipo }) {
   const { paso, facturas, tipoComp, mapeos, docTipo: docTipoActual, setDocTipo, reset } = useWizardStore();
 
@@ -197,6 +206,35 @@ export function CausacionWizard({ docTipo = "compras" }: { docTipo?: DocTipo }) 
 
       {/* Main */}
       <div className="flex-1 overflow-y-auto px-4 py-6 lg:px-8 lg:py-8">
+        {/* Módulo activo — indica claramente en qué módulo está el usuario */}
+        {(() => {
+          const m = MODULE_META[docTipo];
+          const Icon = m.icon;
+          return (
+            <div
+              className="mb-6 flex items-center gap-3 rounded-xl border px-4 py-3"
+              style={{ borderColor: m.color + "40", backgroundColor: m.color + "08" }}
+            >
+              <div
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+                style={{ backgroundColor: m.color + "18" }}
+              >
+                <Icon className="h-5 w-5" style={{ color: m.color }} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold leading-none" style={{ color: m.color }}>{m.label}</p>
+                <p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>{m.desc}</p>
+              </div>
+              <span
+                className="hidden shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold sm:block"
+                style={{ backgroundColor: m.color + "18", color: m.color }}
+              >
+                Módulo activo
+              </span>
+            </div>
+          );
+        })()}
+
         {/* KPI bar */}
         <div className="grid grid-cols-2 gap-3 mb-6 sm:grid-cols-4 lg:mb-8">
           <KpiCard icon={FileText}    label={kpiLabel} value={facturas.length} accent="#4F46E5" sublabel={facturas.length ? (esNC ? "notas cargadas" : "documentos cargados") : "Sin cargar aún"} />

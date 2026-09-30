@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import datetime
+import unicodedata
+from datetime import datetime, timedelta
 from urllib.parse import urlparse, parse_qs
 
 import requests
@@ -241,12 +242,15 @@ def _obtener_account_id(session: requests.Session) -> str:
 
 # Documentos por página en los listados DataTables de la DIAN.
 _PAGINA = 150
+# El listado de documentos soporte (catálogo) usa un tope de página distinto.
+_PAGINA_SOPORTE = 100
 
 
 def _paginar_datatables(
-    session: requests.Session, url: str, data: dict, headers: dict, *, url_alias: str | None = None,
+    session: requests.Session, url: str, data: dict, headers: dict,
+    *, url_alias: str | None = None, max_paginas: int | None = None,
 ) -> dict:
-    """Recorre TODAS las páginas de un listado de la DIAN.
+    """Recorre las páginas de un listado de la DIAN (hasta `max_paginas`, o todas).
 
     La DIAN devuelve como máximo `length` documentos por respuesta y los ordena
     por fecha DESCENDENTE. Pedir una sola página parecía suficiente y no lo es:
@@ -254,10 +258,18 @@ def _paginar_datatables(
     silencio —meses enteros aparecen vacíos, sin ningún error— y el usuario cree
     que no hubo movimiento. Se detectó con un rango de enero a septiembre donde
     dos meses salían en cero y, consultados aparte, sí traían documentos.
+
+    OJO con el paginado por offset (`start += length`): el portal corre sobre
+    Cosmos DB, que NO pagina de forma confiable por offset. Al pedir la 2.ª página
+    el orden se re-baraja y quedan documentos afuera en silencio. Por eso la ÚNICA
+    página confiable es la primera; el llamador que necesite exactitud usa
+    ``max_paginas=1`` como sonda y, si la primera página vino llena, parte el rango
+    de fechas (ver ``consultar_documentos_completo``) en vez de pedir la 2.ª.
     """
     todos: list[dict] = []
     total: int | None = None
     start = 0
+    paginas = 0
 
     while True:
         pagina = {**data, "start": str(start), "length": str(_PAGINA)}
@@ -278,9 +290,14 @@ def _paginar_datatables(
 
         registros = payload.get("data") or []
         todos.extend(registros)
+        paginas += 1
         if total is None:
             total = payload.get("recordsTotal") or payload.get("recordsFiltered") or len(registros)
 
+        # Tope de páginas (modo sonda): frenar tras la 1.ª página, que es la única
+        # confiable. Quien pide max_paginas=1 solo quiere saber si el rango cabe.
+        if max_paginas is not None and paginas >= max_paginas:
+            break
         # Condición de parada robusta:
         # 1. Página vacía → no hay más (señal definitiva).
         # 2. Ya tenemos todos los que la DIAN dijo que había.
@@ -301,7 +318,8 @@ def _paginar_datatables(
     return {"data": todos, "recordsTotal": total or len(todos)}
 
 
-def _get_received(session: requests.Session, account_id: str, desde: str, hasta: str) -> dict:
+def _get_received(session: requests.Session, account_id: str, desde: str, hasta: str,
+                  *, max_paginas: int | None = None) -> dict:
     """Aplica el rango de fechas y pide la lista JSON de documentos recibidos."""
     received_url = f"{BILLER_BASE}/Document/Received"
 
@@ -336,10 +354,12 @@ def _get_received(session: requests.Session, account_id: str, desde: str, hasta:
         f"{BILLER_BASE}/Document/GetReceivedDocuments",
         data,
         {**_HEADERS, "Referer": received_url, "X-Requested-With": "XMLHttpRequest"},
+        max_paginas=max_paginas,
     )
 
 
-def _get_soporte(session: requests.Session, account_id: str, desde: str, hasta: str, doc_type_id: str = "05") -> dict:
+def _get_soporte(session: requests.Session, account_id: str, desde: str, hasta: str, doc_type_id: str = "05",
+                 *, max_paginas: int | None = None) -> dict:
     """Documentos SOPORTE (tipo 05) y su Nota de Ajuste (tipo 95).
 
     Viven en el portal ``catalogo-vpfe`` y se consultan con
@@ -373,7 +393,7 @@ def _get_soporte(session: requests.Session, account_id: str, desde: str, hasta: 
         "Referer": sent_url,
     }
     url_token = f"{CATALOGO_BASE}/Document/GetDocumentsPageToken"
-    length = 100
+    length = _PAGINA_SOPORTE
     all_records: list[dict] = []
     payload = {
         "draw": 1, "start": 0, "length": length,
@@ -391,7 +411,7 @@ def _get_soporte(session: requests.Session, account_id: str, desde: str, hasta: 
             total = data_json.get("recordsTotal", len(records))
             all_records.extend(records)
             start = 0
-            while len(all_records) < total and len(records) >= length:
+            while max_paginas is None and len(all_records) < total and len(records) >= length:
                 start += length
                 payload["start"] = start
                 r = session.post(url_token, data=payload, headers=headers_ajax, timeout=_TIMEOUT)
@@ -426,7 +446,8 @@ def _get_soporte(session: requests.Session, account_id: str, desde: str, hasta: 
     return {"data": []}
 
 
-def _get_issued(session: requests.Session, account_id: str, desde: str, hasta: str) -> dict:
+def _get_issued(session: requests.Session, account_id: str, desde: str, hasta: str,
+                *, max_paginas: int | None = None) -> dict:
     """Aplica el rango de fechas y pide la lista JSON de documentos EMITIDOS (ventas).
 
     Espejo de ``_get_received`` pero contra ``/Document/Sent`` +
@@ -467,6 +488,7 @@ def _get_issued(session: requests.Session, account_id: str, desde: str, hasta: s
         data,
         {**_HEADERS, "Referer": sent_url, "X-Requested-With": "XMLHttpRequest"},
         url_alias=f"{BILLER_BASE}/Document/GetSentDocuments",
+        max_paginas=max_paginas,
     )
 
 
@@ -489,6 +511,29 @@ def _fecha_dian(valor) -> str:
     return _limpiar_html(s)
 
 
+_CODIGOS_FACTURA = {"01", "02", "03", "04"}
+
+
+def clase_del_listado(tipo: str) -> str:
+    """Clase del documento según el texto/código ``DocumentType`` del listado:
+    ``factura`` | ``nota_credito`` | ``nota_debito`` | ``desconocido``.
+
+    Sirve para separar los conteos ANTES de descargar. Lo que no se reconozca
+    queda ``desconocido`` y se descarga igual: el XML decide, así nunca se oculta
+    un documento por un texto inesperado de la DIAN.
+    """
+    t = unicodedata.normalize("NFD", tipo or "").encode("ascii", "ignore").decode().lower().strip()
+    if not t:
+        return "desconocido"
+    if t == "91" or "credito" in t:
+        return "nota_credito"
+    if t == "92" or "debito" in t:
+        return "nota_debito"
+    if t in _CODIGOS_FACTURA or "factura" in t:
+        return "factura"
+    return "desconocido"
+
+
 def _normalizar_documentos(resultado: dict, modo: str = "compras") -> list[dict]:
     """Normaliza la respuesta DataTables de la DIAN. En ``compras`` la contraparte
     es el emisor (SenderName / proveedor); en ``ventas`` es el receptor
@@ -505,38 +550,50 @@ def _normalizar_documentos(resultado: dict, modo: str = "compras") -> list[dict]
                            or d.get("senderName") or d.get("SenderName") or "")
         else:
             contraparte = d.get("senderName") or d.get("SenderName") or ""
+        # GetReceivedDocuments/GetIssuedDocuments lo mandan en ``docTypeName``.
+        tipo = _limpiar_html(d.get("docTypeName") or d.get("documentType") or d.get("DocumentType") or "")
         docs.append({
             "id": d.get("DT_RowId") or d.get("Id") or d.get("DocumentKey"),
             "numero": _limpiar_html(d.get("docNumber") or d.get("DocumentNumber")
                                     or d.get("SerieAndNumber") or d.get("Number") or ""),
             "fecha": _fecha_dian(d.get("docDate") or d.get("DocumentDate") or d.get("EmissionDate") or ""),
             "proveedor": _limpiar_html(contraparte),
-            "tipo": _limpiar_html(d.get("documentType") or d.get("DocumentType") or ""),
+            "tipo": tipo,
+            "clase": clase_del_listado(tipo),
         })
     return docs
 
 
 # ── API pública del servicio ──────────────────────────────────────────────────
 
-def consultar_documentos(auth_url: str, fecha_desde: str, fecha_hasta: str, modo: str = "compras") -> dict:
+def _tope_pagina(modo: str) -> int:
+    """Tope de documentos por página del listado según el módulo (soporte usa 100)."""
+    return _PAGINA_SOPORTE if (modo or "").lower() in ("soporte", "soporte_ajuste") else _PAGINA
+
+
+def consultar_documentos(auth_url: str, fecha_desde: str, fecha_hasta: str, modo: str = "compras",
+                         *, max_paginas: int | None = None) -> dict:
     """
     Consulta las facturas del rango [desde, hasta] (formato DD/MM/YYYY).
       - ``modo='compras'`` → documentos RECIBIDOS (proveedores → tu NIT).
       - ``modo='ventas'``  → documentos EMITIDOS (tu empresa → clientes).
     Retorna {'success', 'total', 'documents': [{id, numero, fecha, proveedor, tipo}]}.
     Lanza DianError en caso de token/sesión/conexión.
+
+    ``max_paginas=1`` la usa ``consultar_documentos_completo`` como sonda: trae solo
+    la primera página (la única confiable en el paginado por offset de la DIAN).
     """
     modo_l = (modo or "compras").lower()
     session, account_id = _sesion_para(auth_url)
     try:
         if modo_l == "soporte":
-            resultado = _get_soporte(session, account_id, fecha_desde, fecha_hasta, doc_type_id="05")
+            resultado = _get_soporte(session, account_id, fecha_desde, fecha_hasta, doc_type_id="05", max_paginas=max_paginas)
         elif modo_l == "soporte_ajuste":
-            resultado = _get_soporte(session, account_id, fecha_desde, fecha_hasta, doc_type_id="95")
+            resultado = _get_soporte(session, account_id, fecha_desde, fecha_hasta, doc_type_id="95", max_paginas=max_paginas)
         elif modo_l == "ventas":
-            resultado = _get_issued(session, account_id, fecha_desde, fecha_hasta)
+            resultado = _get_issued(session, account_id, fecha_desde, fecha_hasta, max_paginas=max_paginas)
         else:
-            resultado = _get_received(session, account_id, fecha_desde, fecha_hasta)
+            resultado = _get_received(session, account_id, fecha_desde, fecha_hasta, max_paginas=max_paginas)
     except DianError as e:
         if e.code == "SESSION_EXPIRED":
             _evict(auth_url)  # sesión cacheada muerta → re-autenticar en el próximo intento
@@ -560,6 +617,134 @@ def consultar_documentos(auth_url: str, fecha_desde: str, fecha_hasta: str, modo
             f"amplio y el portal de la DIAN corta la respuesta. Importa en rangos más "
             f"pequeños (máximo 2 meses) para garantizar que no quede ningún documento fuera."
         )
+    return respuesta
+
+
+# Tope de seguridad de consultas en la auto-división: evita que un rango absurdo
+# (o un token con muchísimos documentos) dispare miles de peticiones a la DIAN.
+_MAX_CONSULTAS_BISECCION = 400
+# Reintentos cuando una respuesta de la DIAN no cuadra (fechas de otro rango o
+# mitades que no suman el total reportado).
+_REINTENTOS_RANGO = 3
+
+
+def _en_rango(doc: dict, d1, d2) -> bool:
+    """¿La fecha del documento cae en [d1, d2]? Sin fecha legible se da por buena
+    (no se descarta un documento solo porque la DIAN no mandó la fecha)."""
+    try:
+        f = datetime.strptime(doc.get("fecha") or "", "%d/%m/%Y").date()
+    except ValueError:
+        return True
+    return d1 <= f <= d2
+
+
+def consultar_documentos_completo(auth_url: str, fecha_desde: str, fecha_hasta: str, modo: str = "compras") -> dict:
+    """Consulta el rango GARANTIZANDO que no se pierda ningún documento.
+
+    El portal de la DIAN corre sobre Cosmos DB y NO pagina de forma confiable por
+    offset: al pedir la 2.ª página el orden se re-baraja y quedan documentos afuera
+    en silencio (por eso "se perdían" facturas en rangos amplios sin ningún aviso).
+    La ÚNICA página confiable es la primera.
+
+    En vez de confiar en el paginado, se parte el rango de fechas a la mitad y se
+    re-consulta cada mitad hasta que cada subrango entra en UNA sola página (la
+    primera vino con menos del tope) — ahí no hubo salto de bloque y el resultado
+    es EXACTO. Se deduplica por id, así que los solapes entre subrangos no molestan.
+    Un token grande se recorre en más peticiones, pero ninguna factura queda fuera.
+    """
+    try:
+        d_ini = datetime.strptime(fecha_desde, "%d/%m/%Y").date()
+        d_fin = datetime.strptime(fecha_hasta, "%d/%m/%Y").date()
+    except ValueError:
+        # Formato inesperado: no se puede bisecar por fecha → una consulta normal.
+        return consultar_documentos(auth_url, fecha_desde, fecha_hasta, modo=modo)
+
+    tope = _tope_pagina(modo)
+    docs_por_id: dict[str, dict] = {}
+    dias_saturados: list[str] = []   # un solo día con >= tope documentos (caso extremo)
+    contador = {"n": 0}
+
+    def _fmt(d) -> str:
+        return d.strftime("%d/%m/%Y")
+
+    def _recolectar(docs: list[dict]) -> None:
+        for doc in docs:
+            _id = doc.get("id")
+            if _id:
+                docs_por_id[_id] = doc
+
+    def _sondear(d1, d2) -> tuple[dict, list[dict]]:
+        # El filtro de fechas vive en la sesión de la DIAN (se fija con un POST
+        # aparte) y a veces no se aplica: la respuesta trae documentos de OTRO
+        # rango. Se detecta por las fechas y se reintenta; si persiste, se
+        # descartan los de afuera (los recoge el subrango que sí les corresponde).
+        res: dict = {}
+        docs: list[dict] = []
+        for _ in range(_REINTENTOS_RANGO):
+            contador["n"] += 1
+            res = consultar_documentos(auth_url, _fmt(d1), _fmt(d2), modo=modo, max_paginas=1)
+            docs = res.get("documents", []) or []
+            if all(_en_rango(x, d1, d2) for x in docs):
+                return res, docs
+        return res, [x for x in docs if _en_rango(x, d1, d2)]
+
+    def _rec(d1, d2) -> set[str]:
+        """Recorre [d1, d2] y devuelve los ids que encontró en ese rango."""
+        if contador["n"] >= _MAX_CONSULTAS_BISECCION:
+            dias_saturados.append(f"{_fmt(d1)}–{_fmt(d2)}")
+            return set()
+        # Sonda: solo la primera página, que es la confiable.
+        res, docs = _sondear(d1, d2)
+        ids = {x["id"] for x in docs if x.get("id")}
+        # Cabe en una página (y la DIAN no dice que haya más) → es exacto, se queda.
+        if len(docs) < tope and not res.get("incompleto"):
+            _recolectar(docs)
+            return ids
+        # No se puede partir más (un solo día) pero sigue saturado: caso extremo.
+        if d1 >= d2:
+            _recolectar(docs)
+            dias_saturados.append(_fmt(d1))
+            return ids
+        # Partir el rango por la mitad (por días) y recurse en cada mitad. Las
+        # mitades deben sumar lo que la DIAN reportó para el rango entero: si una
+        # vino vacía o con datos de otro rango, se re-consultan.
+        total_rango = int(res.get("total_dian") or 0)
+        medio = d1 + timedelta(days=(d2 - d1).days // 2)
+        hijos: set[str] = set()
+        for _ in range(_REINTENTOS_RANGO):
+            hijos |= _rec(d1, medio) | _rec(medio + timedelta(days=1), d2)
+            if len(hijos) >= total_rango:
+                return hijos
+        faltantes.append((f"{_fmt(d1)} y {_fmt(d2)}", total_rango, len(hijos)))
+        return hijos
+
+    faltantes: list[tuple[str, int, int]] = []
+    _rec(d_ini, d_fin)
+
+    docs = list(docs_por_id.values())
+    respuesta: dict = {
+        "success": True,
+        "total": len(docs),
+        "total_dian": len(docs),
+        "incompleto": bool(dias_saturados or faltantes),
+        "documents": docs,
+    }
+    avisos: list[str] = []
+    if faltantes:
+        detalle = "; ".join(f"entre {r} reporta {t} y entregó {n}" for r, t, n in faltantes)
+        avisos.append(
+            f"⚠️ La DIAN no entregó completos algunos periodos aun reintentando ({detalle}). "
+            f"Vuelve a consultar; si se repite, genera un enlace nuevo en el portal de la DIAN."
+        )
+    if dias_saturados:
+        avisos.append(
+            f"⚠️ Estos días tienen más de {tope} documentos y la DIAN no los entrega "
+            f"todos ni consultando el día solo: {', '.join(dias_saturados)}. Es un caso "
+            f"raro; si notás faltantes de esas fechas, revisalas directamente en el "
+            f"portal de la DIAN."
+        )
+    if avisos:
+        respuesta["advertencia"] = " ".join(avisos)
     return respuesta
 
 

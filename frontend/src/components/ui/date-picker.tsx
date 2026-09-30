@@ -1,6 +1,6 @@
 "use client";
 import * as React from "react";
-import { ChevronLeft, ChevronRight, Calendar } from "lucide-react";
+import { ChevronLeft, ChevronRight, Calendar, Info } from "lucide-react";
 
 interface DatePickerProps {
   label: string;
@@ -8,6 +8,8 @@ interface DatePickerProps {
   onChange: (v: string) => void;
   max?: string;
   min?: string;
+  // Aviso dentro del calendario, p. ej. para explicar por qué hay días bloqueados.
+  hint?: string;
 }
 
 const DAYS_ES = ["DO", "LU", "MA", "MI", "JU", "VI", "SA"];
@@ -56,7 +58,7 @@ function buildCells(year: number, month: number) {
   return cells;
 }
 
-export function DatePicker({ label, value, onChange, max, min }: DatePickerProps) {
+export function DatePicker({ label, value, onChange, max, min, hint }: DatePickerProps) {
   const today = new Date().toISOString().slice(0, 10);
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
@@ -217,6 +219,16 @@ export function DatePicker({ label, value, onChange, max, min }: DatePickerProps
               );
             })}
           </div>
+
+          {hint && (
+            <div
+              className="mx-2 mb-2 flex items-start gap-1.5 rounded-md px-2 py-1.5 text-[11px] leading-snug"
+              style={{ backgroundColor: "var(--info-bg)", color: "var(--info-text)" }}
+            >
+              <Info className="mt-px h-3 w-3 shrink-0" />
+              <span>{hint}</span>
+            </div>
+          )}
 
           {/* Footer */}
           <div

@@ -33,12 +33,11 @@ export default function LoginPage() {
         setLoading(false);
         return;
       }
-      // El admin de la cuenta (y el superadmin) no causan: van directo a su
-      // panel. Antes siempre se mandaba a /causacion y era app-shell quien
-      // corregía la ruta un instante después — ese doble salto es lo que se
-      // veía como que la pantalla "parpadeaba" al iniciar sesión.
+      // Admin va a su panel; causadores van a /inicio.
+      // /inicio espera a saber si hay empresa elegida antes de mostrar contenido,
+      // así que no habrá flash aunque el usuario tenga que pasar por EmpresaGate.
       const esAdmin = data.rol === "org_admin" || data.rol === "admin";
-      router.replace(esAdmin ? "/admin/dashboard" : "/causacion");
+      router.replace(esAdmin ? "/admin/dashboard" : "/inicio");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al iniciar sesión");
     } finally {
