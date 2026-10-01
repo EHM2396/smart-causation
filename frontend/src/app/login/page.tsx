@@ -8,6 +8,7 @@ import { ArrowLeft, Loader2, MailWarning, CheckCircle2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
 import { PasswordInput } from "@/components/password-input";
+import { mensajeApiError } from "@/lib/utils";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -39,7 +40,7 @@ export default function LoginPage() {
       const esAdmin = data.rol === "org_admin" || data.rol === "admin";
       router.replace(esAdmin ? "/admin/dashboard" : "/inicio");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al iniciar sesión");
+      setError(mensajeApiError(err, "No pudimos iniciar sesión. Intenta de nuevo."));
     } finally {
       setLoading(false);
     }

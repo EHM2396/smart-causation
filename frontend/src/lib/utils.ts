@@ -104,3 +104,27 @@ export function periodosIVA(): PeriodoPreset[] {
     { id: "cuatrimestre", label: "Último cuatrimestre", desde: localYMD(inicioCuatrimestreAnterior), hasta: localYMD(finCuatrimestreAnterior) },
   ];
 }
+
+// Correo con dominio completo (usuario@empresa.com, usuario@empresa.com.co…).
+// El input type="email" del navegador acepta "usuario@empresa" sin extensión,
+// así que se valida aparte. Debe coincidir con core/correo.py del backend.
+const EMAIL_RE = /^[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$/;
+export const MENSAJE_EMAIL_INVALIDO =
+  "El correo no es válido. Revisa que esté completo, por ejemplo: usuario@empresa.com";
+export function emailValido(email: string): boolean {
+  const e = (email || "").trim();
+  return e.length <= 254 && !e.includes("..") && EMAIL_RE.test(e);
+}
+
+// Convierte "API 401: {"detail":"..."}" en el mensaje legible del backend.
+export function mensajeApiError(err: unknown, porDefecto = "Ocurrió un error. Intenta de nuevo."): string {
+  const raw = err instanceof Error ? err.message : "";
+  const cuerpo = raw.replace(/^API\s+\d+:\s*/, "");
+  try {
+    const p = JSON.parse(cuerpo);
+    if (typeof p?.detail === "string") return p.detail;
+    if (Array.isArray(p?.detail)) return porDefecto;
+  } catch {}
+  if (raw === "Failed to fetch") return "No pudimos conectar con el servidor. Revisa tu conexión e intenta de nuevo.";
+  return cuerpo || porDefecto;
+}

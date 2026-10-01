@@ -64,7 +64,9 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     ...initRest,
     headers: _buildHeaders(authHeaders, extraHeaders, true),
   });
-  if (res.status === 401) _handleUnauthorized();
+  // En /auth/login un 401 es "credenciales incorrectas", no "sesión expirada":
+  // no se redirige (recargaría la página y el usuario no alcanzaría a ver el error).
+  if (res.status === 401 && path !== "/auth/login") _handleUnauthorized();
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`API ${res.status}: ${text}`);
