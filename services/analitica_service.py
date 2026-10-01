@@ -35,10 +35,10 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from db.models.auth import Empresa, Usuario
+from db.models.auth import Empresa, Usuario, UsuarioEmpresa
 from db.models.contabilidad import DocumentoDian
 
 # Signo con el que cada tipo entra a su naturaleza.
@@ -81,8 +81,11 @@ def _valor():
 def empresas_visibles(db: Session, usuario: Usuario, cuenta_id: int | None) -> list[int]:
     """Qué empresas puede ver este usuario en la analítica.
 
-    El causador ve las suyas (las que creó). El administrador de la cuenta —y el
-    superadmin— ven todas las de la cuenta.
+    El causador ve las empresas a las que pertenece (usuario_empresa), las mismas
+    que le ofrece el selector de empresa del menú lateral; no solo las que creó.
+    Antes se filtraba por owner_id y una empresa asignada a un causador no
+    aparecía aquí, así que no podía traer su información de la DIAN. El
+    administrador de la cuenta —y el superadmin— ven todas las de la cuenta.
 
     Solo empresas ACTIVAS: las eliminadas salen de la lista del usuario, así que
     incluirlas haría que el informe hablara de más empresas de las que el filtro
@@ -93,8 +96,10 @@ def empresas_visibles(db: Session, usuario: Usuario, cuenta_id: int | None) -> l
             Empresa.cuenta_id == cuenta_id, Empresa.activa.is_(True)
         )
     else:
+        miembro = select(UsuarioEmpresa.empresa_id).where(UsuarioEmpresa.usuario_id == usuario.id)
         stmt = select(Empresa.id).where(
-            Empresa.owner_id == usuario.id, Empresa.activa.is_(True)
+            or_(Empresa.owner_id == usuario.id, Empresa.id.in_(miembro)),
+            Empresa.activa.is_(True),
         )
     return list(db.scalars(stmt).all())
 

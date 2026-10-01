@@ -272,3 +272,43 @@ def test_historial_y_analitica_usan_la_misma_definicion_de_fecha():
     from api.routers.causacion import _columna_fecha
     for campo in ("emision", "causacion", None):
         assert _columna_fecha(campo) is columna_fecha(campo)
+
+
+# ─── Qué empresas ve cada rol ─────────────────────────────────────────────────
+
+class _DbQueCaptura:
+    """Sesión falsa: guarda la consulta en vez de ejecutarla."""
+    def __init__(self):
+        self.stmt = None
+
+    def scalars(self, stmt):
+        self.stmt = stmt
+        return self
+
+    def all(self):
+        return []
+
+
+def _sql_visibles(rol: str) -> str:
+    from types import SimpleNamespace
+    from services.analitica_service import empresas_visibles
+    db = _DbQueCaptura()
+    empresas_visibles(db, SimpleNamespace(id=7, rol=rol), cuenta_id=3)
+    return str(db.stmt.compile(compile_kwargs={"literal_binds": True}))
+
+
+def test_el_causador_ve_las_empresas_asignadas_no_solo_las_que_creo():
+    """Una empresa asignada al causador (usuario_empresa) tiene que salir en
+    Analítica: si no, no puede traer su información de la DIAN aunque la tenga
+    activa en el menú lateral."""
+    sql = _sql_visibles("causador")
+    assert "usuario_empresa" in sql
+    assert "owner_id" in sql
+    assert "cuenta_id" not in sql
+
+
+@pytest.mark.parametrize("rol", ["org_admin", "admin"])
+def test_el_admin_ve_todas_las_de_la_cuenta(rol):
+    sql = _sql_visibles(rol)
+    assert "cuenta_id = 3" in sql
+    assert "usuario_empresa" not in sql
