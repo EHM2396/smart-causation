@@ -227,8 +227,8 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
     contexto === "causador" && empresas?.some((e) => e.id === empresaActiva) ? empresaActiva
     : empresas?.length === 1 ? empresas[0].id
     : null;
-  const nombreEmpresa = empresas?.find((e) => e.id === empresaId)?.nombre;
   const empresaId = empresaElegida === undefined ? empresaPorDefecto : empresaElegida;
+  const nombreEmpresa = empresas?.find((e) => e.id === empresaId)?.nombre;
   const faltaElegir = exigeEmpresa && empresaId === null;
 
   const opcionesEmpresa = useMemo(() => {
