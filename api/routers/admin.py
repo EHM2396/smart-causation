@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_current_user
+from core.correo import MENSAJE_EMAIL_INVALIDO, email_valido, normalizar_email
 from db.models.auth import CuentaCliente, Empresa, Usuario
 from db.models.contabilidad import FacturaCausada
 from db.session import get_db
@@ -174,9 +175,9 @@ def create_usuario(body: UsuarioCreate, db: DB, admin: OrgAdmin):
             status_code=402,
             detail=f"Alcanzaste el máximo de usuarios de tu plan ({info['actuales']}/{info['max']}).",
         )
-    email = body.email.lower().strip()
-    if "@" not in email:
-        raise HTTPException(status_code=400, detail="Escribe un correo válido")
+    email = normalizar_email(body.email)
+    if not email_valido(email):
+        raise HTTPException(status_code=400, detail=MENSAJE_EMAIL_INVALIDO)
     if db.scalar(select(Usuario).where(Usuario.email == email)):
         raise HTTPException(status_code=409, detail="Ese correo ya está registrado")
 

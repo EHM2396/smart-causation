@@ -23,6 +23,7 @@ from db.models.auth import CuentaCliente, Empresa, Plan, TokenEmail, Usuario, Us
 from db.models.legal import Consentimiento
 from db.session import get_db
 from core.brand import APP_NAME
+from core.correo import MENSAJE_EMAIL_INVALIDO, email_valido, normalizar_email
 from services import email_service
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -226,7 +227,9 @@ def registro(body: RegistroRequest, request: Request, background_tasks: Backgrou
             detail="Debes aceptar los Términos y Condiciones y la Política de Privacidad",
         )
 
-    email = body.email.lower().strip()
+    email = normalizar_email(body.email)
+    if not email_valido(email):
+        raise HTTPException(status_code=400, detail=MENSAJE_EMAIL_INVALIDO)
     if db.scalar(select(Usuario).where(Usuario.email == email)):
         raise HTTPException(status_code=409, detail="El email ya está registrado")
     if not (body.nit_empresa or "").strip():

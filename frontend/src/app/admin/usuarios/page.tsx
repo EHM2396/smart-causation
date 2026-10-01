@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { AdminUsuario, AdminLimite } from "@/lib/types";
+import { MENSAJE_EMAIL_INVALIDO, emailValido } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -277,7 +278,7 @@ function UsuarioDialog({
   const submit = () => {
     setErr("");
     if (!editar) {
-      if (!email.includes("@")) return setErr("Escribe un correo válido.");
+      if (!emailValido(email)) return setErr(MENSAJE_EMAIL_INVALIDO);
       if (nombre.trim().length < 1) return setErr("Escribe el nombre.");
       if (password.length < 8) return setErr("La contraseña debe tener al menos 8 caracteres.");
     }

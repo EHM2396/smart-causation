@@ -10,6 +10,7 @@ import { LogoCiolix } from "@/components/logo-ciolix";
 import { api } from "@/lib/api";
 import { VERSION_LEGAL } from "@/lib/legal";
 import { useAuthStore } from "@/stores/auth";
+import { MENSAJE_EMAIL_INVALIDO, emailValido, mensajeApiError } from "@/lib/utils";
 
 export default function RegistroPage() {
   const [form, setForm] = useState({
@@ -36,11 +37,15 @@ export default function RegistroPage() {
       setError("Debes aceptar los Términos y Condiciones y la Política de Privacidad");
       return;
     }
+    if (!emailValido(form.email)) {
+      setError(MENSAJE_EMAIL_INVALIDO);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
       const data = await api.registro({
-        email: form.email,
+        email: form.email.trim(),
         password: form.password,
         nombre: form.nombre,
         nombre_empresa: form.nombre_empresa,
@@ -55,7 +60,7 @@ export default function RegistroPage() {
         router.replace("/causacion");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al registrarse");
+      setError(mensajeApiError(err, "No pudimos completar el registro. Intenta de nuevo."));
     } finally {
       setLoading(false);
     }
