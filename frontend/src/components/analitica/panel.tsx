@@ -20,11 +20,12 @@ import {
 import {
   ArrowDownRight, ArrowUpRight, Building2, CalendarCheck, CalendarDays, DownloadCloud,
   FileSpreadsheet, FileStack, FileText, Info, KeyRound, Loader2, Percent, Receipt,
-  Scale, Share2, TriangleAlert,
+  Scale, TriangleAlert,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
-import { fmt, periodosIVA, localYMD, MAX_MESES_CONSULTA, limiteHasta, AVISO_TOPE_CALENDARIO } from "@/lib/utils";
+import { useAuthStore } from "@/stores/auth";
+import { fmt, periodosIVA, localYMD, MAX_MESES_CONSULTA, limiteHasta, AVISO_TOPE_CALENDARIO, type PeriodoPreset } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -132,6 +133,47 @@ function TooltipCifras({ active, payload, label }: {
   );
 }
 
+/** Botones de periodo rápido (Este mes / Último bimestre / Último cuatrimestre). */
+function PresetsPeriodo({ presets, desde, hasta, onElegir }: {
+  presets: PeriodoPreset[]; desde: string; hasta: string; onElegir: (p: PeriodoPreset) => void;
+}) {
+  const activo = presets.find((p) => p.desde === desde && p.hasta === hasta)?.id;
+  return (
+    <>
+      {presets.map((p) => {
+        const active = activo === p.id;
+        return (
+          <button key={p.id} type="button" onClick={() => onElegir(p)}
+            className="rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors"
+            style={{ backgroundColor: active ? "var(--brand)" : "var(--bg-elevated)", color: active ? "#fff" : "var(--text-secondary)", border: `1px solid ${active ? "var(--brand)" : "var(--border-soft)"}` }}>
+            {p.label}
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
+/** Encabezado de cada paso: número + título + explicación corta. */
+function EncabezadoPaso({ numero, icon: Icon, titulo, descripcion }: {
+  numero: number; icon: React.ElementType; titulo: string; descripcion: string;
+}) {
+  return (
+    <div className="mb-3 flex items-start gap-3">
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+        style={{ backgroundColor: "var(--brand)" }}>
+        {numero}
+      </span>
+      <div className="min-w-0">
+        <p className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+          <Icon className="h-4 w-4" style={{ color: "var(--brand)" }} /> {titulo}
+        </p>
+        <p className="mt-0.5 text-xs leading-relaxed" style={{ color: "var(--text-secondary)" }}>{descripcion}</p>
+      </div>
+    </div>
+  );
+}
+
 function SinDatos({ mensaje }: { mensaje: string }) {
   return (
     <div className="flex h-full items-center justify-center text-center text-sm" style={{ color: "var(--text-muted)" }}>
@@ -144,7 +186,9 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
   const presets = useMemo(periodosIVA, []);
   const [desde, setDesde] = useState(presets[2].desde);
   const [hasta, setHasta] = useState(presets[2].hasta);
-  const [empresaId, setEmpresaId] = useState<number | null>(null);
+  // undefined = todavía no se ha tocado el selector: se usa la empresa por defecto.
+  const [empresaElegida, setEmpresaId] = useState<number | null | undefined>(undefined);
+  const empresaActiva = useAuthStore((s) => s.empresaId);
   const [token, setToken] = useState("");
   const [trayendo, setTrayendo] = useState(false);
   const [progreso, setProgreso] = useState({ done: 0, total: 0 });
@@ -155,12 +199,12 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
   const [reprocesadoResult, setReprocesadoResult] = useState<{ actualizados: number } | null>(null);
   const queryClient = useQueryClient();
 
-  const presetActivo = presets.find((p) => p.desde === desde && p.hasta === hasta)?.id ?? "personalizado";
   // Periodo a TRAER de la DIAN, aparte del filtro del informe: el informe lee lo
   // ya guardado y puede abarcar el año entero; la descarga con el token se
-  // limita a 4 meses por vez (igual que el importador DIAN).
-  const [traerDesde, setTraerDesde] = useState(presets[2].desde);
-  const [traerHasta, setTraerHasta] = useState(presets[2].hasta);
+  // limita a 4 meses por vez (igual que el importador DIAN). Arranca en
+  // "Este mes" (del 1 a hoy), como el importador.
+  const [traerDesde, setTraerDesde] = useState(presets[0].desde);
+  const [traerHasta, setTraerHasta] = useState(presets[0].hasta);
   const hoy = localYMD(new Date());
   const topeHasta = (d: string) => (limiteHasta(d) < hoy ? limiteHasta(d) : hoy);
   const cambiarTraerDesde = (v: string) => {
@@ -175,6 +219,16 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
   // en un mismo número no representan nada. El causador sí puede ver el conjunto
   // de las suyas.
   const exigeEmpresa = contexto === "admin" && (empresas?.length ?? 0) > 1;
+
+  // Empresa por defecto, para que el campo del enlace DIAN no quede bloqueado
+  // sin explicación: si es un causador, la que ya tiene activa en el menú
+  // lateral; si hay una sola, esa. El admin con varias sí tiene que elegir.
+  const empresaPorDefecto =
+    contexto === "causador" && empresas?.some((e) => e.id === empresaActiva) ? empresaActiva
+    : empresas?.length === 1 ? empresas[0].id
+    : null;
+  const nombreEmpresa = empresas?.find((e) => e.id === empresaId)?.nombre;
+  const empresaId = empresaElegida === undefined ? empresaPorDefecto : empresaElegida;
   const faltaElegir = exigeEmpresa && empresaId === null;
 
   const opcionesEmpresa = useMemo(() => {
@@ -234,6 +288,8 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
       );
       setResultado(r);
       setToken("");
+      setDesde(traerDesde);
+      setHasta(traerHasta);
       await queryClient.invalidateQueries({ queryKey: ["analitica"] });
       await queryClient.invalidateQueries({ queryKey: ["analitica-empresas"] });
     } catch (e) {
@@ -324,83 +380,33 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
         </div>
       </div>
 
-      {/* ── Filtros ─────────────────────────────────────────────────────── */}
-      <div className="mb-6 rounded-xl border p-4" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
-        <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-          <span className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-            <CalendarDays className="h-4 w-4" style={{ color: "var(--brand)" }} /> Periodo
-          </span>
+      {/* ── Empresa: aplica a la descarga y al informe ─────────────────── */}
+      {(empresas?.length ?? 0) > 1 && (
+        <div className="mb-6 flex flex-wrap items-center gap-2 rounded-xl border p-4"
+          style={{
+            borderColor: empresaId == null && exigeEmpresa ? "rgba(245,158,11,0.5)" : "var(--border-soft)",
+            backgroundColor: "var(--bg-surface)",
+          }}>
+          <Building2 className="h-4 w-4 shrink-0" style={{ color: "var(--brand)" }} />
+          <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Empresa</span>
+          <Combobox
+            className="w-full sm:w-80"
+            options={opcionesEmpresa}
+            value={empresaId === null ? "" : String(empresaId)}
+            onChange={(v) => setEmpresaId(v === "" ? null : Number(v))}
+            placeholder={exigeEmpresa ? "Elige una empresa..." : "Todas las empresas"}
+            clearable={!exigeEmpresa}
+          />
           <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-            por fecha de emisión del documento
+            {empresas?.length} disponibles
           </span>
         </div>
-        <div className="flex flex-wrap items-end gap-2">
-          {presets.map((p) => {
-            const active = presetActivo === p.id;
-            return (
-              <button key={p.id} type="button" onClick={() => { setDesde(p.desde); setHasta(p.hasta); }}
-                className="rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors"
-                style={{ backgroundColor: active ? "var(--brand)" : "var(--bg-elevated)", color: active ? "#fff" : "var(--text-secondary)", border: `1px solid ${active ? "var(--brand)" : "var(--border-soft)"}` }}>
-                {p.label}
-              </button>
-            );
-          })}
-          <div className="ml-1 flex flex-wrap items-end gap-2">
-            <DatePicker label="Desde" value={desde} onChange={setDesde} max={hasta} />
-            <span className="pb-2 text-xs" style={{ color: "var(--text-muted)" }}>hasta</span>
-            <DatePicker label="Hasta" value={hasta} onChange={setHasta} min={desde} />
-          </div>
-        </div>
+      )}
 
-        {(empresas?.length ?? 0) > 1 && (
-          <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3" style={{ borderColor: "var(--border-soft)" }}>
-            <Building2 className="h-4 w-4 shrink-0" style={{ color: "var(--brand)" }} />
-            <span className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>Empresa</span>
-            <Combobox
-              className="w-full sm:w-80"
-              options={opcionesEmpresa}
-              value={empresaId === null ? "" : String(empresaId)}
-              onChange={(v) => setEmpresaId(v === "" ? null : Number(v))}
-              placeholder={exigeEmpresa ? "Elegí una empresa..." : "Todas las empresas"}
-              clearable={!exigeEmpresa}
-            />
-            <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-              {empresas?.length} disponibles
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* ── Exportar ─────────────────────────────────────────────────────
-          Entre el periodo y la traída a propósito: lo que se exporta es
-          justamente el periodo elegido arriba. */}
-      <div className="mb-6 flex flex-wrap items-center gap-2 rounded-xl border px-4 py-3"
-        style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
-        <span className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-          <Share2 className="h-4 w-4" style={{ color: "var(--brand)" }} /> Exportar informe
-        </span>
-        <span className="mr-auto text-xs" style={{ color: "var(--text-muted)" }}>
-          del periodo seleccionado
-        </span>
-        <Button onClick={() => descargar("pdf")} disabled={ocupado || !hayDatos}
-          variant="outline" className="gap-1.5">
-          {descargando === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-          PDF
-        </Button>
-        <Button onClick={() => descargar("xlsx")} disabled={ocupado || !hayDatos}
-          variant="outline" className="gap-1.5">
-          {descargando === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
-          Excel
-        </Button>
-      </div>
-
-      {/* ── Traer de la DIAN ────────────────────────────────────────────── */}
+      {/* ── Paso 1: descargar de la DIAN ────────────────────────────────── */}
       <div className="mb-6 rounded-xl border p-4" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
-        <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-            <KeyRound className="h-4 w-4" style={{ color: "var(--brand)" }} /> Información de la DIAN
-          </span>
-        </div>
+        <EncabezadoPaso numero={1} icon={KeyRound} titulo="Descargar documentos de la DIAN"
+          descripcion="Trae las facturas y notas que la DIAN tiene de la empresa. Solo hace falta cuando quieras actualizar la información; lo que descargues se suma a lo que ya estaba." />
 
         {/* Qué periodo está cargado. Es lo primero que hay que poder responder:
             sin esto, un informe vacío no distingue "falta traer" de "no hubo
@@ -415,61 +421,67 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
               <>
                 <span className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
                   <CalendarCheck className="h-4 w-4" style={{ color: "var(--brand)" }} />
-                  Datos cargados{" "}
+                  {nombreEmpresa ? `${nombreEmpresa}: ya descargado` : "Ya descargado"}{" "}
                   {cobertura.map((c) => `del ${fechaCorta(c.desde)} al ${fechaCorta(c.hasta)}`).join(" · ")}
                 </span>
                 <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                  Última traída: {sinc.documentos} documento(s) el{" "}
+                  Última descarga: {sinc.documentos} documento(s) el{" "}
                   {new Date(sinc.ejecutado_at).toLocaleString("es-CO", {
                     day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
                   })}
                 </span>
-                {!cubrePeriodo && (
-                  <span className="flex items-center gap-1 text-xs font-medium" style={{ color: COLOR_COSTOS }}>
-                    <TriangleAlert className="h-3.5 w-3.5" />
-                    El periodo que estás viendo no está cubierto: volvé a traer con el token.
-                  </span>
-                )}
               </>
             ) : (
               <span className="flex items-center gap-1.5 text-sm" style={{ color: "var(--text-secondary)" }}>
                 <TriangleAlert className="h-4 w-4" style={{ color: "var(--text-muted)" }} />
-                Todavía no se ha traído información de la DIAN para esta empresa.
+                Todavía no se ha descargado información de la DIAN para {nombreEmpresa ?? "esta empresa"}.
               </span>
             )}
           </div>
         )}
 
-        <p className="mb-3 text-xs" style={{ color: "var(--text-secondary)" }}>
-          Pegá el enlace de la DIAN de la empresa seleccionada, elegí el periodo a traer y traé los documentos.
-          Se descarga cada documento, así que un rango largo puede tardar varios minutos. Lo que traigas se suma a
-          lo que ya estaba: para ver un año completo, tráelo por partes con el mismo enlace.
-        </p>
-
         <div className="mb-3 space-y-2">
+          <p className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>¿Qué fechas quieres descargar?</p>
           <div className="flex flex-wrap items-end gap-2">
-            <span className="pb-2 text-xs font-medium" style={{ color: "var(--text-muted)" }}>Periodo a traer</span>
-            <DatePicker label="Desde" value={traerDesde} onChange={cambiarTraerDesde} max={traerHasta} />
-            <span className="pb-2 text-xs" style={{ color: "var(--text-muted)" }}>hasta</span>
-            <DatePicker label="Hasta" value={traerHasta} onChange={setTraerHasta} min={traerDesde}
-              max={topeHasta(traerDesde)} hint={AVISO_TOPE_CALENDARIO} />
+            <PresetsPeriodo presets={presets} desde={traerDesde} hasta={traerHasta}
+              onElegir={(p) => { setTraerDesde(p.desde); setTraerHasta(p.hasta); }} />
+            <div className="ml-1 flex flex-wrap items-end gap-2">
+              <DatePicker label="Desde" value={traerDesde} onChange={cambiarTraerDesde} max={traerHasta} />
+              <span className="pb-2 text-xs" style={{ color: "var(--text-muted)" }}>hasta</span>
+              <DatePicker label="Hasta" value={traerHasta} onChange={setTraerHasta} min={traerDesde}
+                max={topeHasta(traerDesde)} hint={AVISO_TOPE_CALENDARIO} />
+            </div>
           </div>
           <div className="flex items-start gap-2 rounded-lg border px-3 py-2"
             style={{ borderColor: "var(--info-border)", backgroundColor: "var(--info-bg)" }}>
             <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: "var(--info-text)" }} />
             <p className="text-xs leading-relaxed" style={{ color: "var(--info-text)" }}>
-              <strong>Máximo {MAX_MESES_CONSULTA} meses por descarga.</strong> Por eso el calendario bloquea los días
-              que se pasan de ese límite. El filtro del informe de arriba no tiene límite: muestra todo lo que ya se trajo.
+              <strong>Máximo {MAX_MESES_CONSULTA} meses por descarga.</strong> Para un periodo más largo, descárgalo
+              por partes con el mismo enlace. Cada documento se descarga uno a uno, así que un rango largo puede tardar varios minutos.
             </p>
           </div>
         </div>
+
+        {empresaId == null && (
+          <div className="mb-3 flex items-start gap-2 rounded-lg border px-3 py-2"
+            style={{ borderColor: "rgba(245,158,11,0.4)", backgroundColor: "rgba(245,158,11,0.08)" }}>
+            <Building2 className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: "#d97706" }} />
+            <p className="text-xs leading-relaxed" style={{ color: "#d97706" }}>
+              {(empresas?.length ?? 0) === 0
+                ? "No tienes empresas disponibles para descargar información de la DIAN."
+                : <><strong>Primero elige la empresa arriba</strong> para poder pegar el enlace de la DIAN. El enlace tiene que ser el de esa empresa.</>}
+            </p>
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-2">
           <input
             value={token}
             onChange={(e) => setToken(e.target.value)}
             disabled={trayendo || empresaId == null}
-            placeholder="https://catalogo-vpfe.dian.gov.co/User/AuthToken?pk=...&rk=...&token=..."
+            placeholder={empresaId == null
+              ? "Elige primero una empresa para pegar el enlace"
+              : "Pega aquí el enlace de la DIAN: https://catalogo-vpfe.dian.gov.co/User/AuthToken?pk=..."}
             className="h-10 min-w-0 flex-1 rounded-lg border px-3 text-sm focus:outline-none focus:ring-2 disabled:opacity-40"
             style={{
               borderColor: "var(--border-soft)", backgroundColor: "var(--bg-elevated)",
@@ -478,7 +490,7 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
           />
           <Button onClick={traer} disabled={trayendo || empresaId == null || !token.trim()} className="gap-1.5">
             {trayendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <DownloadCloud className="h-4 w-4" />}
-            {trayendo ? "Trayendo..." : "Traer de la DIAN"}
+            {trayendo ? "Descargando..." : "Descargar de la DIAN"}
           </Button>
           <Button onClick={reprocesar} disabled={reprocesando || trayendo || empresaId == null}
             variant="outline" className="gap-1.5" title="Actualiza los datos guardados con el parser más reciente sin ir a la DIAN. Útil para corregir IVA en facturas AIU.">
@@ -490,12 +502,6 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
         {reprocesadoResult && !reprocesando && (
           <p className="mt-2 text-xs" style={{ color: "var(--text-secondary)" }}>
             Reprocesado: {reprocesadoResult.actualizados} documento(s) actualizados con el parser más reciente.
-          </p>
-        )}
-
-        {empresaId == null && (
-          <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>
-            Elegí primero una empresa: el enlace debe ser el de esa empresa.
           </p>
         )}
 
@@ -521,11 +527,46 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
 
         {resultado && !trayendo && !error && (
           <p className="mt-3 text-xs" style={{ color: "var(--text-secondary)" }}>
-            Listo: {resultado.guardados} documento(s) guardado(s).
+            Listo: {resultado.guardados} documento(s) guardado(s). El informe de abajo ya muestra esas fechas.
             {resultado.errores > 0 && (
-              <> {resultado.errores} no se pudieron descargar — volvé a traer el mismo
+              <> {resultado.errores} no se pudieron descargar: vuelve a descargar el mismo
               periodo y se completan los que faltaron, sin duplicar lo que ya está.</>
             )}
+          </p>
+        )}
+      </div>
+
+      {/* ── Paso 2: ver el informe ──────────────────────────────────────────
+          Lee lo YA descargado; no va a la DIAN, por eso no tiene tope de meses. */}
+      <div className="mb-6 rounded-xl border p-4" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
+        <EncabezadoPaso numero={2} icon={CalendarDays} titulo="Ver el informe"
+          descripcion="Elige qué fechas ver en las gráficas y en el PDF o Excel. Se calcula con lo que ya descargaste de la DIAN, por fecha de emisión del documento." />
+        <div className="flex flex-wrap items-end gap-2">
+          <PresetsPeriodo presets={presets} desde={desde} hasta={hasta}
+            onElegir={(p) => { setDesde(p.desde); setHasta(p.hasta); }} />
+          <div className="ml-1 flex flex-wrap items-end gap-2">
+            <DatePicker label="Desde" value={desde} onChange={setDesde} max={hasta} />
+            <span className="pb-2 text-xs" style={{ color: "var(--text-muted)" }}>hasta</span>
+            <DatePicker label="Hasta" value={hasta} onChange={setHasta} min={desde} />
+          </div>
+          {/* Lo que se exporta es justamente el periodo elegido aquí. */}
+          <div className="ml-auto flex items-center gap-2">
+            <Button onClick={() => descargar("pdf")} disabled={ocupado || !hayDatos}
+              variant="outline" className="gap-1.5">
+              {descargando === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+              PDF
+            </Button>
+            <Button onClick={() => descargar("xlsx")} disabled={ocupado || !hayDatos}
+              variant="outline" className="gap-1.5">
+              {descargando === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+              Excel
+            </Button>
+          </div>
+        </div>
+        {sinc && !cubrePeriodo && (
+          <p className="mt-3 flex items-center gap-1.5 text-xs font-medium" style={{ color: COLOR_COSTOS }}>
+            <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+            Parte de estas fechas todavía no se ha descargado de la DIAN, así que las cifras pueden salir incompletas. Descárgalas en el paso 1.
           </p>
         )}
       </div>
@@ -544,7 +585,7 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
       ) : faltaElegir ? (
         <div className="rounded-xl border px-4 py-16 text-center" style={{ borderColor: "var(--border-soft)", backgroundColor: "var(--bg-surface)" }}>
           <Building2 className="mx-auto mb-3 h-8 w-8" style={{ color: "var(--text-muted)" }} />
-          <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>Elegí una empresa para ver su analítica</p>
+          <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>Elige una empresa para ver su analítica</p>
           <p className="mx-auto mt-1 max-w-md text-sm" style={{ color: "var(--text-muted)" }}>
             Los costos y los ingresos son de cada empresa por separado: sumarlos entre compañías
             distintas daría una cifra que no corresponde a ninguna.
@@ -558,8 +599,8 @@ export function AnaliticaPanel({ contexto }: { contexto: "causador" | "admin" })
           <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>No hay documentos de la DIAN en este periodo</p>
           <p className="mx-auto mt-1 max-w-md text-sm" style={{ color: "var(--text-muted)" }}>
             {sinc
-              ? "Ya se trajo información de la DIAN, pero no hay documentos emitidos en este rango. Probá con otras fechas."
-              : "Pegá arriba el enlace de la DIAN y traé los documentos del periodo para ver el informe."}
+              ? "Ya se descargó información de la DIAN, pero no hay documentos emitidos en estas fechas. Prueba con otras en el paso 2."
+              : "Descarga primero los documentos de la DIAN en el paso 1 para ver el informe."}
           </p>
         </div>
       ) : (
