@@ -188,6 +188,38 @@ body {
   background-color: var(--bg-hover);
 }
 
+/* ─── Opciones seleccionables (importador DIAN) ─────────────────
+   Realce inmediato al pasar el cursor —fondo de hover y contorno de marca—
+   para saber qué opción se va a tocar. Estas opciones pintan fondo, borde y
+   opacidad con estilos en línea (según estén marcadas o no), por eso el hover
+   usa !important. Solo cambia la apariencia, nunca el comportamiento. */
+.opcion-hover {
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease, opacity 150ms ease;
+}
+.opcion-hover:hover:not(:disabled) {
+  background-color: var(--bg-hover) !important;
+  border-color: var(--brand) !important;
+  box-shadow: 0 0 0 1.5px var(--brand), var(--shadow-sm);
+  opacity: 1 !important;
+}
+/* Una opción ya activa (píldora de periodo) conserva su color de marca. */
+.opcion-hover[data-activo="true"]:hover:not(:disabled) {
+  background-color: var(--brand-hover) !important;
+}
+.opcion-hover:disabled {
+  cursor: not-allowed;
+}
+/* Tarjeta de módulo atenuada: al pasar el cursor vuelve a verse completa,
+   anticipando que tocar una de sus opciones cambia de módulo. */
+.tarjeta-modulo {
+  transition: opacity 150ms ease, box-shadow 150ms ease;
+}
+.tarjeta-modulo:hover {
+  opacity: 1 !important;
+  box-shadow: var(--shadow-sm);
+}
+
 /* ─── Custom scrollbar ──────────────────────────────────────── */
 ::-webkit-scrollbar         { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track   { background: transparent; }

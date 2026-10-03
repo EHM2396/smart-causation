@@ -10,6 +10,7 @@ import type {
   PasoWizard,
   Sugerencia,
 } from "@/lib/types";
+import { reordenarBorrador } from "@/lib/orden-documentos";
 
 interface TutorialMockMapeo {
   cuentaPago: Record<number, string>;
@@ -143,9 +144,13 @@ export const useWizardStore = create<WizardState>((set) => ({
   setFacturasOmitidas: (facturasOmitidas) => set({ facturasOmitidas }),
   setTutorialActivo: (tutorialActivo) => set({ tutorialActivo }),
   setTutorialMockMapeo: (tutorialMockMapeo) => set({ tutorialMockMapeo }),
-  hydrateBorrador: (snapshot) => set((state) => {
+  hydrateBorrador: (guardado) => set((state) => {
     // Revocar object URLs previos (por si había facturas cargadas en memoria).
     Object.values(state.pdfUrls).forEach((url) => { try { URL.revokeObjectURL(url); } catch {} });
+    // Un borrador guardado antes de ordenar por fecha de emisión (o fusionado por
+    // partes) se restaura ya en orden cronológico, con su configuración del paso 2
+    // movida junto a cada factura.
+    const snapshot = reordenarBorrador(guardado);
     return {
       ...initial,
       docTipo: state.docTipo,

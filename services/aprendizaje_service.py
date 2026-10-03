@@ -7,6 +7,7 @@ dos usuarios que operen la misma empresa tienen aprendizajes independientes.
 from __future__ import annotations
 
 from collections import defaultdict
+from typing import Callable
 import re
 import unicodedata
 from datetime import datetime, timezone
@@ -235,10 +236,20 @@ def cargar_reglas(db: Session) -> list:
     ).all()
 
 
-def aplicar_reglas_cargadas(reglas: list, descripcion: str) -> str | None:
-    """Aplica reglas ya cargadas a una descripción (sin query DB)."""
+def aplicar_reglas_cargadas(
+    reglas: list,
+    descripcion: str,
+    cuenta_valida: Callable[[str], bool] | None = None,
+) -> str | None:
+    """Aplica reglas ya cargadas a una descripción (sin query DB).
+
+    `cuenta_valida` descarta las reglas cuya cuenta no corresponde a la
+    naturaleza del documento (p. ej. una regla de gasto en una factura de venta)
+    y sigue buscando entre las demás."""
     desc_norm = _norm(descripcion)
     for regla in reglas:
+        if cuenta_valida is not None and not cuenta_valida(regla.cuenta_puc):
+            continue
         if regla.tipo == "keyword":
             if _norm(regla.patron) in desc_norm:
                 return regla.cuenta_puc
@@ -256,6 +267,7 @@ def obtener_mapeos_batch(
     items: list[dict],
     empresa_id: int | None = None,
     usuario_id: int | None = None,
+    cuenta_valida: Callable[[str], bool] | None = None,
 ) -> dict[str, tuple[str, bool]]:
     """
     Lookup de aprendizaje para múltiples ítems en una sola query.
@@ -265,6 +277,12 @@ def obtener_mapeos_batch(
         dentro de la misma empresa/usuario) → es_otro=True. Así, si dos proveedores
         distintos traen el mismo ítem, se reutiliza la cuenta ya aprendida.
     Siempre aislado por (empresa, usuario).
+
+    `cuenta_valida` filtra lo aprendido por la naturaleza del documento: el
+    aprendizaje se guarda por palabra clave, sin módulo, así que "cemento"
+    aprendido como gasto en compras NO debe sugerirse al vender cemento. Se
+    filtra ANTES de elegir la cuenta dominante, para que gane la mejor cuenta
+    coherente y no se pierda el ítem.
     """
     if not items:
         return {}
@@ -297,6 +315,8 @@ def obtener_mapeos_batch(
     lookup_nit: dict[tuple, str] = {}
     lookup_kw: dict[str, str] = {}
     for row in rows:
+        if cuenta_valida is not None and not cuenta_valida(row.cuenta_puc):
+            continue
         lookup_nit.setdefault((row.nit, row.keyword), row.cuenta_puc)
         lookup_kw.setdefault(row.keyword, row.cuenta_puc)
 

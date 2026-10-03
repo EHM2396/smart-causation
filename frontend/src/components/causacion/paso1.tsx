@@ -7,8 +7,8 @@ import { useAuthStore } from "@/stores/auth";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle2, Loader2, TrendingDown, History, Trash2, ArrowRight, ExternalLink } from "lucide-react";
-import { cn, fmt, ordenarPorFechaEmision } from "@/lib/utils";
-import type { Factura } from "@/lib/types";
+import { cn, fmt, ordenarPorFechaEmision, reordenarBorrador } from "@/lib/utils";
+import type { Factura, FacturaCausadaInfo, FacturaOmitida, Paso2Snapshot, Sugerencia } from "@/lib/types";
 
 function fechaBorrador(iso: string): string {
   try {
@@ -92,19 +92,26 @@ export function Paso1() {
       const prev = (completo?.datos ?? {}) as Record<string, unknown>;
       const existentes = (prev.facturas as Factura[]) ?? [];
       const nums = new Set(existentes.map((f) => f.numero_dian));
-      const merged = [...existentes, ...ncs.filter((f) => !nums.has(f.numero_dian))];
-      const snapshot = {
-        facturas: merged,
+      const nuevas: Factura[] = [];
+      for (const f of ncs) {
+        if (nums.has(f.numero_dian)) continue;  // ni contra lo existente ni dentro del lote
+        nums.add(f.numero_dian);
+        nuevas.push(f);
+      }
+      // La bandeja de NC queda en orden de fecha de emisión del XML (no en el
+      // orden de carga), moviendo con cada nota su configuración guardada.
+      const snapshot = reordenarBorrador({
+        facturas: [...existentes, ...nuevas],
         tipoComp: (prev.tipoComp as string) ?? "",
         centroCosto: (prev.centroCosto as string) ?? "",
-        facturasYaCausadas: prev.facturasYaCausadas ?? [],
-        facturasOmitidas: prev.facturasOmitidas ?? [],
-        suggestions: prev.suggestions ?? {},
-        paso2: prev.paso2 ?? null,
-      };
+        facturasYaCausadas: (prev.facturasYaCausadas as FacturaCausadaInfo[]) ?? [],
+        facturasOmitidas: (prev.facturasOmitidas as FacturaOmitida[]) ?? [],
+        suggestions: (prev.suggestions as Record<string, Sugerencia>) ?? {},
+        paso2: (prev.paso2 as Paso2Snapshot) ?? null,
+      });
       await api.guardarBorrador({
         datos: snapshot as unknown as Record<string, unknown>,
-        total_facturas: merged.length,
+        total_facturas: snapshot.facturas.length,
         total_verificadas: 0,
         tipo_comp: snapshot.tipoComp || null,
       }, tipoNC);
@@ -218,9 +225,9 @@ export function Paso1() {
     setErrors(errs);
     setOmitidas(causadasInfo.map((c) => c.numero_dian));
     setFacturasYaCausadas(causadasInfo);
-    // Ordenar cronológicamente por fecha de emisión: la más antigua primero, para
-    // que los consecutivos SIIGO se asignen en ese orden (los asigna el backend
-    // según el orden en que se envían las facturas).
+    // Ordenar cronológicamente por fecha de emisión del XML (no por el orden de
+    // los archivos): la más antigua primero, para que los consecutivos SIIGO se
+    // asignen en ese orden (los asigna el backend según el orden en que se envían).
     const nuevasOrdenadas = ordenarPorFechaEmision(nuevas);
     setFacturas(nuevasOrdenadas);
     setLoading(false);

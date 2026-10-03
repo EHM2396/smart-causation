@@ -50,6 +50,12 @@ jobs:
         working-directory: frontend
         run: npm install --no-audit --no-fund
 
+      # Lógica pura del frontend (orden cronológico del borrador, cuenta de IVA
+      # según la naturaleza del documento). Node ejecuta los .ts directo.
+      - name: Pruebas
+        working-directory: frontend
+        run: npm test
+
       # El build de Next corre TypeScript: atrapa errores de tipos, que es donde
       # más se rompe al fusionar ramas.
       - name: Compilar

@@ -393,7 +393,9 @@ export const api = {
   // Cuentas
   getCuentasGasto: () => req<CuentaOpcion[]>("/cuentas/gasto"),
   getCuentasIngreso: () => req<CuentaOpcion[]>("/cuentas/ingreso"),
-  getCuentasPago: () => req<CuentaOpcion[]>("/cuentas/pago"),
+  // Contrapartida: en ventas, clientes / caja / bancos / anticipos de clientes;
+  // por defecto, las de compras (proveedores, caja, bancos).
+  getCuentasPago: (esVenta = false) => req<CuentaOpcion[]>(`/cuentas/pago${esVenta ? "?modo=ventas" : ""}`),
   getCuentasTodas: () => req<CuentaOpcion[]>("/cuentas/todas"),
   crearCuenta: (body: { codigo: string; nombre: string; fiscal?: boolean }) =>
     req<{ id: number; codigo: string; nombre: string }>("/cuentas/", {
@@ -587,10 +589,13 @@ export const api = {
   },
 
   // Sugerencia batch (reemplaza múltiples llamadas a sugerirCuenta).
-  // `esVenta`: en ventas la contrapartida a crédito es Clientes (1305), no Proveedores.
+  // `esVenta`: en ventas la cuenta del ítem es de INGRESO (clase 4) y la
+  // contrapartida a crédito es Clientes (1305), no Proveedores.
+  // `esNC`: nota crédito; en ventas es una devolución (devoluciones en ventas).
   sugerirCuentasBatch: (
     items: { key: string; nit: string | null; descripcion: string; tipo_proveedor: string | null; nombre_proveedor?: string | null }[],
     esVenta = false,
+    esNC = false,
   ) =>
     req<{
       resultados: Record<string, {
@@ -603,7 +608,7 @@ export const api = {
       }>;
     }>("/causacion/sugerir-cuentas-batch", {
       method: "POST",
-      body: JSON.stringify({ items, es_venta: esVenta }),
+      body: JSON.stringify({ items, es_venta: esVenta, es_nota_credito: esNC }),
     }),
 
   // Sugerencia de cuenta (individual — mantenido para compatibilidad)

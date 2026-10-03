@@ -39,8 +39,11 @@ def get_cuentas_ingreso(db: DB, empresa: EmpresaActiva):
 
 
 @router.get("/pago", response_model=list[CuentaOpcion])
-def get_metodos_pago(db: DB, empresa: EmpresaActiva):
-    return cuentas_service.listar_metodos_pago(db, empresa_id=empresa.id)
+def get_metodos_pago(db: DB, empresa: EmpresaActiva, modo: str = "compras"):
+    """Cuentas de contrapartida. `modo=ventas` (o nc_ventas): clientes, caja,
+    bancos y anticipos de clientes; por defecto, las de compras."""
+    es_venta = modo in ("ventas", "nc_ventas")
+    return cuentas_service.listar_metodos_pago(db, empresa_id=empresa.id, es_venta=es_venta)
 
 
 @router.get("/todas", response_model=list[CuentaOpcion])

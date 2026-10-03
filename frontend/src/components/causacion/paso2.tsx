@@ -12,6 +12,7 @@ import { NuevoImpuestoDialog } from "@/components/causacion/nuevo-impuesto-dialo
 import { CausadasModal } from "@/components/causacion/causadas-modal";
 import { OmitidasModal } from "@/components/causacion/omitidas-modal";
 import { fmt } from "@/lib/utils";
+import { cuentaIvaPorDefecto, type ImpuestoIva } from "@/lib/cuenta-iva";
 import {
   AlertTriangle, Plus, Sparkles, Loader2,
   ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Clock, Search, History, X, Trash2, Save, Scissors, Layers, Copy, Check,
@@ -38,6 +39,8 @@ const ORIGEN_BADGE: Record<string, { label: string; variant: "success" | "info" 
   aprendizaje:      { label: "Aprendido",              variant: "success" },
   aprendizaje_otro: { label: "Aprendido (otro prov.)", variant: "warning" },
   regla:        { label: "Regla",          variant: "info" },
+  // NC de venta con una sola cuenta de devoluciones en ventas en el catálogo.
+  devolucion_venta: { label: "Devolución en ventas", variant: "info" },
   forma_pago:   { label: "Forma pago",     variant: "info" },
   ia_alta:      { label: "IA · Alta",      variant: "purple" },
   ia_media:     { label: "IA · Media",     variant: "warning" },
@@ -49,7 +52,7 @@ const ORIGEN_BADGE: Record<string, { label: string; variant: "success" | "info" 
 function origenToFuente(origen: string | null): FuenteMapeo {
   if (origen === "aprendizaje") return "aprendido";
   if (origen === "aprendizaje_otro") return "aprendido_otro";
-  if (origen === "regla") return "regla";
+  if (origen === "regla" || origen === "devolucion_venta") return "regla";
   if (origen === "ia") return "ia_alta";
   return "manual";
 }
@@ -84,7 +87,11 @@ export function Paso2() {
   const { data: cuentasGasto = [] } = useQuery({ queryKey: ["cuentas-gasto"], queryFn: api.getCuentasGasto });
   // En ventas la "cuenta" es de INGRESO (clase 4), no de gasto.
   const { data: cuentasIngreso = [] } = useQuery({ queryKey: ["cuentas-ingreso"], queryFn: api.getCuentasIngreso });
-  const { data: cuentasPago = [] } = useQuery({ queryKey: ["cuentas-pago"], queryFn: api.getCuentasPago });
+  // Contrapartida según el módulo: en ventas, Clientes (1305) / Caja / Bancos.
+  const { data: cuentasPago = [] } = useQuery({
+    queryKey: ["cuentas-pago", esVenta ? "ventas" : "compras"],
+    queryFn: () => api.getCuentasPago(esVenta),
+  });
   const { data: todasCuentas = [] } = useQuery({ queryKey: ["cuentas-todas"], queryFn: api.getCuentasTodas });
   const { data: impuestosRaw = [], refetch: refetchImps } = useQuery({ queryKey: ["impuestos"], queryFn: api.getImpuestos });
 
@@ -250,7 +257,7 @@ export function Paso2() {
         allItems.forEach(({ key }) => {
           const sug = sugs[key];
           if (!sug) return;
-          const esAutoconfiable = sug.origen === "regla" || sug.origen === "aprendizaje" || sug.origen === "aprendizaje_otro";
+          const esAutoconfiable = sug.origen === "regla" || sug.origen === "aprendizaje" || sug.origen === "aprendizaje_otro" || sug.origen === "devolucion_venta";
           if (!next[key] && sug.cuenta && esAutoconfiable) next[key] = sug.cuenta;
         });
         return next;
@@ -318,7 +325,7 @@ export function Paso2() {
       return () => clearTimeout(t);
     }
 
-    api.sugerirCuentasBatch(pendientes, esVenta)
+    api.sugerirCuentasBatch(pendientes, esVenta, esNC)
       .then(({ resultados }) => {
         const nuevas: Record<string, Sugerencia> = {};
         Object.entries(resultados).forEach(([key, r]) => {
@@ -364,36 +371,12 @@ export function Paso2() {
     .map(i => ({ value: i.codigo, label: `${i.codigo} — ${i.tipo_impuesto ?? ""} ${i.tarifa ?? 0}%` }));
   const todasCuentasOpts = cuentaOpts(todasCuentas);
 
-  // En modo NC, la cuenta de IVA es "IVA devolución en compras" (una por tarifa,
-  // 5% o 19%). Se busca en el PUC por nombre. El usuario puede cambiarla.
-  const recomendarCuentaIvaDevolucion = (tarifa: number): string => {
-    if (!esNC || !tarifa) return "";
-    const norm = (s: string) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-    const pct = String(Math.round(tarifa));
-    const conPct = todasCuentas.find((c) => {
-      const n = norm(c.nombre ?? "");
-      return n.includes("devolucion") && n.includes(pct);
-    });
-    if (conPct) return conPct.codigo;
-    const soloDev = todasCuentas.find((c) => norm(c.nombre ?? "").includes("devolucion"));
-    return soloDev?.codigo ?? "";
-  };
-
-  // Cuenta de IVA (u otro impuesto sobre ventas/compras) por defecto para un
-  // impuesto, según el módulo actual:
-  //   compras factura → cta_compras         · compras NC → devolución en compras (PUC)
-  //   ventas  factura → cta_ventas          · ventas  NC → cta_dev_ventas (o devolución PUC)
-  const cuentaIvaDeImpuesto = (
-    impInfo?: { tarifa: number | null; cta_compras: string | null; cta_ventas: string | null; cta_dev_ventas: string | null } | null,
-  ): string => {
-    if (!impInfo) return "";
-    if (esVenta) {
-      if (esNC) return impInfo.cta_dev_ventas || recomendarCuentaIvaDevolucion(impInfo.tarifa ?? 0) || impInfo.cta_ventas || "";
-      return impInfo.cta_ventas ?? "";
-    }
-    if (esNC) return recomendarCuentaIvaDevolucion(impInfo.tarifa ?? 0);
-    return impInfo.cta_compras ?? "";
-  };
+  // Cuenta de IVA por defecto para un impuesto según la naturaleza del documento:
+  // compra → IVA descontable; venta → IVA generado; NC de venta → reversa del IVA
+  // generado (nunca una cuenta de compras). Ver lib/cuenta-iva.ts. El usuario
+  // puede cambiarla.
+  const cuentaIvaDeImpuesto = (impInfo?: ImpuestoIva | null): string =>
+    cuentaIvaPorDefecto(impInfo, { esVenta, esNC }, todasCuentas);
 
   // Cuenta de la retención según el módulo: en compras es la "retención por pagar"
   // (cta_compras del impuesto de retención); en ventas es la "retención que te
@@ -1110,7 +1093,7 @@ export function Paso2() {
           <table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
-                {["#", "N° Factura", `${terceroLabel} / NIT`, "Fecha", "Subtotal", "Total", "Estado", ""].map((h) => (
+                {["#", "N° Factura", `${terceroLabel} / NIT`, "Fecha emisión", "Subtotal", "Total", "Estado", ""].map((h) => (
                   <th
                     key={h}
                     className={`px-4 py-3 text-xs font-semibold uppercase tracking-wide${h === "Total" ? " text-right" : " text-left"}`}
@@ -1503,7 +1486,7 @@ export function Paso2() {
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium flex items-center gap-1.5" style={{ color: cuentaPagoVacia ? "rgb(245,158,11)" : "var(--text-muted)" }}>
-              Cuenta de pago
+              {esVenta ? "Cuenta de cobro" : "Cuenta de pago"}
               {cuentaPagoVacia && <span className="require-badge">Requerida</span>}
             </label>
             {cuentaPagoIASug && (() => {
@@ -1562,7 +1545,7 @@ export function Paso2() {
                 options={pagoOpts}
                 value={cuentaPago[selectedIdx] ?? ""}
                 onChange={(v) => setCuentaPago((p) => ({ ...p, [selectedIdx]: v }))}
-                placeholder="Buscar cuenta de pago…"
+                placeholder={esVenta ? "Buscar cliente, caja o banco…" : "Buscar cuenta de pago…"}
                 disabled={isVerificada}
               />
             </div>
