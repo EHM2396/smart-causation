@@ -108,6 +108,7 @@ def factura_xml(
     lineas: list[str],
     *,
     numero: str = "SETP001",
+    fecha: str = "2026-09-15",  # cbc:IssueDate (fecha de emisión)
     total: float = 0.0,
     nit_emisor: str = "900123456",
     nit_receptor: str = "800999888",
@@ -157,7 +158,7 @@ def factura_xml(
 <{raiz} {ns}>
   <cbc:ID>{numero}</cbc:ID>
   <cbc:UUID>cufe-de-prueba</cbc:UUID>
-  <cbc:IssueDate>2026-09-15</cbc:IssueDate>
+  <cbc:IssueDate>{fecha}</cbc:IssueDate>
   {cust}{tipo_nota}
   <cac:AccountingSupplierParty><cac:Party>
     {_party_xml(nit_emisor, emisor_solo_en_tax_scheme, "Proveedor de Prueba SAS")}

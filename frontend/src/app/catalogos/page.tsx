@@ -557,7 +557,7 @@ export default function CatalogosPage() {
   const [tab, setTab] = useState<TabId>("Codigos de Impuesto");
 
   const { data: imps = [] } = useQuery({ queryKey: ["impuestos"], queryFn: api.getImpuestos });
-  const { data: cuentasPago = [] } = useQuery({ queryKey: ["cuentas-pago"], queryFn: api.getCuentasPago });
+  const { data: cuentasPago = [] } = useQuery({ queryKey: ["cuentas-pago", "compras"], queryFn: () => api.getCuentasPago() });
   const { data: cuentasGasto = [] } = useQuery({ queryKey: ["cuentas-gasto"], queryFn: api.getCuentasGasto });
   const { data: tipos = [] } = useQuery({ queryKey: ["tipos-comp"], queryFn: api.getTiposComprobante });
 

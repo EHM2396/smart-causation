@@ -118,12 +118,32 @@ def listar_cuentas_ingreso(db: Session, empresa_id: int | None = None) -> list[d
     ]
 
 
-def listar_metodos_pago(db: Session, empresa_id: int | None = None) -> list[dict]:
-    stmt = select(CuentaContable).where(
-        CuentaContable.activo == True,
-        CuentaContable.nivel == 8,
-        CuentaContable.fiscal == False,
-        or_(
+# Contrapartida de una VENTA (lo que te deben o cómo te pagaron): caja y bancos
+# (11), deudores / clientes (13), ingresos recibidos por anticipado (27) y
+# anticipos de clientes o ingresos para terceros (28). Sin proveedores (22) ni
+# demás pasivos de compras: no son la contrapartida de una venta.
+PREFIJOS_CONTRAPARTIDA_VENTAS = ("11", "13", "27", "28")
+
+
+def es_contrapartida(codigo: str | None, es_venta: bool = False) -> bool:
+    """¿La cuenta sirve como contrapartida (tercero / medio de pago) del módulo?
+      - compras: pasivos (clase 2), caja y bancos (11) e inversiones (12).
+      - ventas:  ver PREFIJOS_CONTRAPARTIDA_VENTAS (1305 Clientes incluida).
+    """
+    c = str(codigo or "").strip()
+    if es_venta:
+        return c.startswith(PREFIJOS_CONTRAPARTIDA_VENTAS)
+    return c.startswith(("2", "11", "12"))
+
+
+def listar_metodos_pago(db: Session, empresa_id: int | None = None, es_venta: bool = False) -> list[dict]:
+    """Cuentas de contrapartida según el módulo (ver es_contrapartida). Antes la
+    misma lista servía para ventas y no traía 1305 Clientes: una venta a crédito
+    no encontraba su cuenta."""
+    if es_venta:
+        condicion = or_(*[CuentaContable.codigo.like(f"{p}%") for p in PREFIJOS_CONTRAPARTIDA_VENTAS])
+    else:
+        condicion = or_(
             CuentaContable.clase == 2,
             and_(
                 CuentaContable.clase == 1,
@@ -133,6 +153,11 @@ def listar_metodos_pago(db: Session, empresa_id: int | None = None) -> list[dict
                 )
             )
         )
+    stmt = select(CuentaContable).where(
+        CuentaContable.activo == True,
+        CuentaContable.nivel == 8,
+        CuentaContable.fiscal == False,
+        condicion,
     ).order_by(CuentaContable.codigo)
     if empresa_id is not None:
         stmt = stmt.where(CuentaContable.empresa_id == empresa_id)

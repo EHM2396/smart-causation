@@ -69,6 +69,9 @@ class SugerenciaBatchItem(BaseModel):
 class SugerenciaBatchRequest(BaseModel):
     items: list[SugerenciaBatchItem]
     es_venta: bool = False  # True = módulo de ventas (contrapartida = clientes)
+    # True = nota crédito. En ventas es una devolución: la cuenta sugerida es la de
+    # devoluciones en ventas (reversa el ingreso), no la del ingreso mismo.
+    es_nota_credito: bool = False
 
 
 class SugerenciaBatchResponse(BaseModel):

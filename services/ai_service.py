@@ -325,11 +325,16 @@ def sugerir_batch(
     cuentas_pago: list[dict] | None = None,
     ejemplos_aprendizaje: list[dict] | None = None,
     modelo: str = _MODELO_DEFAULT,
+    naturaleza: str = "compra",
 ) -> dict[str, "SugerenciaIA | None"]:
     """
     Clasifica ítems dividiendo en chunks de ~15 y disparándolos en paralelo.
     Deduplica por (descripcion, tipo_proveedor). Retorna dict[key → SugerenciaIA | None].
     Nunca lanza excepción.
+
+    `naturaleza` ("compra" | "venta" | "devolucion_venta") cambia el contexto
+    del prompt: en ventas el ítem es lo que la empresa VENDE (ingreso) y en una
+    nota crédito de venta, una devolución que disminuye el ingreso.
     """
     if not esta_disponible() or not items:
         return {item["key"]: None for item in items}
@@ -365,7 +370,7 @@ def sugerir_batch(
         sug_por_combo.update(
             _procesar_chunk_batch(
                 chunks[0], cuentas_gasto, codigos_impuesto, cuentas_pago, modelo, api_key,
-                ejemplos_aprendizaje,
+                ejemplos_aprendizaje, naturaleza,
             )
         )
     else:
@@ -375,7 +380,7 @@ def sugerir_batch(
                 executor.submit(
                     _procesar_chunk_batch,
                     chunk, cuentas_gasto, codigos_impuesto, cuentas_pago, modelo, api_key,
-                    ejemplos_aprendizaje,
+                    ejemplos_aprendizaje, naturaleza,
                 ): idx
                 for idx, chunk in enumerate(chunks)
             }
@@ -405,6 +410,7 @@ def _procesar_chunk_batch(
     modelo: str,
     api_key: str,
     ejemplos_aprendizaje: list[dict] | None = None,
+    naturaleza: str = "compra",
 ) -> dict[tuple, SugerenciaIA]:
     """Procesa un chunk de combos en 1 llamada a la API."""
     codigos_gasto_validos = {c["codigo"] for c in cuentas_gasto}
@@ -413,7 +419,9 @@ def _procesar_chunk_batch(
 
     try:
         client  = _OpenAI(api_key=api_key)
-        prompt  = _construir_prompt_batch(chunk, cuentas_gasto, codigos_impuesto, cuentas_pago, ejemplos_aprendizaje)
+        prompt  = _construir_prompt_batch(
+            chunk, cuentas_gasto, codigos_impuesto, cuentas_pago, ejemplos_aprendizaje, naturaleza,
+        )
         max_tok = min(2500, max(600, 150 * len(chunk)))
 
         response = client.chat.completions.create(
@@ -441,7 +449,8 @@ def _procesar_chunk_batch(
             continue
         combo = chunk[idx]
 
-        cuenta_gasto = r.get("cuenta_gasto") or None
+        # En ventas el prompt pide "cuenta_ingreso"; se acepta cualquiera de los dos.
+        cuenta_gasto = r.get("cuenta_gasto") or r.get("cuenta_ingreso") or None
         cod_impuesto = r.get("cod_impuesto") or None
         cuenta_pago  = (r.get("cuenta_pago") or None) if cuentas_pago else None
         confianza    = float(r.get("confianza", 0.0))
@@ -610,13 +619,96 @@ def _llamar_openai(
     )
 
 
+# Contexto del prompt batch según la NATURALEZA del documento. Compras conserva
+# el texto de siempre. En ventas el ítem es lo que la empresa VENDE (ingreso) y
+# en una nota crédito de venta, una devolución que disminuye ese ingreso: sin
+# esto la IA leía "cemento" o "asesoría" como un gasto aunque fuera una venta.
+_GLOSARIO_COMPRAS = """GLOSARIO PUC (Decreto 2650) — tipos de gasto y su naturaleza contable:
+• Honorarios / consultoría / asesoría legal, contable, técnica → servicios profesionales externos
+• Arrendamiento / alquiler / canon de inmuebles o equipos → arrendamientos
+• Servicios públicos domiciliarios: agua, energía, gas, telefonía, internet → servicios públicos
+• Mantenimiento y reparación de activos fijos (edificios, maquinaria, vehículos) → mantenimiento y reparaciones
+• Materiales físicos para construcción, remodelación, acabados, proceso productivo → materiales / suministros / acondicionamiento
+• Combustibles y lubricantes para vehículos y maquinaria → combustibles y lubricantes
+• Seguros de bienes, vehículos, personas, pólizas, ARL → seguros
+• Dotación personal de empleados: uniformes, EPP (guantes de seguridad, botas, casco, gafas protección, overol) → dotación a trabajadores
+• Papelería y útiles de oficina: papel, tóner, esferos, archivadores → papelería y útiles
+• Publicidad, mercadeo, impresión comercial → gastos de publicidad
+• Transporte, fletes, mensajería, logística → gastos de transporte
+• Viáticos, tiquetes, hospedaje para viajes de negocios → gastos de viaje
+• Gastos de representación, reuniones, atención a clientes → gastos de representación
+• Aseo, vigilancia, cafetería → gastos generales de administración
+"""
+
+_GLOSARIO_VENTAS = """GLOSARIO PUC (Decreto 2650) — ingresos y su naturaleza contable:
+• Venta de mercancías que la empresa no fabrica (comercio al por mayor y al por menor) → ingresos de comercio
+• Venta de productos fabricados o transformados por la empresa → ingresos de industrias manufactureras
+• Construcción, obras civiles, remodelaciones → ingresos de construcción
+• Servicios prestados (asesoría, consultoría, mantenimiento, transporte, software…) → ingresos de la actividad de servicios correspondiente
+• Alimentos y bebidas servidos, alojamiento → ingresos de hoteles y restaurantes
+• Arrendamientos cobrados → ingresos por arrendamientos
+• Intereses, comisiones, recuperaciones, venta de activos y otros ajenos a la actividad → ingresos no operacionales
+⚠️ NUNCA uses cuentas de costo ni de gasto: el ítem es un INGRESO de la empresa.
+⚠️ No elijas cuentas de devoluciones en ventas: esto es una venta, no una devolución.
+"""
+
+_GLOSARIO_DEVOLUCION_VENTAS = """GLOSARIO PUC (Decreto 2650) — devoluciones en ventas:
+• Devolución de mercancías o productos vendidos → devoluciones en ventas de la actividad correspondiente
+• Anulación o rebaja de un servicio facturado → devoluciones en ventas de la actividad de servicios
+• Rebajas o descuentos concedidos al cliente sobre la venta → devoluciones, rebajas y descuentos en ventas
+⚠️ NUNCA uses cuentas de costo ni de gasto: la nota crédito REVERSA un ingreso.
+"""
+
+_REGLA_FINAL_VENTAS = (
+    "- El tercero es el CLIENTE: la cuenta depende de lo que la empresa vende, no de quién compra."
+)
+
+_CONTEXTO_NATURALEZA: dict[str, dict[str, str]] = {
+    "compra": {
+        "intro": "Clasificas ítems de facturas electrónicas DIAN para causación en SIIGO.",
+        "glosario": _GLOSARIO_COMPRAS,
+        "etiqueta_lista": "Cuentas PUC de gasto disponibles",
+        "campo": "cuenta_gasto",
+        "tercero": "proveedor",
+        "regla_final": '- tipo_proveedor "juridica" = empresa; "natural" = persona natural. Afecta cuenta_pago.',
+    },
+    "venta": {
+        "intro": (
+            "Clasificas ítems de FACTURAS DE VENTA electrónicas DIAN emitidas por la empresa, "
+            "para causación en SIIGO.\nLa empresa es el VENDEDOR: cada ítem es un bien o servicio "
+            "que la empresa VENDE y se registra como INGRESO (clase 4 del PUC)."
+        ),
+        "glosario": _GLOSARIO_VENTAS,
+        "etiqueta_lista": "Cuentas PUC de ingreso disponibles",
+        "campo": "cuenta_ingreso",
+        "tercero": "cliente",
+        "regla_final": _REGLA_FINAL_VENTAS,
+    },
+    "devolucion_venta": {
+        "intro": (
+            "Clasificas ítems de NOTAS CRÉDITO DE VENTA electrónicas DIAN emitidas por la empresa, "
+            "para causación en SIIGO.\nCada ítem es una DEVOLUCIÓN, anulación o rebaja sobre una venta "
+            "ya facturada: DISMINUYE el ingreso. Va a la cuenta de devoluciones en ventas (4175 del PUC) "
+            "que corresponda a lo vendido; si la lista no trae devoluciones, a la cuenta de ingreso que se reversa."
+        ),
+        "glosario": _GLOSARIO_DEVOLUCION_VENTAS,
+        "etiqueta_lista": "Cuentas PUC disponibles para la devolución",
+        "campo": "cuenta_ingreso",
+        "tercero": "cliente",
+        "regla_final": _REGLA_FINAL_VENTAS,
+    },
+}
+
+
 def _construir_prompt_batch(
     combos: list[tuple],
     cuentas_gasto: list[dict],
     codigos_impuesto: list[dict],
     cuentas_pago: list[dict] | None = None,
     ejemplos_aprendizaje: list[dict] | None = None,
+    naturaleza: str = "compra",
 ) -> str:
+    ctx = _CONTEXTO_NATURALEZA.get(naturaleza, _CONTEXTO_NATURALEZA["compra"])
     # Rankear cuentas por relevancia a los ítems del chunk (desc + nombre proveedor)
     descripciones = [f"{desc} {nombre_prov}" for desc, _tipo, nombre_prov in combos]
     cuentas_rankeadas = _rankear_cuentas(cuentas_gasto, descripciones)
@@ -669,39 +761,24 @@ Decisiones previas de esta empresa (úsalas como guía principal):
 
     items_str = "\n".join(
         f'{i + 1}. descripcion="{desc}"'
-        + (f', proveedor="{nombre_prov}"' if nombre_prov else "")
+        + (f', {ctx["tercero"]}="{nombre_prov}"' if nombre_prov else "")
         + (f', tipo_proveedor="{tipo}"' if tipo else "")
         for i, (desc, tipo, nombre_prov) in enumerate(combos)
     )
     n = len(combos)
 
     return f"""Eres un experto en contabilidad colombiana bajo el PUC (Decreto 2650). \
-Clasificas ítems de facturas electrónicas DIAN para causación en SIIGO.
+{ctx["intro"]}
 {ejemplos_section}INSTRUCCIONES:
 1. Si hay ejemplos previos de la empresa, úsalos como guía principal.
 2. Para ítems sin ejemplo, clasifica por la NATURALEZA CONTABLE real usando el glosario PUC.
 3. Elige la cuenta más específica de la lista disponible.
 4. Si ninguna encaja → null con confianza < 0.4.
 
-GLOSARIO PUC (Decreto 2650) — tipos de gasto y su naturaleza contable:
-• Honorarios / consultoría / asesoría legal, contable, técnica → servicios profesionales externos
-• Arrendamiento / alquiler / canon de inmuebles o equipos → arrendamientos
-• Servicios públicos domiciliarios: agua, energía, gas, telefonía, internet → servicios públicos
-• Mantenimiento y reparación de activos fijos (edificios, maquinaria, vehículos) → mantenimiento y reparaciones
-• Materiales físicos para construcción, remodelación, acabados, proceso productivo → materiales / suministros / acondicionamiento
-• Combustibles y lubricantes para vehículos y maquinaria → combustibles y lubricantes
-• Seguros de bienes, vehículos, personas, pólizas, ARL → seguros
-• Dotación personal de empleados: uniformes, EPP (guantes de seguridad, botas, casco, gafas protección, overol) → dotación a trabajadores
-• Papelería y útiles de oficina: papel, tóner, esferos, archivadores → papelería y útiles
-• Publicidad, mercadeo, impresión comercial → gastos de publicidad
-• Transporte, fletes, mensajería, logística → gastos de transporte
-• Viáticos, tiquetes, hospedaje para viajes de negocios → gastos de viaje
-• Gastos de representación, reuniones, atención a clientes → gastos de representación
-• Aseo, vigilancia, cafetería → gastos generales de administración
-
+{ctx["glosario"]}
 Usa SOLO códigos de la lista entregada. Nunca inventes códigos.
 
-Cuentas PUC de gasto disponibles (código - nombre):
+{ctx["etiqueta_lista"]} (código - nombre):
 {cuentas_str}
 
 Códigos de impuesto disponibles (código - tipo - tarifa):
@@ -716,7 +793,7 @@ Responde ÚNICAMENTE con este JSON exacto con {n} elementos en "resultados":
   "resultados": [
     {{
       "indice": 1,{cuenta_pago_field}
-      "cuenta_gasto": "<código de 8 dígitos de la lista o null>",
+      "{ctx["campo"]}": "<código de 8 dígitos de la lista o null>",
       "cod_impuesto": "<código de la lista o null>",
       "confianza": <0.0 a 1.0>,
       "explicacion": "<razón breve en español, máx 60 chars>"
@@ -730,4 +807,4 @@ Reglas adicionales:
 - Usa SOLO códigos de la lista. Nunca inventes códigos.
 - Si hay un ejemplo previo para un ítem similar, priorízalo sobre las reglas genéricas.
 - confianza >= 0.8 solo si la cuenta coincide claramente con el tipo de ítem.
-- tipo_proveedor "juridica" = empresa; "natural" = persona natural. Afecta cuenta_pago."""
+{ctx["regla_final"]}"""

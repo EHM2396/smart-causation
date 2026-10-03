@@ -279,7 +279,7 @@ export function CausadasModal({ facturas, onClose }: Props) {
               <table className="w-full min-w-[820px] text-sm">
                 <thead>
                   <tr style={{ borderBottom: "1px solid var(--border-soft)", backgroundColor: "var(--bg-elevated)" }}>
-                    {["#", "N° Factura", "Proveedor / NIT", "Fecha", "Subtotal", "Total", "Consecutivo", "Causada el", ""].map((h) => (
+                    {["#", "N° Factura", "Proveedor / NIT", "Fecha emisión", "Subtotal", "Total", "Consecutivo", "Causada el", ""].map((h) => (
                       <th
                         key={h}
                         className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide"

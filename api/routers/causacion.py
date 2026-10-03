@@ -239,7 +239,7 @@ def verificar_causadas(body: VerificarCausadasRequest, db: DB, empresa: EmpresaA
             FacturaCausada.eliminado.is_(False),
         )
     )
-    rows = db.scalars(stmt).all()
+    rows = causacion_service.ordenar_por_emision(db.scalars(stmt).all())
     ya_causadas = [
         FacturaCausadaInfo(
             numero_dian=row.numero_dian,
@@ -289,7 +289,9 @@ def sugerir_cuentas_batch(body: SugerenciaBatchRequest, db: DB, empresa: Empresa
     Sugiere cuentas para múltiples ítems en una sola llamada.
     Drasticamente más eficiente que llamar /sugerir-cuenta N veces.
     """
-    cuentas_pago = cuentas_service.listar_metodos_pago(db, empresa_id=empresa.id)
+    # En ventas la contrapartida es Clientes / Caja / Bancos: sin esta lista la
+    # regla "venta a crédito → 1305" no encontraba la cuenta.
+    cuentas_pago = cuentas_service.listar_metodos_pago(db, empresa_id=empresa.id, es_venta=body.es_venta)
     items_list = [
         {
             "key": item.key,
@@ -309,6 +311,7 @@ def sugerir_cuentas_batch(body: SugerenciaBatchRequest, db: DB, empresa: Empresa
         usuario_id=current_user.id,
         cuentas_pago=cuentas_pago,
         es_venta=body.es_venta,
+        es_nota_credito=body.es_nota_credito,
     )
     return SugerenciaBatchResponse(
         resultados={
@@ -705,12 +708,15 @@ def get_historial_causadas(
     El rango de fechas (fecha_desde/fecha_hasta) aplica sobre la fecha de
     CAUSACIÓN o sobre la fecha de EMISIÓN de la factura según `campo_fecha`.
     `tipo_causacion` filtra por módulo (compras/ventas/soporte/sus NC).
+
+    El ORDEN es siempre por fecha de EMISIÓN (la del XML), de la más reciente a
+    la más antigua, sin importar sobre qué fecha se filtre: un documento
+    causado tarde no cambia su posición cronológica.
     """
-    columna_orden = _columna_fecha(campo_fecha)
     stmt = (
         select(FacturaCausada)
         .where(FacturaCausada.empresa_id == empresa.id, FacturaCausada.eliminado.is_(False))
-        .order_by(columna_orden.desc(), FacturaCausada.id.desc())
+        .order_by(FacturaCausada.fecha_factura.desc().nulls_last(), FacturaCausada.id.desc())
         .limit(limit)
     )
     stmt = _aplicar_rango_fecha(stmt, campo_fecha, fecha_desde, fecha_hasta)
@@ -737,7 +743,9 @@ def get_historial_causadas(
         except Exception:
             return None
 
-    rows = db.scalars(stmt).all()
+    # Desempate del mismo día por tipo, prefijo y consecutivo numérico (en SQL el
+    # número es texto: "FE10" quedaría antes que "FE9").
+    rows = causacion_service.ordenar_por_emision(db.scalars(stmt).all(), descendente=True)
     return [
         {
             "id": r.id,

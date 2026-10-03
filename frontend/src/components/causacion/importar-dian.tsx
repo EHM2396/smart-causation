@@ -10,8 +10,8 @@ import {
   ShoppingCart, TrendingUp, FileMinus2, ArrowRight, CheckCircle2, FileCheck2, Check, ListChecks, Info,
 } from "lucide-react";
 import type { DocTipo } from "@/stores/wizard";
-import type { DianDocumento, Factura } from "@/lib/types";
-import { ordenarPorFechaEmision, periodosIVA, MAX_MESES_CONSULTA, limiteHasta, AVISO_TOPE_CALENDARIO } from "@/lib/utils";
+import type { DianDocumento, Factura, FacturaCausadaInfo, FacturaOmitida, Paso2Snapshot, Sugerencia } from "@/lib/types";
+import { reordenarBorrador, periodosIVA, MAX_MESES_CONSULTA, limiteHasta, AVISO_TOPE_CALENDARIO } from "@/lib/utils";
 
 // YYYY-MM-DD (input date) → DD/MM/YYYY (formato que espera el portal DIAN)
 function isoToDian(iso: string): string {
@@ -258,18 +258,12 @@ export function ImportarDian() {
         if (n > 0) descartadas[tipo] = n;
         continue;
       }
-      const nuevasSinOrdenar = buckets[tipo] ?? [];
-      encontradas[tipo] = nuevasSinOrdenar.length;
-      if (!nuevasSinOrdenar.length) continue;
-      // La DIAN devuelve los documentos más recientes primero; se ordenan de más
-      // antigua a más reciente ANTES de fusionar (así SIIGO asigna los
-      // consecutivos en orden cronológico, no al revés).
-      const nuevas = ordenarPorFechaEmision(nuevasSinOrdenar);
+      const nuevas = buckets[tipo] ?? [];
+      encontradas[tipo] = nuevas.length;
+      if (!nuevas.length) continue;
       // Fusionar con lo que ya haya en ese borrador (sin duplicar por numero_dian,
       // ni contra lo existente NI dentro del propio lote nuevo — la DIAN puede
-      // listar el mismo documento más de una vez). Solo se ordena el lote NUEVO:
-      // lo existente no se reordena, porque su posición puede estar ligada a
-      // configuración ya guardada (cuenta, verificada…) por índice.
+      // listar el mismo documento más de una vez).
       const completo = await api.getBorradorCompleto(tipo as DocTipo);
       const prev = (completo?.datos ?? {}) as Record<string, unknown>;
       const existentes = (prev.facturas as Factura[]) ?? [];
@@ -281,19 +275,22 @@ export function ImportarDian() {
         nuevasUnicas.push(f);
       }
       agregadas[tipo] = nuevasUnicas.length;
-      const merged = [...existentes, ...nuevasUnicas];
-      const snapshot = {
-        facturas: merged,
+      // El borrador COMPLETO (lo que ya había + lo nuevo) queda en orden de fecha
+      // de emisión del XML, no en el orden en que se trajo: si antes se importó
+      // septiembre y ahora agosto, agosto queda antes. reordenarBorrador mueve
+      // también las sugerencias y la configuración del paso 2 de cada factura.
+      const snapshot = reordenarBorrador({
+        facturas: [...existentes, ...nuevasUnicas],
         tipoComp: (prev.tipoComp as string) ?? "",
         centroCosto: (prev.centroCosto as string) ?? "",
-        facturasYaCausadas: prev.facturasYaCausadas ?? [],
-        facturasOmitidas: prev.facturasOmitidas ?? [],
-        suggestions: prev.suggestions ?? {},
-        paso2: prev.paso2 ?? null,
-      };
+        facturasYaCausadas: (prev.facturasYaCausadas as FacturaCausadaInfo[]) ?? [],
+        facturasOmitidas: (prev.facturasOmitidas as FacturaOmitida[]) ?? [],
+        suggestions: (prev.suggestions as Record<string, Sugerencia>) ?? {},
+        paso2: (prev.paso2 as Paso2Snapshot) ?? null,
+      });
       await api.guardarBorrador({
         datos: snapshot as unknown as Record<string, unknown>,
-        total_facturas: merged.length,
+        total_facturas: snapshot.facturas.length,
         total_verificadas: 0,
         tipo_comp: snapshot.tipoComp || null,
       }, tipo as DocTipo);
@@ -407,7 +404,9 @@ export function ImportarDian() {
                 key={p.id}
                 type="button"
                 onClick={() => { setDesde(p.desde); setHasta(p.hasta); }}
-                className="rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors"
+                className="opcion-hover rounded-full px-3.5 py-1.5 text-xs font-medium"
+                data-activo={active}
+                aria-pressed={active}
                 style={{
                   backgroundColor: active ? "var(--brand)" : "var(--bg-elevated)",
                   color: active ? "#fff" : "var(--text-secondary)",
@@ -453,7 +452,7 @@ export function ImportarDian() {
             return (
               <div
                 key={g.id}
-                className="rounded-xl border p-3 space-y-2 transition-opacity"
+                className="tarjeta-modulo rounded-xl border p-3 space-y-2"
                 style={{
                   borderColor: esActivo ? g.color : "var(--border-soft)",
                   backgroundColor: "var(--bg-surface)",
@@ -473,7 +472,7 @@ export function ImportarDian() {
                         type="button"
                         onClick={() => toggleItem(it.key)}
                         disabled={consultando || importando}
-                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:opacity-90 disabled:opacity-60"
+                        className="opcion-hover flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs disabled:opacity-60"
                         aria-pressed={on}
                         title={atenuado ? "Cambia a este módulo (deselecciona el otro)" : undefined}
                         style={{ backgroundColor: on ? "var(--bg-elevated)" : "transparent" }}
@@ -535,7 +534,7 @@ export function ImportarDian() {
                   disabled={importando}
                   aria-pressed={activo}
                   title={activo ? "Toca para no traerlas" : "Toca para incluirlas"}
-                  className="rounded-lg border p-3 text-left transition-opacity hover:opacity-90 disabled:cursor-not-allowed"
+                  className="opcion-hover rounded-lg border p-3 text-left"
                   style={{
                     borderColor: activo ? color + "66" : "var(--border-soft)",
                     backgroundColor: "var(--bg-elevated)",

@@ -17,6 +17,7 @@ No tiene dependencias de Streamlit. Puede ser llamado desde:
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date
 from io import BytesIO
 from typing import Any
@@ -58,6 +59,67 @@ class ResultadoSugerencia:
     confianza: float | None = None
     cuenta_pago: str | None = None
     cuenta_pago_origen: str | None = None  # 'aprendizaje' | 'ia_alta' | 'ia_media' | 'ia_baja'
+
+
+# ── Naturaleza contable del documento ────────────────────────────────────────
+# La cuenta principal de cada ítem depende de QUÉ es el documento, no de las
+# palabras de su descripción: "cemento" es un gasto/costo cuando la empresa lo
+# compra, un ingreso cuando lo vende y una devolución en ventas cuando el
+# cliente lo devuelve. Reglas, aprendizaje e IA comparten el mismo vocabulario
+# (palabras clave), así que sin este filtro lo aprendido en compras se colaba
+# como sugerencia de ventas (y al revés).
+
+NATURALEZA_COMPRA = "compra"                      # compras, NC compras, soporte
+NATURALEZA_VENTA = "venta"                        # factura de venta → ingreso
+NATURALEZA_DEVOLUCION_VENTA = "devolucion_venta"  # NC de venta → reversa el ingreso
+
+
+def naturaleza_operacion(es_venta: bool, es_nota_credito: bool = False) -> str:
+    """Naturaleza contable de la cuenta principal de los ítems del documento."""
+    if not es_venta:
+        return NATURALEZA_COMPRA
+    return NATURALEZA_DEVOLUCION_VENTA if es_nota_credito else NATURALEZA_VENTA
+
+
+def es_cuenta_devolucion_venta(codigo: str, nombre: str | None = "") -> bool:
+    """Cuenta de devoluciones/rebajas en ventas: la 4175 del PUC (ingreso de
+    naturaleza débito) o una cuenta de ingreso que así se llame en el catálogo."""
+    codigo = str(codigo or "").strip()
+    if codigo.startswith("4175"):
+        return True
+    return codigo.startswith("4") and "devoluc" in (nombre or "").lower()
+
+
+def cuentas_para_naturaleza(cuentas_ingreso: list[dict], naturaleza: str) -> list[dict]:
+    """De las cuentas de ingreso (clase 4), las que aplican a la naturaleza:
+      - venta: los ingresos, SIN las devoluciones en ventas.
+      - devolución en venta: solo las devoluciones en ventas. Si el catálogo no
+        tiene ninguna, la nota crédito reversa directamente la cuenta de ingreso.
+    """
+    devoluciones = [
+        c for c in cuentas_ingreso if es_cuenta_devolucion_venta(c["codigo"], c.get("nombre"))
+    ]
+    if naturaleza == NATURALEZA_DEVOLUCION_VENTA:
+        return devoluciones or list(cuentas_ingreso)
+    ingresos = [c for c in cuentas_ingreso if c not in devoluciones]
+    return ingresos or list(cuentas_ingreso)
+
+
+def cuenta_coherente(codigo: str | None, naturaleza: str, validas: set[str] | None = None) -> bool:
+    """¿La cuenta sirve como cuenta principal de un ítem de esta naturaleza?
+      - compra: cualquier cuenta menos un ingreso (clase 4).
+      - venta / devolución: una de las cuentas `validas` para esa naturaleza
+        (ver cuentas_para_naturaleza); sin catálogo, al menos de clase 4.
+        Nunca una cuenta de costo o gasto.
+    """
+    codigo = str(codigo or "").strip()
+    if not codigo:
+        return False
+    if naturaleza == NATURALEZA_COMPRA:
+        return not codigo.startswith("4")
+    if validas:
+        return codigo in validas
+    return codigo.startswith("4")
 
 
 def _cuenta_pago_por_forma_pago(
@@ -340,16 +402,39 @@ def sugerir_cuentas_batch(
     usuario_id: int | None = None,
     cuentas_pago: list[dict] | None = None,
     es_venta: bool = False,
+    es_nota_credito: bool = False,
 ) -> dict[str, ResultadoSugerencia]:
     """
     Sugiere cuentas para múltiples ítems en una sola operación.
     Orden de prioridad por ítem: reglas → aprendizaje → IA.
     Minimiza queries DB: reglas se cargan 1 vez, aprendizaje en 1 query, IA se deduplica por descripción.
+
+    La NATURALEZA del documento (compra, venta o devolución en venta) decide qué
+    cuentas son admisibles en las tres fuentes: en ventas solo ingresos (clase
+    4), nunca costos ni gastos; en una nota crédito de venta, la cuenta de
+    devoluciones en ventas (ver naturaleza_operacion).
     """
     if not items:
         return {}
 
     resultados: dict[str, ResultadoSugerencia] = {}
+    naturaleza = naturaleza_operacion(es_venta, es_nota_credito)
+
+    # 0. Cuentas admisibles para la naturaleza del documento (1 query)
+    try:
+        if naturaleza == NATURALEZA_COMPRA:
+            candidatas = cuentas_service.listar_cuentas_gasto(db, empresa_id=empresa_id)
+        else:
+            candidatas = cuentas_para_naturaleza(
+                cuentas_service.listar_cuentas_ingreso(db, empresa_id=empresa_id), naturaleza
+            )
+    except Exception as exc:
+        logger.warning("[batch-sugerir] no se pudo cargar el catálogo de cuentas: %s", exc)
+        candidatas = []
+    validas = {c["codigo"] for c in candidatas}
+
+    def _coherente(codigo: str) -> bool:
+        return cuenta_coherente(codigo, naturaleza, validas)
 
     # 1. Cargar reglas una sola vez (1 query para todos los ítems)
     reglas = aprendizaje_service.cargar_reglas(db)
@@ -357,7 +442,9 @@ def sugerir_cuentas_batch(
     # 2. Aplicar reglas (puro Python, sin DB)
     sin_regla: list[dict] = []
     for item in items:
-        cuenta = aprendizaje_service.aplicar_reglas_cargadas(reglas, item["descripcion"])
+        cuenta = aprendizaje_service.aplicar_reglas_cargadas(
+            reglas, item["descripcion"], cuenta_valida=_coherente
+        )
         if cuenta:
             resultados[item["key"]] = ResultadoSugerencia(cuenta=cuenta, origen="regla")
         else:
@@ -367,7 +454,8 @@ def sugerir_cuentas_batch(
     sin_aprendizaje: list[dict] = []
     if sin_regla:
         mapeos = aprendizaje_service.obtener_mapeos_batch(
-            db, sin_regla, empresa_id=empresa_id, usuario_id=usuario_id
+            db, sin_regla, empresa_id=empresa_id, usuario_id=usuario_id,
+            cuenta_valida=_coherente,
         )
         for item in sin_regla:
             mapeo = mapeos.get(item["key"])
@@ -379,9 +467,31 @@ def sugerir_cuentas_batch(
             else:
                 sin_aprendizaje.append(item)
 
+    # 3b. Nota crédito de venta con UNA sola cuenta de devoluciones en ventas en el
+    # catálogo: la cuenta sale de la naturaleza del documento, sin adivinar.
+    if naturaleza == NATURALEZA_DEVOLUCION_VENTA and sin_aprendizaje:
+        devoluciones = [c for c in candidatas if es_cuenta_devolucion_venta(c["codigo"], c.get("nombre"))]
+        if len(devoluciones) == 1:
+            for item in sin_aprendizaje:
+                resultados[item["key"]] = ResultadoSugerencia(
+                    cuenta=devoluciones[0]["codigo"], origen="devolucion_venta",
+                    explicacion="Nota crédito de venta: reversa el ingreso",
+                )
+            sin_aprendizaje = []
+
     # 4. Cuenta de pago por item (regla determinista > historial NIT)
     nits_unicos = list({item["nit"] for item in items if item.get("nit")})
     cp_por_nit = _obtener_cuentas_pago_batch(db, nits_unicos, empresa_id)
+
+    # La contrapartida aprendida del tercero debe ser del módulo actual: el
+    # historial es por NIT y no distingue compras de ventas, así que un tercero que
+    # es proveedor y cliente heredaba en la venta su cuenta de proveedores (2205).
+    codigos_pago = {str(c.get("codigo", "")) for c in (cuentas_pago or [])}
+
+    def _contrapartida_coherente(cp: str) -> bool:
+        if codigos_pago:
+            return cp in codigos_pago
+        return cuentas_service.es_contrapartida(cp, es_venta=es_venta)
 
     # cp_por_key: llave de item → (codigo_cuenta, origen)
     # Regla forma_pago tiene máxima prioridad; si no aplica, usa historial del NIT
@@ -396,6 +506,8 @@ def sugerir_cuentas_batch(
         else:
             nit = item.get("nit")
             cp_hist = cp_por_nit.get(nit) if nit else None
+            if cp_hist and not _contrapartida_coherente(cp_hist):
+                cp_hist = None
             cp_por_key[k] = (cp_hist, "aprendizaje" if cp_hist else None)
 
     # Inyectar cuenta_pago a los ya resueltos por regla/aprendizaje
@@ -414,10 +526,11 @@ def sugerir_cuentas_batch(
             from services import ai_service
             ia_ok = ai_service.esta_disponible()
             if ia_ok:
-                cuentas_gasto_list = cuentas_service.listar_cuentas_gasto(db, empresa_id=empresa_id)
-                if cuentas_gasto_list:
+                # La IA solo puede elegir entre las cuentas de la naturaleza del
+                # documento: en ventas, ingresos; nunca la lista de gastos.
+                if candidatas:
                     codigos_imp = impuestos_service.listar_como_dict(db, empresa_id=empresa_id)
-                    cuentas_gasto_opts = [{"codigo": c["codigo"], "nombre": c["nombre"]} for c in cuentas_gasto_list]
+                    cuentas_gasto_opts = [{"codigo": c["codigo"], "nombre": c["nombre"]} for c in candidatas]
                 else:
                     ia_ok = False
         except Exception as exc:
@@ -425,8 +538,13 @@ def sugerir_cuentas_batch(
             ia_ok = False
 
         if ia_ok and cuentas_gasto_opts:
-            # Cargar historial de decisiones de la empresa como ejemplos para la IA
-            ejemplos = _obtener_ejemplos_aprendizaje(db, empresa_id, cuentas_gasto_opts)
+            # Cargar historial de decisiones de la empresa como ejemplos para la IA.
+            # Solo los de la misma naturaleza: un ejemplo de compra (gasto) le
+            # enseñaría a la IA a causar una venta contra un gasto.
+            ejemplos = [
+                e for e in _obtener_ejemplos_aprendizaje(db, empresa_id, cuentas_gasto_opts)
+                if _coherente(e["cuenta"])
+            ]
 
             # 1 sola llamada a la IA con todos los ítems únicos
             items_para_batch = [
@@ -442,8 +560,13 @@ def sugerir_cuentas_batch(
                 items=items_para_batch,
                 cuentas_gasto=cuentas_gasto_opts,
                 codigos_impuesto=codigos_imp,
-                cuentas_pago=cuentas_pago,
+                # El prompt de la cuenta de pago está pensado para proveedores
+                # (pago/acreedor). En ventas la contrapartida sale de la forma de
+                # pago (crédito → Clientes 1305, contado → Caja/Bancos) o del
+                # historial del cliente, no de la IA.
+                cuentas_pago=cuentas_pago if naturaleza == NATURALEZA_COMPRA else None,
                 ejemplos_aprendizaje=ejemplos,
+                naturaleza=naturaleza,
             )
 
             for item in sin_aprendizaje:
@@ -564,6 +687,57 @@ def generar_siigo(
 
     buf = exporter.exportar_xlsx(movimientos)
     return buf, consecutivo
+
+
+# ── Orden cronológico de documentos ───────────────────────────────────────────
+# Manda la FECHA DE EMISIÓN del XML (fecha_factura), nunca la de causación ni el
+# orden en que se importó: un documento de agosto que se trajo después de los de
+# septiembre va antes que ellos. Mismo día: factura antes que sus notas, luego
+# prefijo y consecutivo (numérico). Espejo de frontend/src/lib/orden-documentos.ts.
+
+_TIPOS_NOTA = {"nc", "nc_ventas", "nc_soporte", "nota_credito", "nota_debito", "nota_ajuste_soporte"}
+
+
+def partes_numero(numero: str | None) -> tuple[str, str]:
+    """(prefijo, consecutivo) del número DIAN: "FE0012" → ("FE", "0012"). El
+    consecutivo se devuelve como TEXTO tal cual: solo se usa para comparar, el
+    número del documento nunca se modifica."""
+    n = str(numero or "").strip()
+    m = re.match(r"^(.*?)(\d+)$", n)
+    if not m:
+        return n.upper(), ""
+    return m.group(1).upper(), m.group(2)
+
+
+def clave_cronologica(fecha: date | None, numero: str | None, tipo: str | None = None) -> tuple:
+    """Clave de orden ascendente: fecha de emisión → factura antes que notas →
+    prefijo → consecutivo numérico (sin convertirlo: no pierde precisión)."""
+    prefijo, consecutivo = partes_numero(numero)
+    significativo = consecutivo.lstrip("0")
+    return (
+        fecha or date.min,
+        1 if (tipo or "").lower() in _TIPOS_NOTA else 0,
+        prefijo,
+        consecutivo == "",
+        len(significativo),
+        significativo,
+    )
+
+
+def ordenar_por_emision(
+    filas: list,
+    *,
+    descendente: bool = False,
+    fecha=lambda f: f.fecha_factura,
+    numero=lambda f: f.numero_dian,
+    tipo=lambda f: f.tipo_causacion,
+) -> list:
+    """Ordena documentos por fecha de emisión (ver clave_cronologica). Los que
+    no tienen fecha de emisión válida van siempre al final."""
+    con_fecha = [f for f in filas if fecha(f)]
+    sin_fecha = [f for f in filas if not fecha(f)]
+    con_fecha.sort(key=lambda f: clave_cronologica(fecha(f), numero(f), tipo(f)), reverse=descendente)
+    return con_fecha + sin_fecha
 
 
 def columna_fecha(campo_fecha: str | None):
